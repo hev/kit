@@ -1,6 +1,6 @@
 ---
 term: "rework"
-aliases: ["send back","retry a run","rework from validation"]
+aliases: ["retry","re-run with note","send back","retry run","redo"]
 ---
 
-Restarts a stopped run in the same worktree and branch with a note appended to the order.
+Restart a stopped run in the same branch and worktree with a note.

@@ -3,14 +3,14 @@ id: "index"
 title: "Introduction"
 heading: null
 group: "Start"
-order: 128
+order: 246
 url: "/docs"
 anchor: null
-terms: ["introduction","tools","team","software","factory","binary","providing","trace","daemon","dispatch","shared","hosts","repo","admission","bring","machines","harnesses","identities","process","adopt","fits","alone","complete","person","linkgrid","astro","building","gives","build","repos","agent","parts","existing","setup","their","everything","plain","files","account","docker"]
-hash: "3b8fccf55a2ff0da1798ca8e6628f8754940f4f850adff6c7ef8bb6479a825fe"
+terms: ["meta","harness","binary","macos","linux","windows","works","across","harnesses","sessions","machines","providing","traces","orders","dispatch","peers","board","hooks","more","install","machine","form","system","linkgrid","astro","edition","tools","coding","agents","packaged","distributed","such","claude","code","codex","runs","agent","session","sits","level"]
+hash: "d9906858c0074db463f1bc2258e74316d66cf95a8d06f04ea6e31de6bc69a892"
 mode: "agent-primary"
-facts: [{"kind":"value","literal":"LinkGrid.astro","chunkId":"index"}]
+facts: [{"kind":"code","literal":"hev","chunkId":"index"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"index"},{"kind":"value","literal":"Edition.astro","chunkId":"index"}]
 sources: [{"chunkId":"index","url":"/docs","anchor":null}]
 ---
 
-Introduction to hev kit, tools for a team's software factory: one binary providing a trace daemon, dispatch to shared hosts and repo admission. Bring your own machines, harnesses, identities and process, and adopt what fits. Kit alone is complete for one person.
+hev kit is a meta-harness: one binary for macOS, Linux and Windows that works across harnesses, sessions and machines, providing traces, orders and dispatch, peers, board, hooks and more. Install it on each machine and they form one system.

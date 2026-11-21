@@ -3,7 +3,7 @@ id: "concepts#dispatch"
 title: "Concepts"
 heading: "Dispatch"
 group: "Use"
-order: 48
+order: 140
 url: "/docs/concepts#dispatch"
 anchor: "dispatch"
 terms: ["dispatch","sends","order","host","checks","capacity","fetches","origin","creates","branch","starts","supervisor","full","queues","first","name","base","target","waits","queue","slot","frees"]
@@ -13,4 +13,4 @@ facts: [{"kind":"code","literal":"hev dispatch ORDER.md","chunkId":"concepts#dis
 sources: [{"chunkId":"concepts#dispatch","url":"/docs/concepts#dispatch","anchor":"dispatch"}]
 ---
 
-Dispatch sends an order to its host, which checks capacity, fetches origin, creates a branch and starts a supervisor. A full host queues the order first in first out.
+Dispatch sends an order to its host, which checks the order and capacity, fetches origin, creates a branch from origin and starts a supervisor; a full host queues the order first in, first out.

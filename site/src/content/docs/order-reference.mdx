@@ -2,6 +2,8 @@
 title: "Order reference"
 description: "Every ORDER.md frontmatter field, its default, and the rules the parser enforces."
 group: "Reference"
+command: "hev dispatch ORDER.md"
+skill: "hev-dispatch"
 ---
 
 An order is a Markdown file: flat frontmatter between `---` lines, then a body
@@ -14,16 +16,20 @@ again before it admits it. For how to write one, see
 
 | Field | Type | Default | Rules |
 | --- | --- | --- | --- |
-| `name` | string | none, required | Must match `^[a-z0-9][a-z0-9-]*$`. Becomes branch `d/<name>` and run directory `~/dispatch/<name>/`. Must be unused on the target host. |
+| `name` | string | none, required | Must match `^[a-z0-9][a-z0-9-]*$`. Becomes branch `d/<name>` and run directory `~/.hev/orders/<name>/` (`~/dispatch/<name>/` on a host set up before 0.7). Must be unused on the target host. |
 | `host` | string | none | A host from the sender's dispatch config. Not checked by the parser, but `hev dispatch ORDER.md` fails with `unknown or missing host` unless `host` or `--host` names a configured host. `--host` wins. |
 | `repo` | string | none, required | A directory under the host's workspace, an absolute path (Unix, Windows drive or UNC), or a `~/` path. Must be a clone with an `origin` remote. |
 | `base` | string | `main` | Branch to start from, as `origin/<base>`. Must match `^[A-Za-z0-9][A-Za-z0-9/_.-]*$` and must not contain `..`. |
-| `harness` | string | `codex` | `codex` or `claude`. |
+| `harness` | string | `codex` | `codex`, `claude` or `agy` (the Antigravity CLI). |
 | `model` | string | none | Passed to the harness as `--model`. Any non-empty value. |
+| `effort` | string | harness default | Reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. A model name that already carries its effort is passed through unchanged. |
+| `fallbacks` | list | the target's `[[fallbacks]]` | Harnesses to try in order after a launch error or non-zero exit, each `harness`, `harness/model` or `harness/model/effort`, as `[codex/MODEL/high, claude/MODEL]`. `[]` disables retries. |
 | `validation` | string | `none` | `none` or `browser`. `browser` launches a validator run after a `done` result, if the config has a `[validation]` host. |
 | `preview` | string | none | Used by browser validation: a URL, or a command run in the validator's worktree. `{port}` is replaced with a free local port. |
 | `reply` | string | none | Passed to the target host's `notify` command as `{reply}`. Dispatch does not interpret it. |
 | `issue` | string | none | Free-form issue key, kept with the run and its traces. |
+| `class` | string | none | Concurrency class, same pattern as `name`. A target can cap concurrent runs per class. |
+| `skills` | list | none | Skills from the target's [skills shelf](/docs/skills-shelf) for this run only, as `[pack/skill, ...]`. The target refuses names it cannot resolve and skills from more than one `mode` pack. |
 | `linear` | string | none | Alias for `issue`. Setting both is a duplicate-key error. |
 | `every` | duration | none | Repeat at this interval. Positive Go duration. First round starts immediately; rounds never overlap. |
 | `until` | string | none | Condition for the worker to check. Requires `every`. Worker writes `until-met.json` when met. |
@@ -31,6 +37,7 @@ again before it admits it. For how to write one, see
 | `timeout` | integer | `120` | Minutes. A whole number from 1 to 525600. The supervisor kills the harness and records `timeout` when it runs out. |
 | `context` | string | none | A [context recipe](/docs/context): a JSON file in the order's repository, relative to its root, read at the run's base commit on `origin/<base>`. The same path rules as a recipe source: a clean relative path with no `..` or backslashes. The host builds the bundle before the worker starts. Same as `hev dispatch run --context`. |
 | `context_recipe` | string | none | A [context recipe for this dispatch only](/docs/context#a-recipe-for-one-dispatch): the recipe's JSON in standard base64, up to 1 MiB. `--context-file` writes it; you don't write it by hand. The host pins it in the run record at the first build. Exclusive with `context`. |
+| `supersedes` | string | none | `[HOST/]NAME` of a run this order replaces. Sender-side like `trace`: the sender removes it, and closes that run with `superseded_by` once this one is admitted or queued. Same as `--supersedes`. See [Dispatch](/docs/dispatch#close-supersede-and-adopt). |
 | `trace` | string | none | Continue an existing [ask-rooted trace](/docs/traces#ask-rooted-traces): a 32-hex trace ID, or a W3C traceparent (`00-TRACE-SPAN-FLAGS`). `--trace` wins over it. The sender reads it and removes it before the order is sent, so the target never sees it. `hev dispatch amend` ignores it: an amended run keeps its trace. |
 
 `every` and `max_lifetime` accept positive Go durations such as `15m` or
@@ -73,7 +80,7 @@ section contains.
 described" if there are none.
 
 Rework appends a `## Rework` section with the note to the run's copy of the
-order (`~/dispatch/<name>/order.md`). `rework --from-validation` writes the
+order (`<run>/order.md`). `rework --from-validation` writes the
 failed verdict items into that note.
 
 ## Errors
@@ -87,13 +94,13 @@ failed verdict items into that note.
 | `duplicate key: K` | A key set twice, including `issue` with `linear`. |
 | `unclosed quote` | A quoted value without its closing quote. |
 | `invalid scalar` | Text other than a comment after a closing quote. |
-| `expected scalar` | `[`, `]`, `{`, `}` or a tab in an unquoted value. |
+| `expected scalar` | `[`, `]`, `{`, `}` or a tab in an unquoted value (other than the `skills` and `fallbacks` lists). |
 | `empty field: K` | A key with no value. |
 | `missing ## Acceptance section` | No `## Acceptance` line in the body. |
 | `invalid timeout` | Not a whole number from 1 to 525600. |
 | `invalid name` | `name` missing or not matching the pattern. |
 | `repo required` | No `repo`. |
-| `invalid harness` | Not `codex` or `claude`. |
+| `invalid harness` | Not `codex`, `claude` or `agy`. |
 | `invalid validation` | Not `none` or `browser`. |
 | `invalid base` | Fails the pattern or contains `..`. |
 | `context and context_recipe are exclusive` | The order has both. |

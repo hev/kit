@@ -3,14 +3,14 @@ id: "peers"
 title: "Peers"
 heading: null
 group: "Use"
-order: 220
+order: 337
 url: "/docs/peers"
 anchor: null
-terms: ["peers","live","coding","agent","sessions","claude","code","codex","others","machines","lets","session","person","read","message","helps","avoid","collisions","shared","repos","servers","codetabs","astro","agentprompt","linkgrid","peer","another","harness","running","terminal","several","agents","work","once","need","know","doing","before","edit","same"]
-hash: "aad8050d02d9e663978157f443578cfa169bd9d8ecca31835804988a0409bda2"
+terms: ["peers","agent","communications","layer","discovery","inspection","messaging","live","coding","sessions","claude","code","codex","opencode","across","harnesses","hosts","agents","know","others","doing","before","editing","shared","repos","restarting","servers","inbox","peer","message","online","offline","local","state","codetabs","astro","agentprompt","linkgrid","edition","communication"]
+hash: "bb6965f145457e9d6bcb6d1e98e203829dfa7365b3ab5bfb94cd5d28a96ca493"
 mode: "agent-primary"
-facts: [{"kind":"code","literal":"hev peers","chunkId":"peers"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"peers"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"peers"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"peers"}]
+facts: [{"kind":"code","literal":"agy","chunkId":"peers"},{"kind":"code","literal":"hev peers","chunkId":"peers"},{"kind":"code","literal":"peers-inbox","chunkId":"peers"},{"kind":"code","literal":"peer-message","chunkId":"peers"},{"kind":"code","literal":"peer-online","chunkId":"peers"},{"kind":"code","literal":"peer-offline","chunkId":"peers"},{"kind":"code","literal":"~/.hev/peers/","chunkId":"peers"},{"kind":"code","literal":"~/.local/state/peers-v2/","chunkId":"peers"},{"kind":"code","literal":"HEV_PEERS_STATE","chunkId":"peers"},{"kind":"value","literal":"CodeTabs.astro","chunkId":"peers"},{"kind":"value","literal":"AgentPrompt.astro","chunkId":"peers"},{"kind":"value","literal":"LinkGrid.astro","chunkId":"peers"},{"kind":"value","literal":"Edition.astro","chunkId":"peers"},{"kind":"value","literal":"0.7","chunkId":"peers"}]
 sources: [{"chunkId":"peers","url":"/docs/peers","anchor":null}]
 ---
 
-Peers are live coding-agent sessions (Claude Code, Codex and others) on your machines, and hev peers lets a session or person see, read and message them. It helps avoid collisions on shared repos and servers.
+Peers is kit's agent-to-agent communications layer: discovery, inspection and messaging of live coding-agent sessions (Claude Code, Codex, agy, OpenCode, pi) across harnesses and hosts, so agents know what others are doing before editing shared repos or restarting shared servers.

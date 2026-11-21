@@ -2,11 +2,14 @@
 title: "Traces"
 description: "hevd captures every coding-agent session on a host and makes the archive searchable from the terminal, a browser or another agent."
 group: "Use"
+command: "hev traces"
+skill: "hev-traces"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
 A trace is one coding-agent session: your prompts, the agent's replies and the
 tool calls it made. Every file an agent opened, every command it ran and every
@@ -16,15 +19,29 @@ terminal closes. kit keeps it.
 Work you dispatch is also grouped into
 [ask-rooted traces](#ask-rooted-traces): the ask that started the work is the
 root, and the orders, attempts, validation runs and worker sessions it caused
-hang under it.
+hang under it. `hev traces` and the trace facts on each run record follow
+one ask from start to finish.
 
 `hevd`, the kit daemon, reads the session files your harnesses already write
-and indexes new and growing ones into the archive. On its own, kit keeps the
-archive in a directory on each machine and search matches words. For a team,
-[kit + layer](/docs/kit-and-layer) makes it one hev layer archive every
-machine shares, and search is hybrid, matching meaning and words. You can
-search from the terminal, a local web UI, a terminal browser, or by asking
-Claude Code or Codex, which get a skill that searches for them.
+and indexes new and growing ones into the archive.
+
+<Edition only="oss">
+
+In OSS, traces are a folder: the archive is `~/.hev/traces/hev-traces/` on
+each machine (`~/.hev/archive/hev-traces/` on a machine set up before 0.7), one file per session with a word index beside it, and search
+matches words. There is no API.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, traces go to a hosted archive every machine writes to through an API,
+and search is hybrid, matching meaning and words. See [Upgrade](/docs/upgrade).
+
+</Edition>
+ You can search from
+the terminal, a local web UI, a terminal browser, or by asking Claude Code or
+Codex, which get a skill that searches for them.
 
 ## What gets captured
 
@@ -37,6 +54,7 @@ under `[capture]` in `~/.hev/config.toml`). It reads these sources:
 | Codex | `~/.codex/sessions` | `codex` |
 | pi | `~/.pi/agent/sessions` | `pi` |
 | OpenCode | `~/.local/share/opencode/opencode.db` | `opencode` |
+| Antigravity CLI (`agy`) | `~/.gemini/antigravity-cli/brain` (`HEV_AGY_DATA_DIR`) | `agy` |
 | dot | `~/.dot/traces` | `dot` |
 
 OpenCode keeps sessions in a database. hevd reads it without locking or
@@ -45,6 +63,12 @@ captures an assistant reply once it's finished, never halfway through. If an
 OpenCode update changes the database layout, `hev s` shows the error instead
 of skipping it.
 
+Antigravity CLI (`agy`) sessions are read from each conversation's
+`transcript_full.jsonl` (else `transcript.jsonl`) under
+`~/.gemini/antigravity-cli/brain/`, with the workspace and title from
+`conversation_summaries.db` when it is there. Point capture elsewhere with
+`HEV_AGY_DATA_DIR` or `agy_data_dir` under `[capture]`.
+
 Sessions that run as part of a dispatched [order](/docs/orders) carry the
 order's ID, so you can pull up every trace behind one piece of work with
 `--order`.
@@ -52,10 +76,17 @@ order's ID, so you can pull up every trace behind one piece of work with
 ## Where traces are kept
 
 With no [hev layer](https://hevlayer.com) key, hevd keeps traces in files on
-the machine it runs on, under `~/.hev/archive/hev-traces/`: one file per
+the machine it runs on, under `~/.hev/traces/hev-traces/`: one file per
 session, its chunks and blocks, and a word index beside them. Nothing else is
 needed: no endpoint, no account and no Docker. Move the archive with
 `[archive] dir` in `~/.hev/config.toml`, or `HEV_ARCHIVE_DIR`, which wins.
+
+Traces follow kit's [one folder per surface](/docs/concepts#where-kit-keeps-its-files)
+layout. A machine that already has `~/.hev/archive/` (every install before
+the unified `~/.hev/<surface>/` layout) and no `~/.hev/traces/` keeps using
+`~/.hev/archive/`: nothing is moved or re-indexed, and `hev up` never creates
+`~/.hev/traces/` beside it. To move, stop hevd, `mv ~/.hev/archive
+~/.hev/traces`, and start it again.
 
 With a key, traces go to one hev layer namespace that every machine with the
 key writes to and searches, and nothing is written to the archive directory.
@@ -76,7 +107,7 @@ says it:
 
 On such a machine, a `hev` command that finds no key stops with an error
 saying the machine is set up for hev layer, what it found and what to set. It
-does not read or create an archive under `~/.hev/archive`, and no read ever
+does not read or create an archive under `~/.hev/traces`, and no read ever
 creates that directory. To keep traces in files instead, remove `endpoint` and
 `namespace` from `[layer]` and name the archive with `namespace` under
 `[archive]`.
@@ -100,7 +131,7 @@ rebuilds it. A machine's archive holds that machine's sessions.
 
 `hev up` sets up capture on one machine: it writes the config, installs hevd
 under launchd or systemd, and installs the `hev-traces` skill for Claude Code,
-Codex, pi and OpenCode, whichever you have.
+Codex, pi, OpenCode and Antigravity (`agy`), whichever you have.
 
 <CodeTabs>
 
@@ -111,7 +142,7 @@ hev up
 <AgentPrompt>
 
 ```text
-Set up trace capture on this machine with no hev layer key: make sure HEVLAYER_API_KEY is not set, then run `hev up`. It writes the config, installs hevd under launchd or systemd and installs the hev-traces skill. Verify with `hev s` that the daemon is running and has scanned, and that ~/.hev/archive/hev-traces/ exists.
+Set up trace capture on this machine with no hev layer key: make sure HEVLAYER_API_KEY is not set, then run `hev up`. It writes the config, installs hevd under launchd or systemd and installs the hev-traces skill. Verify with `hev s` that the daemon is running and has scanned, and that ~/.hev/traces/hev-traces/ exists (or ~/.hev/archive/hev-traces/ on a machine set up before 0.7).
 Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -120,7 +151,7 @@ Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.
 </CodeTabs>
 
 With no key, hevd keeps traces in [files](#where-traces-are-kept) under
-`~/.hev/archive/hev-traces/`, your transcripts stay on this machine, and
+`~/.hev/traces/hev-traces/`, your transcripts stay on this machine, and
 nothing runs in Docker. To share one archive with your team on
 [hev layer](https://hevlayer.com), export a key before `hev up`:
 
@@ -145,8 +176,8 @@ Docs: https://hevkit.com/docs/traces#start-capturing (all pages: https://hevkit.
 The key is saved in the config, so later runs need nothing exported. Sessions
 already in the file archive stay there: adding a key starts an empty hev layer
 archive, and `hev backfill` sends past sessions to it from the transcripts
-still on disk. Bringing your own turbopuffer account is an advanced option in
-`hev init`.
+still on disk; see [switching later](/docs/upgrade#switching-later). Bringing
+your own turbopuffer account is an advanced option in `hev init`.
 
 To run the daemon on its own, use `hev d` (start it, or show status if it is
 already running), `hev s` (status) and `hev stop`. `hev down` unloads the
@@ -208,9 +239,9 @@ session.
 Add `--also` with another phrasing of the same question. Up to eight phrasings
 go in one request and are fused into one ranking. Pair a natural-language
 phrasing with the literal tokens you expect, such as an error string, a flag or
-a file name. With no key, kit matches every phrasing by words (BM25) over the
+a file name. On its own, kit matches every phrasing by words (BM25) over the
 file archive, and the command says so, so a miss is not read as "nothing
-exists". With a hev layer key, each phrasing also gets a semantic leg that
+exists". With a shared archive, each phrasing also gets a semantic leg that
 matches meaning.
 
 <CodeTabs>
@@ -235,7 +266,7 @@ Docs: https://hevkit.com/docs/traces#search (all pages: https://hevkit.com/llms.
 | --- | --- |
 | `--also` | Another phrasing, fused in the same request. Repeatable. |
 | `--since` | Only chunks from this window, such as `2h` or `7d`. |
-| `--harness` | Only one harness: `claude_code`, `codex`, `opencode`, `dot` or `pi`. |
+| `--harness` | Only one harness: `claude_code`, `codex`, `opencode`, `agy`, `dot` or `pi`. |
 | `--workdir` | Only one working directory. |
 | `--plan` | Only one plan. |
 | `--order` | Only chunks from one dispatched order. |
@@ -247,7 +278,7 @@ Scoping flags combine with AND.
 
 ### Ask an agent
 
-`hev up` installs the `hev-traces` skill, so Claude Code, Codex, pi and OpenCode can search
+`hev up` installs the `hev-traces` skill, so Claude Code, Codex, pi, OpenCode and agy can search
 your traces themselves. Ask "how did we fix the preflight failure last week?"
 and the agent plans a few phrasings, runs them through `hev traces search`, and
 reads the sessions around the best hits.
@@ -280,8 +311,14 @@ Docs: https://hevkit.com/docs/traces#list-and-read-traces (all pages: https://he
 
 ## The web UI
 
-`hev serve` runs the dashboard. It reads the file archive, or your hev layer
-archive when you have a key:
+`hev serve` runs the dashboard. It has two tabs: **Traces** (the session
+list with a List / Stats toggle, and each session's transcript and timeline)
+and a read-only **Board** (see [Board](/docs/board#browse-it-in-hev-serve)).
+It reads the file archive, or your hev layer archive when you have a key.
+
+`hev up` runs it as a service on `http://127.0.0.1:8099`, so on a machine set
+up with `hev up` the dashboard is already there. Started by hand it listens on
+`127.0.0.1:8787` unless you pass `--port`:
 
 <CodeTabs>
 
@@ -340,7 +377,14 @@ the agent waiting on a person.
 <img class="shot-dark" src="/shots/stats-dark.webp" width="2400" height="1500" alt="The stats view, with spend, tokens and cache hits by day and by model, and a heatmap of when prompts happen." loading="lazy" />
 
 Spend, tokens and cache hits across every trace, by day and by model, at list
-rates. The heatmap shows when you actually prompt.
+rates. The heatmap shows when you actually prompt. It is the **Stats** side
+of the Traces tab's List / Stats toggle.
+
+### Board
+
+The **Board** tab browses and searches the same [board](/docs/board) the CLI
+uses: this machine's files under `~/.hev/board` with no key. It only reads; it
+cannot post, reply or pin.
 
 ## Images
 
@@ -478,9 +522,8 @@ before sending it, so the target never sees it.
 
 ### In the dashboard
 
-`hev serve` has no Asks view. It was removed in 0.7 because it did not show
-these traces well; a view of orders and their traces is planned for the Pro
-UI. Traces are still recorded on every run and published across hosts as
+`hev serve` shows Traces and the Board; a view of orders and their
+ask-rooted traces is planned for the Pro UI. Traces are recorded on every run and published across hosts as
 described below, so nothing is lost: the IDs are in each run's `meta.json`,
 `result.json` and worker session row, and `hev traces` finds a run's sessions.
 The dashboard's **Traces** tab lists those sessions with the rest.
@@ -494,8 +537,7 @@ A run with no trace is one of two kinds.
   without ask-rooted traces. It is labelled neutrally, not as a fault.
 - **untraced**: the run was recorded as untraced on purpose, for example an
   orchestrator launch that had no trace to inherit, a run started by an
-  orchestrator's source events, or a unit a [swarm](/docs/swarms)'s reconcile
-  tick launched. The reason is always shown.
+  orchestrator's source events. The reason is always shown.
 
 An untraced run stays untraced through its reworks and retries: kit does not
 invent a trace for it later.
@@ -520,9 +562,10 @@ stay on the host that ran the order.
 
 ## Hosted archives
 
-With a turbopuffer key, the archive lives in a namespace in your account. kit
-hosts nothing and keeps no copy. `hev open` opens a hosted archive in the
-browser, and `hev join CODE` joins one you were invited to.
+With a hev layer key, the archive is one namespace that every machine with the
+key writes to. kit hosts nothing and keeps no copy. `hev open` opens it in the
+browser, and `hev join CODE` joins one you were invited to. See
+[Upgrade](/docs/upgrade).
 
 ## Sensitive data
 

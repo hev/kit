@@ -2,6 +2,7 @@
 title: "Updating and channels"
 description: "Move a host to the newest release or edge build with hev update, roll back, let the daemon do it, or update every host at once."
 group: "Operate"
+command: "hev update"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
@@ -26,19 +27,6 @@ A host follows one channel, set in its own config:
 Edge is for an operator who wants their own hosts to run each merged feature
 before it is released. Users install releases.
 
-Each edge build also pushes the kit container image from the same commit, for
-`linux/amd64` and `linux/arm64`: `hevlayer/kit:X.Y.Z-edge.<sha>`, and
-`hevlayer/kit:edge`, which follows the newest edge build (the tip of the newest
-train; a re-run of an older build never moves it back). Edge never pushes
-`hevlayer/kit:latest` or a bare `hevlayer/kit:X.Y.Z`; those are releases only.
-The image's entrypoint is `hev` and its default command is the dashboard
-(`serve`). To run another subcommand, such as `hev collect` as a sidecar,
-replace the arguments (`docker run IMAGE collect ...`, or `args: ["collect", ...]`
-in a Kubernetes container) or the whole command (`docker run --entrypoint hev
-IMAGE collect ...`, or `command: ["hev", "collect", ...]` in Kubernetes).
-`docker run IMAGE hev collect` runs `hev hev collect`, which prints the
-top-level help and exits instead of running collect.
-
 ## `hev update`
 
 | Command | What it does |
@@ -48,8 +36,6 @@ top-level help and exits instead of running collect.
 | `hev update --to VERSION` | Move to a named build: `X.Y.Z` or `X.Y.Z-edge.<sha>`. This may move backwards; the channel alone never does. |
 | `hev update --check` | Report the newest build on the channel and whether this host is behind. Changes nothing. |
 | `hev update --rollback` | Return to the build the last update replaced. Running it again goes forward again. |
-| `hev update hold [--for DUR] [--reason TEXT]` | Hold the daemon's automatic updates on this host, until `--for` runs out or you release it. See [Holds and deferral](#holds-and-deferral). |
-| `hev update release` | Release the hold. |
 
 `--json` prints the report. A host already on the newest build reports so
 and changes nothing.
@@ -84,17 +70,11 @@ so a long run's binary is still there when it next executes itself.
 
 | Platform | Restarted | How |
 | --- | --- | --- |
-| macOS | `hevd`, the LaunchAgent `com.hev.hevd`, if `hev up` installed it | `launchctl kickstart -k`, then checks it keeps one running process, waiting up to the job's `ThrottleInterval` plus 15s (at least 20s) |
+| macOS | `hevd`, the LaunchAgent `com.hev.hevd`, if `hev up` installed it | `launchctl kickstart -k`, then checks it keeps one running process |
 | macOS | the secrets cache, the LaunchAgent `com.hev.secrets`, if installed and loaded | as for `hevd` |
 | Linux | `hevd`, the systemd user unit `hevd.service`, if `hev up` installed it | `systemctl --user restart`, then checks it stays active |
 | Linux | the secrets cache, the systemd user unit `hev-secrets.service`, if installed and active | as for `hevd` |
 | Windows | `hevd`, the scheduled task `hev\hevd`, if installed | ends and runs the task, then waits for the daemon to report |
-
-launchd will not start a job again sooner than its `ThrottleInterval`
-(10s unless the plist sets one) after its last start, so a new build whose
-first start fails gets its second try only after that interval. The wait
-is read from the job's plist for that reason; a plist with
-`ThrottleInterval` 30 waits 45s before the update gives up and rolls back.
 
 A daemon you started by hand (`hev d`) is named in the report, not killed;
 restart it yourself. Dispatched runs and their supervisors are not
@@ -134,7 +114,6 @@ In the host's own config (`~/.hev/config.toml`, or `$HEV_CONFIG`):
 channel = "edge"        # release (default) or edge
 auto = false            # let the daemon update this host on a schedule
 interval = "1h"         # how often the daemon checks; at least 1m
-max_defer = "24h"       # longest an automatic update waits for running work or a hold
 post_update = [         # run after each successful update or rollback
   "systemctl --user restart my-wrapper.service",
 ]
@@ -172,76 +151,8 @@ needed; automatic updates are off by default.
 - A failed check backs off: the interval doubles with each failure, up to a
   day, and resets on success.
 - It never moves a host backwards.
-- It waits while a dispatch run or an orchestrator round runs on the host,
-  or while an update hold is set; see below.
 - Everything it does is recorded in `~/.hev/update/state.json` (history,
   last and next check, failures) and in `~/.hev/hev.log`.
-
-### Holds and deferral
-
-When a check is due, the daemon first looks for reasons to wait:
-
-- a dispatch run on this host whose session, supervisor or admission is
-  live, or an orchestrator in the middle of a round (an orchestrator
-  between rounds does not count);
-- an update hold, set with `hev update hold` here or
-  `hev dispatch hosts update --hold` from the machine you dispatch from.
-
-If there is one, it records the deferral (once per reason) in
-`~/.hev/update/state.json` and the log, and tries again in five minutes
-(or at the interval, if shorter). `hev s` shows the hold and the deferral
-(`Update: ...`), and `hev dispatch hosts` shows both in its `UPDATE` column.
-
-The daemon looks again after the new build has downloaded, right before it
-switches. A run admitted or a hold set during the download still defers the
-update, and the host stays on its build. While that last look and the switch
-happen, the daemon holds an exclusive lock on `~/.hev/update/switching`
-(flock, or LockFileEx on Windows). A run's admission, an orchestrator round
-and `hev update hold` each register first and then take and drop the same
-lock. Either the daemon sees them, or they start after the switch. The lock
-is the daemon process's until the switch ends or the process exits, so a
-slow or stalled daemon keeps it however long that takes, and a crashed one
-leaves nothing to clean up. The file itself stays; only the lock matters.
-
-The wait for the lock lasts at most a minute. If the switch is still under
-way then, admission fails with "an automatic update is still switching this
-host's build" and the run does not start; send it again once
-`hev update status` shows the update finished. An orchestrator round fails
-the same way and the next tick tries again. `hev update hold` keeps the
-hold it set but warns that the update may still move the host.
-
-Once the deferral has lasted `max_defer` (24h by default) the daemon updates
-anyway, and the report, the log and the history say it was deferred since
-when, and why. That includes work or a hold that first shows up during the
-download: past `max_defer` it does not stop the switch, but it is named in
-the warning, with "arrived during the download". A hold with no `--for` therefore lasts at most `max_defer`
-of deferred checks; release it when you are done.
-
-A manual `hev update` does not defer. It warns, as the first line of its
-report, when the daemon would have: `warning: updating although the
-daemon's automatic update would defer: ...`.
-
-A one-host-at-a-time rollout:
-
-<CodeTabs>
-
-```sh
-hev dispatch hosts update --all --hold --for 4h --reason "0.7 rollout"
-hev dispatch hosts update --host oven --ignore-hold   # one host, checked before the next
-hev dispatch hosts update --host mini --ignore-hold
-hev dispatch hosts update --all --release
-```
-
-<AgentPrompt>
-
-```text
-Roll a new kit build out to my hosts one at a time. First hold every host's automatic updates with `hev dispatch hosts update --all --hold --for 4h --reason "rollout"`. Then, for each host in the order I give, run `hev dispatch hosts update --host HOST --ignore-hold`, report its version before and after and any warning in the report (a dispatch run running there), and check it with `hev dispatch hosts` before moving to the next. Stop and tell me if a host fails or rolls back. At the end run `hev dispatch hosts update --all --release`.
-Docs: https://hevkit.com/docs/updating#holds-and-deferral (all pages: https://hevkit.com/llms.txt)
-```
-
-</AgentPrompt>
-
-</CodeTabs>
 
 ## Updating every host
 
@@ -274,11 +185,6 @@ channel and whether it is behind it (for edge, by how many commits).
 
 - **Owner only.** A host accepts the request only from its owner. An
   invited member's request is refused by the host.
-- **Holds.** A host whose automatic updates are held refuses to update
-  unless you pass `--ignore-hold`; `--check` still answers. `--hold [--for
-  DUR] [--reason TEXT]` and `--release` set and remove holds instead of
-  updating. A host whose hev predates holds says it has none; set
-  `auto = false` in its config instead.
 - **The request carries a channel and a version, nothing else.** The host
   fetches the build from the official repository and verifies it itself. A
   sender cannot supply a binary, a URL, a digest or a command.

@@ -1,0 +1,16 @@
+---
+id: "secrets#shared-account-budget-across-a-cluster"
+title: "Secrets"
+heading: "Shared account budget across a cluster"
+group: "Operate"
+order: 388
+url: "/docs/secrets#shared-account-budget-across-a-cluster"
+anchor: "shared-account-budget-across-a-cluster"
+terms: ["shared","account","budget","across","cluster","clustering","configured","daemon","gossips","only","numeric","reservation","counts","ledger","values","references","tokens","labels","hosts","share","daily","hourly","caller","minute","meter","host","false","secrets","attribution","config","dispatch","toml","azkv","override","once","cooldown","true","unexplained","spending","provider"]
+hash: "b9ba110169c9f63cbb5cc659ca123e8b07e1661505d6396fe3f275ada67b7be8"
+mode: "agent-primary"
+facts: [{"kind":"code","literal":"{\n  \"daily\": 200,\n  \"hourly\": 40,\n  \"caller_minute\": 5,\n  \"account_daily\": {\"op\": 900},\n  \"account_hourly\": {\"op\": 120},\n  \"meter_host\": false\n}","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"hev secrets attribution --config ~/.config/hev/dispatch.toml","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"[cluster]","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"op","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"azkv","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"override_once","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"secrets budget:","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"sum(B_i + r_i * D)","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"cooldown","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"meter_host: true","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"unexplained spending","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"max(0, provider used - cluster rolling-day reservations)","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"source=stale","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"kind=stale","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"disable_stale","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"hev daemon --secrets-only","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"hev","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"op read","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"OPResolver","chunkId":"secrets#shared-account-budget-across-a-cluster"},{"kind":"code","literal":"--caller","chunkId":"secrets#shared-account-budget-across-a-cluster"}]
+sources: [{"chunkId":"secrets#shared-account-budget-across-a-cluster","url":"/docs/secrets#shared-account-budget-across-a-cluster","anchor":"shared-account-budget-across-a-cluster"}]
+---
+
+With clustering configured, each daemon gossips only numeric reservation counts from its ledger (no values, references, tokens or labels) so hosts share one account budget.

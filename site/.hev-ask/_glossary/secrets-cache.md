@@ -1,6 +1,6 @@
 ---
 term: "secrets cache"
-aliases: ["hev secrets","secrets daemon","secrets-only endpoint","hevd cache"]
+aliases: ["secret cache","hev secrets","hevd cache"]
 ---
 
-Memory-only cache in hevd that serves the same secret to many processes on a host for one request per TTL.
+Memory-only cache in the daemon that serves secret reads so many processes cost one provider request per TTL.

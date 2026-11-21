@@ -167,3 +167,10 @@ button {
 :root[data-theme="dark"] .shot-light,
 :root:not([data-theme="dark"]) .shot-dark { display: none; }
 .doc-body img { max-width: 100%; height: auto; }
+
+/* Docs edition (Pro | OSS). The docs sidebar switch sets data-edition on
+   <html> before first paint; with no value (no script) the OSS text shows. */
+:root[data-edition="pro"] [data-edition-only="oss"],
+:root:not([data-edition="pro"]) [data-edition-only="pro"] {
+	display: none;
+}

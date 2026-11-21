@@ -1,0 +1,103 @@
+---
+title: "Exec commands"
+description: "Add your own hev subcommands as exec commands: hev-NAME executables on PATH."
+group: "Operate"
+command: "hev NAME"
+---
+
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
+`hev NAME args...` runs `hev-NAME` from your PATH when `NAME` is not a
+built-in command. An `hev-NAME` executable found this way is an **exec
+command**. The remaining arguments are passed through as they are. Standard
+input, output and error are the exec command's, and `hev` exits with its
+exit code.
+
+Use exec commands for commands that belong to your setup and not to kit: a deploy
+step, a team's own report, a wrapper around an internal tool. They ship
+separately and need no change to kit.
+
+## Write one
+
+An exec command is any executable named `hev-` plus the command name.
+
+<CodeTabs>
+
+```sh
+#!/bin/sh
+# ~/.local/bin/hev-hello
+printf 'Hello %s\n' "$*"
+```
+
+<AgentPrompt>
+
+```text
+Create a hev exec command called hello: write the executable shell script ~/.local/bin/hev-hello that runs `printf 'Hello %s\n' "$*"`, with #!/bin/sh as its first line. Make it executable with `chmod +x`. Make sure ~/.local/bin is on my PATH. Verify that `hev hello world` prints "Hello world" and that `hev --help` lists hello in its `Plugins:` section of exec commands.
+Docs: https://hevkit.com/docs/exec-commands#write-one (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+<CodeTabs>
+
+```sh
+chmod +x ~/.local/bin/hev-hello
+hev hello world
+```
+
+<AgentPrompt>
+
+```text
+Make my exec command ~/.local/bin/hev-hello executable with `chmod +x ~/.local/bin/hev-hello`, then run `hev hello world` and confirm it prints "Hello world". If hev says the command is unknown, check that ~/.local/bin is on PATH and that the file is named exactly hev-hello.
+Docs: https://hevkit.com/docs/exec-commands#write-one (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+```text
+Hello world
+```
+
+Any language works. hev does not pass extra flags, environment variables or
+config to the exec command. Read what you need from the environment and files
+yourself.
+
+## Rules
+
+- Built-in commands and their aliases always win. A file named `hev-up` or
+  `hev-browse` is never run as an exec command, and neither is `hev-help` or
+  `hev-completion`.
+- Only the first argument is matched. `hev hello --flag` runs `hev-hello`
+  with `--flag`. A first argument that starts with `-` is never an exec command.
+- When two directories on PATH have the same exec command, the first one wins,
+  as with any command.
+- `hev help` and `hev --help` list the exec commands they find at the end,
+  by name, without duplicates. The section is still headed `Plugins:` in
+  the CLI's output.
+
+## Signals and exit status
+
+On macOS and Linux, `hev` replaces itself with the exec command. Ctrl-C and other
+terminal signals go straight to the exec command, and its exit status is the
+command's exit status.
+
+On Windows, `hev` starts the exec command and waits for it. Console interrupts
+reach it. Exec commands can be `hev-NAME.exe` or `hev-NAME.cmd`.
+
+## Batch exec commands on Windows
+
+A `.cmd` exec command runs through `cmd.exe /d /s /c`, which reparses its command
+line. To keep that safe, hev refuses a batch exec command when its path or any
+argument contains `"`, `^`, `&`, `|`, `<`, `>`, `(`, `)`, `%`, `!` or a
+newline. Paths with spaces are fine. Write an `.exe` exec command if you need to
+pass arbitrary arguments.
+
+## Trust
+
+An exec command is an ordinary program running as you. hev does not sign, sandbox
+or check it. Install only exec commands you would run directly.

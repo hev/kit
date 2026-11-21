@@ -3,14 +3,14 @@ id: "traces#cost"
 title: "Traces"
 heading: "Cost"
 group: "Use"
-order: 305
+order: 421
 url: "/docs/traces#cost"
 anchor: "cost"
-terms: ["cost","view","shows","spend","tokens","cache","hits","across","every","trace","model","list","rates","heatmap","prompt","stats","webp","dark","actually"]
-hash: "5ad113968ca513b3dfb2883461e1ece21275dc43c7ae87929b1ccb5685518484"
+terms: ["cost","stats","view","spend","tokens","cache","hits","across","traces","model","list","rates","plus","heatmap","prompt","webp","dark","every","trace","shows","actually","side","toggle"]
+hash: "a06d09757c341a5495d4da67501e4d141971af352a21143d2d952aacb71db601"
 mode: "agent-primary"
 facts: [{"kind":"value","literal":"stats.webp","chunkId":"traces#cost"},{"kind":"value","literal":"stats-dark.webp","chunkId":"traces#cost"}]
 sources: [{"chunkId":"traces#cost","url":"/docs/traces#cost","anchor":"cost"}]
 ---
 
-The cost view shows spend, tokens and cache hits across every trace by day and model at list rates, with a heatmap of when you prompt.
+Stats view of spend, tokens and cache hits across all traces by day and model at list rates, plus a heatmap of when you prompt.

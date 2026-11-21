@@ -8,7 +8,7 @@ import SearchOverlay from "@hevmind/ask/components/SearchOverlay.astro";
 interface Props {
 	title: string;
 	description?: string;
-	current?: "product" | "docs";
+	current?: "product" | "docs" | "pricing";
 	// Path search engines should index for this page. Defaults to the page's own path.
 	canonical?: string;
 	noindex?: boolean;
@@ -19,7 +19,7 @@ interface Props {
 
 const {
 	title,
-	description = "hev kit is what you need to make your machine part of a software factory.",
+	description = "hev kit is a meta-harness for coding agents across macOS, Linux and Windows.",
 	current = "product",
 	canonical = Astro.url.pathname,
 	noindex = false,
@@ -28,7 +28,7 @@ const {
 const canonicalUrl = new URL(canonical.endsWith("/") ? canonical : `${canonical}/`, Astro.site).href;
 // Link preview card for Slack, X, LinkedIn. Source and re-render steps: site/og/.
 const ogImage = new URL("/og.jpg", Astro.site).href;
-const ogImageAlt = "hev kit: make your machine part of a software factory.";
+const ogImageAlt = "hev kit: a meta-harness for coding agents.";
 ---
 
 <!doctype html>
@@ -49,6 +49,12 @@ const ogImageAlt = "hev kit: make your machine part of a software factory.";
 							? "light"
 							: "dark";
 				document.documentElement.dataset.theme = theme;
+				// Docs edition (Pro | OSS), set here so edition text never flashes.
+				var edition = null;
+				try {
+					edition = localStorage.getItem("kit-docs-edition");
+				} catch (e) {}
+				document.documentElement.dataset.edition = edition === "pro" ? "pro" : "oss";
 			})();
 		</script>
 		{deep && <DeepPrepaint />}

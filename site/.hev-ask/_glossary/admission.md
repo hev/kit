@@ -1,6 +1,6 @@
 ---
 term: "admission"
-aliases: ["repo admission","allowed repos","not admitted","admission repos"]
+aliases: ["allowlist","not admitted","repo allowlist"]
 ---
 
-A host's own list of repo origins it will run work against, which dispatch requests cannot override.
+A host's own list of repos it will run work against; others are refused.

@@ -1,8 +1,9 @@
 ---
 import DeepToggle from "./deep/DeepToggle.astro";
+import { APP_LIVE, SIGNIN_HREF } from "../lib/site";
 
 interface Props {
-	current?: "product" | "docs";
+	current?: "product" | "docs" | "pricing";
 	deep?: boolean;
 }
 const { current = "product", deep = false } = Astro.props;
@@ -18,6 +19,7 @@ const REPO = "hev/kit";
 			</a>
 			{deep && <DeepToggle />}
 		</div>
+		<a class="signup" href={SIGNIN_HREF} data-app-signup={APP_LIVE ? "header" : undefined}>Sign up / Sign in</a>
 		<button
 			class="nav-toggle"
 			type="button"
@@ -31,7 +33,14 @@ const REPO = "hev/kit";
 		<div class="nav-links" id="primary-nav-panel" data-nav-panel>
 			<a href="/docs" aria-current={current === "docs" ? "page" : undefined}>docs</a>
 			<a href="/docs/install">install</a>
-			<button class="ask-open" type="button" data-hev-ask-open aria-label="Search the docs">search <kbd>/</kbd></button>
+			<a href="/pricing" aria-current={current === "pricing" ? "page" : undefined}>pricing</a>
+			{
+				current === "docs" && (
+					<button class="ask-open" type="button" data-hev-ask-open aria-label="Search the docs">
+						search <kbd>/</kbd>
+					</button>
+				)
+			}
 			<a
 				class="gh"
 				href={`https://github.com/${REPO}`}
@@ -71,6 +80,24 @@ const REPO = "hev/kit";
 		</div>
 	</nav>
 </header>
+
+{/* Links to the hosted app's sign-in and sign-up, outside the home page (which
+    has its own handler). They exist only when the app origin is set. */}
+{
+	APP_LIVE && (
+		<script is:inline>
+			document.querySelectorAll("[data-app-signup]").forEach((link) => {
+				if (link.dataset.appSignupBound) return;
+				link.dataset.appSignupBound = "1";
+				link.addEventListener("click", () => {
+					if (window.posthog && typeof window.posthog.capture === "function") {
+						window.posthog.capture("trial_signup", { location: link.dataset.appSignup });
+					}
+				});
+			});
+		</script>
+	)
+}
 
 <script is:inline>
 	document.querySelectorAll("header [data-theme-toggle]").forEach((button) => {
@@ -226,6 +253,8 @@ const REPO = "hev/kit";
 	}
 
 	.nav-links {
+		order: 1;
+		margin-left: auto;
 		display: flex;
 		gap: 1.5rem;
 		align-items: center;
@@ -264,6 +293,28 @@ const REPO = "hev/kit";
 	.nav-links a:hover::after,
 	.nav-links a[aria-current="page"]::after {
 		width: 100%;
+	}
+
+	.signup {
+		order: 2;
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		padding: 0.35rem 0.75rem;
+		border: 1px solid var(--ink);
+		border-radius: 3px;
+		background: var(--ink);
+		color: var(--paper);
+		font-size: 0.8125rem;
+		font-weight: 700;
+		text-decoration: none;
+		white-space: nowrap;
+		transition: background 0.15s ease, border-color 0.15s ease;
+	}
+
+	.signup:hover {
+		background: var(--signal);
+		border-color: var(--signal);
 	}
 
 	.ask-open {
@@ -487,8 +538,13 @@ const REPO = "hev/kit";
 			order: 2;
 		}
 
+		.signup {
+			order: 1;
+		}
+
 		.nav-links {
 			order: 3;
+			margin-left: 0;
 			flex-basis: 100%;
 			flex-direction: column;
 			align-items: stretch;

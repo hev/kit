@@ -1,19 +1,45 @@
 ---
 title: "Peers"
-description: "Peers are the live agent sessions on your machines, and hev peers lets you see them, read them and message them."
+description: "Peers is agent-to-agent (A2A) communication: live session discovery, inspection and messaging across harnesses and hosts."
 group: "Use"
+command: "hev peers"
+skill: "hev-peers"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
-A peer is a live coding-agent session: Claude Code, Codex or another harness,
-running in a terminal on one of your machines. When several agents work at
+Peers is kit's **agent-to-agent (A2A) communications** layer: live session
+discovery, inspection and messaging across harnesses and hosts. A peer is a
+live coding-agent session: Claude Code, Codex, Antigravity CLI (`agy`),
+OpenCode, pi or another harness, running in a terminal on one of your machines. When several agents work at
 once, they need to know what the others are doing before they edit the same
 repo, restart a shared server or redo work someone else already finished.
 
 `hev peers` is how a session, or you, finds out and talks to the others.
+Inside a session, the built-in `peers-inbox` [hook](/docs/hooks#handlers)
+delivers its inbox when a prompt is submitted. Each delivered message or chat
+post raises the `peer-message` [hook](/docs/hooks#peers) event on the sending
+host (live today); `peer-online` and `peer-offline` land in the 0.7 train.
+
+<Edition only="oss">
+
+In OSS, peers is a folder: messages, inboxes and receipts are files under
+`~/.hev/peers/` on each machine (a machine that already has
+`~/.local/state/peers-v2/` and no `~/.hev/peers/` keeps using it, so live
+inboxes are never stranded; `HEV_PEERS_STATE` overrides both), live sessions are found from the
+local terminal, and other hosts are reached over SSH. There is no API.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, peers is a hosted API: one view of live sessions across every node and
+teammate, with the same commands. Each node still runs its own sessions.
+
+</Edition>
 
 ## See who is running
 
@@ -36,7 +62,11 @@ Docs: https://hevkit.com/docs/peers#see-who-is-running (all pages: https://hevki
 </CodeTabs>
 
 Both list the live sessions with their harness, state, working directory and
-what each is working on. The operational overview, `hev` on its own, includes
+what each is working on. State is one of `working`, `idle`, `draft` (unsent
+text in the input box), `prompt` (a menu or dialog) or `?` (unreadable), read
+from each harness's own screen; for `agy`, its numbered confirmation dialogs
+and post-turn feedback survey read `prompt`, so a message is never taken as an
+answer. The operational overview, `hev` on its own, includes
 the same peers section alongside nodes and orders.
 
 ## Read a session

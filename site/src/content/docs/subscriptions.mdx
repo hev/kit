@@ -1,0 +1,292 @@
+---
+title: "Subscriptions"
+description: "Check Antigravity (agy), Claude and Codex sign-in, plan tiers, usage windows and reset times on one machine or across your dispatch hosts."
+group: "Operate"
+command: "hev subscriptions"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+
+<Callout label="0.7">
+`hev subscriptions` is landing on the 0.7 train. Until your build has it,
+`hev subscriptions` is an unknown command.
+</Callout>
+
+`hev subscriptions` shows which flat-rate agent plans this machine (or your
+dispatch fleet) is signed in to, how much of each usage window is used, and
+when each resets. Check it before sending heavy work to a machine.
+
+It covers the plan side. The spend side, `subscriptions.toml` priced by
+`hev cost-price`, is unchanged and not required. Harnesses with no plan to
+check, such as pi and OpenCode, have no row.
+
+## Commands
+
+<CodeTabs>
+
+```sh
+hev subscriptions                 # list every subscription (same as ls)
+hev subscriptions --all           # list across every configured dispatch host
+hev subscriptions ls              # list every subscription
+hev subscriptions show NAME       # every meter for one subscription
+hev subscription NAME             # same as show NAME
+hev subscription                  # same as ls
+```
+
+<AgentPrompt>
+
+```text
+Before you send heavy work anywhere, check my agent plans: run `hev subscriptions --all --json` and tell me, per host, which of agy, claude and codex are signed in, their plan tier, the weekly percentage used (say "unknown" when it is null, never guess) and when each resets. Flag any login expired or stale reading, and recommend which host and harness has the most headroom.
+Docs: https://hevkit.com/docs/subscriptions (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`subscription` and `subs` are aliases of the group. The names are `agy`,
+`claude` and `codex`. An unknown name exits 2 and lists the valid ones.
+
+Flags, on every form:
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | Print the versioned JSON shape below |
+| `--host HOST` | Read on one configured dispatch host instead of this machine |
+| `--all` | Read across every configured dispatch host in parallel |
+| `--config PATH` | Dispatch configuration that defines `--host` and `--all` |
+| `--plans PATH` | `subscriptions.toml` used to name matching spend plans and optional `plan` annotations (default `~/.hev/subscriptions.toml` when present) |
+
+`--host` and `--all` are mutually exclusive. `ls` always exits 0 unless the
+command itself fails: with no network it shows the cached reading, marked
+stale, or `?`/`-` where nothing is known.
+
+### `subscriptions.toml`
+
+The file is optional. `hev subscriptions` reads it (`--plans`, default
+`~/.hev/subscriptions.toml`) for two things: to name the spend plans on the
+same harness in `show`, and to pin a plan tier kit cannot read itself, such as
+an Antigravity Ultra seat:
+
+```toml
+# ~/.hev/subscriptions.toml
+[agy]
+plan = "ultra"     # used first when agy is signed in with OAuth
+```
+
+The same annotation can sit on a `[[plans]]` entry with `harness = "agy"`, or
+in the host's `dispatch.toml` as `[harnesses.agy] plan = "ultra"`.
+
+### Sample output (synthetic fixtures)
+
+```
+$ hev subscriptions
+NAME    HARNESS  PLAN   STATE      WEEKLY  RESETS   AGE
+agy     agy      ultra  signed in  ?       -        30m
+claude  claude   max    signed in  44%     in 3d6h  0s
+codex   codex    plus   signed in  27%     in 1d6h  1h
+```
+
+```
+$ hev subscription claude
+claude
+harness:   claude
+plan:      max
+state:     signed in
+source:    Claude OAuth usage
+read:      2030-03-06T12:00:00Z (0s ago)
+
+METER         USED  RESETS                          NOTE
+session (5h)  9%    2030-03-06T15:00:00Z (in 3h)
+weekly        44%   2030-03-09T18:00:00Z (in 3d6h)
+```
+
+`WEEKLY` shows `?` when the provider gave no percentage and `-` when there is
+no weekly meter (not signed in, API-key billing, or no reading). `AGE` gains
+`(stale)` when the reading is old or a refresh failed; `show` prints the
+reason. A `spend:` line in `show` names the `subscriptions.toml` plans
+configured for the same harness.
+
+States: `signed in`, `not signed in`, `login expired`, `unknown`.
+
+## Where readings come from
+
+### Antigravity (`agy`)
+
+Antigravity CLI (`agy`) supports both Google AI OAuth subscriptions (Google AI
+Ultra, Pro, Standard/Free, and Gemini Enterprise) and pay-as-you-go Gemini
+API-key billing. `hev subscriptions` separates the two across macOS, Linux, and
+Windows:
+
+- **API-key billing (`plan: api-key`, `state: not signed in`)**: detected when
+  `$HEV_AGY_DATA_DIR/settings.json` (default `~/.gemini/antigravity-cli`) sets
+  `"modelProvider": "gemini"` (or `"auth": {"type": "gemini-api-key"}`), when
+  the host's `dispatch.toml` sets `[harnesses.agy] model_provider = "gemini"`
+  or `env_refs.GEMINI_API_KEY`, or when `GEMINI_API_KEY` is exported in the
+  environment. Because requests bill per token to the Gemini API rather than an
+  OAuth subscription, `PLAN` shows `api-key` and `STATE` shows `not signed in`.
+- **OAuth sign-in (`state: signed in` or `login expired`)**: checked in
+  `$HEV_AGY_DATA_DIR/antigravity-oauth-token`, OS keyring metadata (macOS
+  Keychain existence check without `-w`, Windows Credential Manager `cmdkey /list`
+  target check without reading credential blobs), and a non-interactive
+  `agy models` probe bounded by a **5-second** timeout (`BROWSER=false`,
+  `stdin` closed). An expired access token stays `signed in` when a refresh
+  token is present, and becomes `login expired` when no refresh token exists or
+  `agy models` rejects the session.
+- **Plan tier (`ultra`, `pro`, `standard`, `enterprise`, `unknown`)**:
+  - An operator annotation (`plan = "ultra"` on `[[plans]]` with
+    `harness = "agy"` or `[agy] plan = "ultra"` in `subscriptions.toml`, or
+    `[harnesses.agy] plan = "ultra"` in `dispatch.toml`) is used first when
+    signed in via OAuth.
+  - Otherwise `agy models` distinguishes **Google AI Ultra** (`gemini-4-carbon-*`
+    and `gemini-pro-orchestrator` / Carbon Orchestrator), **Google AI Pro**
+    (`gemini-4-neon-*`, `gemini-4-argon-*`, `gemini-4-hydrogen-*`, Claude 5.5
+    without Carbon), **Standard** (`gemini-3.8-flash-*` only), and
+    **Enterprise**. Sanitized model-tier checks are cached for **10 minutes**
+    in `~/.hev/subscriptions/agy.json` (mode `0600`).
+  - Offline, recent local transcripts using `gemini-4-carbon-*` still establish
+    `ultra`; lower-tier transcript models leave the tier `unknown` rather than
+    guessing.
+- **Honest limits and local host activity**: Antigravity displays quota
+  percentages only inside its interactive TUI (`/usage`), with no documented
+  REST usage endpoint or local quota file. `hev subscriptions` never fabricates
+  percentages: `WEEKLY` shows `?` (`percent: null` with `percent_reason`), and
+  `show` / `--json` report bounded local activity (`session (5h)` and `weekly`
+  sessions, completed model turns, and input/output/cached tokens across the
+  newest 64 transcripts and `conversation_summaries.db` modified in the last 7
+  days).
+- **Redaction**: OAuth tokens, refresh tokens, API keys, secret URIs, emails,
+  and local credential paths never enter `agy.json`, rendered output, JSON, or
+  errors.
+
+### Codex
+
+No network call. Codex records `payload.rate_limits` on every `token_count`
+event in its rollouts, `$CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl`
+(`CODEX_HOME` defaults to `~/.codex`). A read opens only the six most recently
+modified rollouts across the newest seven day directories and keeps the newest
+reading per `limit_id`.
+
+- Windows are classified by `window_minutes`, not by slot: a plan may report
+  its weekly window as `primary` with `secondary` null. 10080 minutes is the
+  weekly meter; a day or less is a session window.
+- `plan_type` is the plan tier; `credits` becomes a `credits` meter.
+- A `limit_id` other than `codex` becomes a model-scoped meter named by
+  `limit_name`.
+- A reading taken before its window's `resets_at` has passed is shown as 0%
+  used and `rolled over`; the next reset is unknown until a newer reading.
+- A reading older than six hours is marked stale.
+- State comes from `auth.json`: `chatgpt` is signed in; an API-key login is not
+  a plan and shows not signed in. Codex's local files carry no expiry signal,
+  so Codex never shows `login expired`.
+
+The parsing is shared with `internal/cost`, which reads the same structure
+from recorded accounting rows.
+
+### Claude
+
+The Claude Code OAuth login, read at use: `CLAUDE_CODE_OAUTH_TOKEN`, else the
+macOS keychain item `Claude Code-credentials`, else
+`$CLAUDE_CONFIG_DIR/.credentials.json` (default `~/.claude`). The credential
+JSON carries the plan tier (`subscriptionType`, with the multiplier from
+`rateLimitTier`); a token from the environment does not. If the credential's
+access token has expired the state is `login expired` and no request is made;
+running Claude Code refreshes it.
+
+Usage is one `GET https://api.anthropic.com/api/oauth/usage` with
+`anthropic-beta: oauth-2025-04-20`. The endpoint is undocumented and rate
+limits hard, so:
+
+- The last reading and the time of the last attempt are cached in
+  `~/.hev/subscriptions/claude.json` (mode 0600). Within **10 minutes** of the
+  last attempt the cache is served with its age and no request is made, whether
+  that attempt succeeded or failed. Ten minutes keeps a watch loop or several
+  agents to six requests an hour per machine, while a weekly meter rarely moves
+  more than a point or two in that time. Concurrent commands share this interval.
+- One attempt per read, never a retry. 401 is `login expired`. 429, another
+  status, or no network serves the cached reading marked stale with the reason,
+  or no meters when there is no cache.
+- The cache holds meters, the plan tier and timestamps only. The token is
+  never written to it, to a log, an error or a process argument.
+
+The response is read in either of two shapes: a `limits[]` list (`kind` of
+`session`, `weekly_all`, `weekly_scoped` with `scope.model.display_name`;
+`percent`; `resets_at`) or keyed windows (`five_hour`, `seven_day`,
+`seven_day_<model>` with `utilization` and `resets_at`). `extra_usage`
+becomes an `extra usage` meter in both.
+
+The reset times shown here are for usage windows. Banked limit reset grants
+from Claude's Usage settings are currently unavailable in this command.
+
+## Reading dispatch hosts (`--host` and `--all`)
+
+`--host HOST` runs the same read on one configured dispatch host (such as
+`mini`, `oven`, or `win-oven`) over the owner-authorized `hev dispatch rpc`
+channel, and `--all` queries every configured dispatch host in parallel and
+adds a `HOST` column. An unreachable host in `--all` renders `unknown` rows so
+the rest of the fleet table still completes.
+
+Each host reads its own logins, local transcripts/rollouts, `dispatch.toml`,
+and subscription caches. Plans are account-wide, while `agy` transcript
+activity reflects work recorded on that host. Only an owner key can ask; a
+teammate's restricted key is refused. Remote hosts need a `hev` build that
+includes `hev subscriptions`.
+
+## JSON
+
+Schema `hev.subscriptions/v1`. Fields are only added within a version; removing
+or retyping one bumps it. An unknown value is `null` with a sibling `*_reason`
+string, never `0`.
+
+`hev subscriptions --json` (and `hev subscriptions [NAME] --all --json`):
+
+```json
+{
+  "schema": "hev.subscriptions/v1",
+  "generated_at": "2030-03-06T12:00:00Z",
+  "subscriptions": [ STATUS, ... ]
+}
+```
+
+`hev subscriptions show NAME --json`:
+
+```json
+{
+  "schema": "hev.subscriptions/v1",
+  "generated_at": "2030-03-06T12:00:00Z",
+  "subscription": STATUS
+}
+```
+
+STATUS:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | `agy`, `claude`, `codex` |
+| `harness` | string | harness the plan serves |
+| `host` | string, optional | set when read with `--host` or `--all` |
+| `plan` | string or null | plan tier (or `api-key` for `agy` Gemini API billing); `plan_reason` when null |
+| `state` | string | `signed_in`, `not_signed_in`, `login_expired`, `unknown`; `state_reason` explains |
+| `meters` | array of METER | every meter, empty when there is no reading |
+| `weekly` | METER or null | the plan-wide weekly meter; `weekly_reason` when null |
+| `activity` | object, optional | measured local host activity (`session` and `weekly` counts of `sessions`, `turns`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `total_tokens`) when reported |
+| `source` | string | where the reading came from; `(cached)` when served from cache |
+| `observed_at` | RFC 3339 or null | when the reading was taken; `observed_reason` when null |
+| `age_seconds` | integer or null | age of the reading at `generated_at` |
+| `stale` | bool | the reading is old or a refresh failed; `stale_reason` says which |
+| `configured_plans` | array of string | `subscriptions.toml` plans on the same harness |
+
+METER:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `kind` | string | `session`, `weekly`, `weekly_scoped`, `window`, `credits`, `extra_usage` |
+| `label` | string | display name, such as `weekly (Opus)` |
+| `scope` | string, optional | model for `weekly_scoped` |
+| `window_minutes` | integer, optional | window length |
+| `percent` | number or null | percent used, 0 to 100; `percent_reason` when null |
+| `resets_at` | RFC 3339 or null | next reset; `resets_at_reason` when null |
+| `rolled_over` | bool, optional | the reading predates a reset that has passed; `percent` is 0 |
+| `detail` | string, optional | credits balance, extra usage `on`/`off`, or local host activity summary |

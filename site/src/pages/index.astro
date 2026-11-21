@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { INVITE_HREF, SIGNUP_HREF } from "../lib/site";
 import HevdBanner from "../components/HevdBanner.astro";
 import TraceStory from "../components/TraceStory.astro";
 import Dive from "../components/deep/Dive.astro";
@@ -54,7 +55,7 @@ const pillars = [
 		label: "distributed",
 		title: "Any machine can do the work.",
 		body: "Your laptop, a box in the closet, a VM in the cloud, Windows or Unix. The same binary on each, and peers ties the agents together.",
-		href: "/docs/hosts",
+		href: "/docs/clustering",
 	},
 ];
 
@@ -74,7 +75,7 @@ budget: {concurrent_runs: 3, runs_per_day: 20}
 Rework anything red once. Ask me before touching the API repo.`;
 ---
 
-<Base title="hev kit: build your own software factory" current="product" deep>
+<Base title="hev kit: a meta-harness for coding agents" current="product" deep>
 	<Dive />
 	{/* Underwater the hero is the plunge: full bleed, at the surface, the art
 	    leaving its left side to open water for the copy. The art is lazy, so
@@ -93,10 +94,10 @@ Rework anything red once. Ask me before touching the API repo.`;
 		<section class="hero">
 			<div class="hero-copy">
 				<p class="kicker">// hev kit</p>
-				<h1>Everything you need to build your own software factory.</h1>
+				<h1>A meta-harness for coding agents.</h1>
 				<p class="lede">
-					hev kit is a declarative, distributed daemon that allows you to quickly
-					compose agents to tackle your work.
+					Run Claude Code, Codex, Antigravity, Pi and OpenCode across a private
+					cluster on macOS, Linux and Windows.
 				</p>
 			</div>
 
@@ -130,14 +131,26 @@ Rework anything red once. Ask me before touching the API repo.`;
 			</aside>
 
 			<div class="cta-row">
-				<a href="/docs/install" class="btn primary">Install</a>
-				<a href="/docs/quickstart" class="btn">Quickstart</a>
-				<a href="/docs" class="text-link">Read the docs</a>
+				<a href={SIGNUP_HREF} class="btn primary" data-home-signup="hero">Sign up for Club Kit</a>
+				<a href="/docs/install" class="btn">Install Starter Kit</a>
+				<p class="invite-note"><a href={INVITE_HREF} data-home-signup="hero">Have an invite code? Use it for free Club Kit credit.</a></p>
 			</div>
 		</section>
 	</div>
 
 	<main>
+		<section class="club-band" aria-labelledby="why-club-kit">
+			<p class="section-label"># why Club Kit</p>
+			<h2 id="why-club-kit">Bring every machine into the same conversation.</h2>
+			<ul class="club-benefits">
+				<li>Shared traces and orders across every machine.</li>
+				<li>One board and peers for the team.</li>
+				<li>Your own voice-first mobile app.</li>
+				<li>Unlimited people and agents.</li>
+				<li>Pay for what you store and search.</li>
+			</ul>
+			<a href={SIGNUP_HREF} class="btn primary" data-home-signup="band">Sign up for Club Kit</a>
+		</section>
 
 		<section id="kit" class="oss-section">
 			<div class="section-heading">
@@ -174,15 +187,15 @@ Rework anything red once. Ask me before touching the API repo.`;
         <section id="teams" class="run-section">
             <div class="section-heading">
                 <p class="section-label"># how teams put it together</p>
-                <h2>Your team builds the factory.</h2>
+                <h2>Share a cluster with your team.</h2>
                 <p>A small team shares one headless host with its own bot account and keys.
                 People dispatch orders from their laptops using tickets from their existing tracker.
                 An orchestrator follows the runs and asks for help when needed; a teammate reads
                 the evidence and approves the PR. The host keeps working when laptops close.</p>
                 <p>Kit plugs into the tracker and agent loops you already use. Your people,
                 context and process stay yours.</p>
-                <p><a href="/docs/join-a-host" class="text-link">Join a host</a>
-                <a href="/docs/share-a-host" class="text-link">Share a host</a></p>
+                <p><a href="/docs/clustering#join-a-cluster" class="text-link">Join a cluster</a>
+                <a href="/docs/clustering#share-a-node-with-a-team" class="text-link">Share a node</a></p>
             </div>
         </section>
 
@@ -221,7 +234,7 @@ Rework anything red once. Ask me before touching the API repo.`;
 					<strong>The sandbox is the computer.</strong> Keep personal credentials and laptop access off it; admission decides which repos dispatch accepts. Admission checks repos in 0.6; it does not distribute skills, MCP servers or secrets.
                     A human reviews and approves the bot’s work.
 				</p>
-				<p><a href="/docs/hosts#add-a-headless-machine" class="text-link">Add a headless machine</a></p>
+				<p><a href="/docs/clustering#add-a-headless-machine" class="text-link">Add a headless machine</a></p>
 			</div>
 		</section>
 
@@ -267,11 +280,35 @@ Rework anything red once. Ask me before touching the API repo.`;
 				<p><a href="/docs/orchestrators" class="text-link">Orchestrators</a></p>
 			</div>
 		</section>
+		<section class="club-band" aria-labelledby="start-club-kit">
+			<p class="section-label"># work together</p>
+			<h2 id="start-club-kit">One shared memory for your team.</h2>
+			<p>Bring everyone. Club Kit is hosted by us, with unlimited people and agents.</p>
+			<a href={SIGNUP_HREF} class="btn primary" data-home-signup="footer">Sign up for Club Kit</a>
+		</section>
 	</main>
 	<Seafloor />
 </Base>
 
+<script is:inline>
+	document.querySelectorAll("[data-home-signup]").forEach((link) => {
+		link.addEventListener("click", () => {
+			if (window.posthog && typeof window.posthog.capture === "function") {
+				window.posthog.capture("trial_signup", { location: link.dataset.homeSignup });
+			}
+		});
+	});
+</script>
+
 <style>
+	.club-band { padding: 3rem 0; border-bottom: 1px solid var(--rule); }
+	.club-band p, .club-benefits { color: var(--ink-soft); line-height: 1.6; }
+	.club-benefits { padding-left: 1.25rem; margin: 1.5rem 0; }
+	.club-benefits li + li { margin-top: 0.4rem; }
+	.club-benefits a, .invite-note a { color: inherit; text-underline-offset: 3px; }
+	.club-band .btn { margin-top: 1rem; }
+	.invite-note { flex-basis: 100%; font-size: 0.8125rem; color: var(--muted); line-height: 1.5; }
+
 	main {
 		width: var(--page);
 		margin: 0 auto;
@@ -285,7 +322,7 @@ Rework anything red once. Ask me before touching the API repo.`;
 		grid-template-rows: auto 1fr;
 		grid-template-areas:
 			"copy panel"
-			"copy cta";
+			"cta panel";
 		column-gap: 3rem;
 		row-gap: 1.5rem;
 		align-items: start;

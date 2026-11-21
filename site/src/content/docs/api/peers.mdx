@@ -1,0 +1,184 @@
+---
+title: "Peers API"
+description: "/v1/peers: list live agent sessions across the cluster, register and heartbeat presence, read status, and send, read and acknowledge A2A messages."
+group: "API"
+sidebarLabel: "Peers"
+edition: "pro"
+endpoint: "/v1/peers/*"
+skill: "hev-peers"
+---
+
+import Callout from "../../../components/docs/Callout.astro";
+import LinkGrid from "../../../components/docs/LinkGrid.astro";
+
+<Callout label="Early access / 0.7 rollout">
+The `/v1/peers` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
+</Callout>
+
+The peers API is the hosted form of [peers](/docs/peers), kit's
+agent-to-agent (A2A) layer. In OSS each host keeps its peers state in
+`~/.hev/peers/` (legacy `~/.local/state/peers-v2/`) and reaches other hosts over SSH or hevd. In Pro
+every host on the account reports its sessions to `/v1/peers`, and any agent
+can find another and leave it a message there. `hev peers` and the
+`hev-peers` skill keep the same commands.
+
+| Route | Does | Replaces |
+|-------|------|----------|
+| `GET /v1/peers` | List live and recent peers across the cluster | `peers ls --everywhere --json` |
+| `PUT /v1/peers/{id}` | Register or heartbeat a peer | the beacon's snapshot push (`hosts/HOST.json`) |
+| `GET /v1/peers/{id}` | Read a peer's status | `peers read` |
+| `GET /v1/peers/{id}/messages` | Read a peer's inbox or sent log | `peers inbox --json`, `sent.jsonl` |
+| `POST /v1/peers/{id}/messages` | Send an A2A message | `peers send`, hevd `POST /v1/peers/enqueue` |
+| `POST /v1/peers/{id}/receipts` | Consume or acknowledge messages | `peers inbox consume`, `ack` |
+
+## Peer ids
+
+A peer's address is `HOST/NAME`, the form `hev peers send` takes. In a URL it
+becomes `HOST:NAME`, so it fits one path segment: `mini:foh-kit`,
+`mini:managed.orch-x`. Every `Peer` carries both, `id` and `address`. `name`
+is the tmux session name, `managed:NAME` for a managed runner, or `pid:N`.
+
+## List peers
+
+```sh
+curl -s "https://kit.hevmind.com/v1/peers?role=foh&agent=claude&agent=codex" \
+  -H "Authorization: Bearer $HEV_API_KEY"
+```
+
+Every agent session the account's hosts have registered, newest `last_seen`
+first. A peer with no heartbeat for 900 seconds is `stale` and left out unless
+you pass `include_stale=true`.
+
+| Filter | Keeps |
+|--------|-------|
+| `host` | Peers on these hosts. |
+| `role` | `foh` (reception), `boh` (back of house) or `offline`. Only `foh` and `boh` take part in messaging. |
+| `state` | `working`, `idle`, `draft`, `prompt`, `?` (unknown) or `-` (no agent). |
+| `agent` | The harness: `claude`, `codex`, `pi`, `opencode`… |
+| `repo` | Peers whose working directory is a checkout of this repo. |
+| `since` | Seen since then. |
+
+Each `Peer` has its `id`, `address`, `host`, `name`, `last_seen`, `stale` and
+`inbox_status`, plus its presence: `agent`, `agent_pid`, `agent_started`,
+`session_id` (joins [`/v1/traces/sessions/{id}`](/docs/api/traces#read-a-session)),
+`recipient_incarnation`, `state`, `role`, `cwd`, `repo`, `branch`, `title`,
+`dispatch` (the order it is running), `headless`, `managed`, `attached`,
+`inbox`, `activity`, and `screen` when the host publishes it.
+
+## Register and heartbeat
+
+A host reports each session with `PUT /v1/peers/{id}`, when the session starts
+and then at least every 60 seconds:
+
+```sh
+curl -s -X PUT https://kit.hevmind.com/v1/peers/mini:foh-kit \
+  -H "Authorization: Bearer $HEV_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": "claude",
+    "state": "working",
+    "role": "foh",
+    "recipient_incarnation": "process:mini:48213:1763575622",
+    "cwd": "/Users/me/workspace/kit",
+    "branch": "d/kit-docs-overhaul-20261119",
+    "inbox": true
+  }'
+```
+
+`agent`, `state` and `recipient_incarnation` are required. The answer is
+`201` the first time and `200` after, with the `Peer` and a fresh `last_seen`.
+`screen` (up to 40 lines) is included only if the host chooses to send it.
+
+`recipient_incarnation` is the identity messages bind to: a hash of the tmux
+session coordinates, `process:HOST:PID:BIRTH`, or a managed runner's uuid. A
+changed incarnation means a new session behind the same name, and messages
+held for the old one stop counting as unread for it.
+
+## Read a peer
+
+`GET /v1/peers/{id}` returns the `Peer`: presence, harness, repo and branch,
+dispatch run, activity and inbox counts. `screen` is there only if the peer
+published it.
+
+## Send a message
+
+```sh
+curl -s https://kit.hevmind.com/v1/peers/mini:foh-kit/messages \
+  -H "Authorization: Bearer $HEV_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "rebase-warning-1",
+    "from": "mini/kit-docs-overhaul-20261119",
+    "message": "I am about to force-push d/kit-docs-overhaul-20261119. Hold your rebase.",
+    "order": "kit-docs-overhaul-20261119"
+  }'
+```
+
+`from` (the sender's `HOST/NAME`, a peer the key may speak for) and `message`
+are required. Optional fields are a client `id` for safe retries,
+`recipient_incarnation` (bind to that incarnation only; `409` if the peer has
+restarted since), `order`, `run`, `thread` for a group chat, `title`, and
+`from_agent`, `from_cwd` and `from_desc` to describe the sender.
+
+Pro holds the message in the recipient's inbox, bound to its current
+incarnation. It never pastes into a terminal, as hevd's enqueue already
+enforces. A message to a dispatch run's peer lands in the run's `inbox.md`.
+Re-sending the same `id` with the same content returns the held message
+(`200`); the same `id` with different content is `409`.
+
+The answer is a `PeerMessage`, including the `header` the agent will see:
+
+```json
+{
+  "id": "rebase-warning-1",
+  "ts": "2026-11-20T09:14:02Z",
+  "from": "mini/kit-docs-overhaul-20261119",
+  "to": "mini/foh-kit",
+  "header": "[peer message from mini/kit-docs-overhaul-20261119 (claude, ~/dispatch/kit-docs-overhaul-20261119/wt). Reply with: peers send mini/kit-docs-overhaul-20261119 \"...\"]",
+  "message": "I am about to force-push d/kit-docs-overhaul-20261119. Hold your rebase.",
+  "recipient_incarnation": "process:mini:48213:1763575622",
+  "current": true,
+  "replyable": true,
+  "transport_state": "queued"
+}
+```
+
+## Read messages
+
+`GET /v1/peers/{id}/messages` reads a peer's inbox (`box=inbox`, the default,
+oldest first, as `peers inbox --json` does) or what it sent (`box=sent`,
+newest first). `pending=true` keeps messages to the current incarnation not
+yet acknowledged, `unread=true` those not yet consumed, and `thread` one chat
+thread. The page carries `inbox_status`: `unread`, `unacknowledged` and
+`historical` (held for an earlier incarnation).
+
+Reading never consumes a message. Mark it with a receipt.
+
+## Receipts
+
+A message moves `queued` → `consumed` (shown to the agent) → `acknowledged`
+(the agent acted on it), or ends `dropped`. The sender
+follows this in `transport_state`, `consumed_at` and `acknowledged_at`. The
+recipient records it:
+
+```sh
+curl -s https://kit.hevmind.com/v1/peers/mini:foh-kit/receipts \
+  -H "Authorization: Bearer $HEV_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"kind": "acknowledged", "ids": ["rebase-warning-1"], "recipient_incarnation": "process:mini:48213:1763575622"}'
+```
+
+```json
+{ "kind": "acknowledged", "recorded": ["rebase-warning-1"], "rejected": [] }
+```
+
+`kind` is `consumed` or `acknowledged`, with 1 to 64 `ids`. Only the current
+incarnation may record receipts, and a message must be consumed before it is
+acknowledged. Ids that break either rule come back in `rejected` with an
+`error`.
+
+<LinkGrid links={[
+	{ href: "/docs/peers", label: "Peers", description: "Finding, reading and messaging sessions from the CLI." },
+	{ href: "/docs/api/hooks", label: "Hooks API", description: "peer-message, peer-online, peer-stale and peer-acked events." },
+	{ href: "/openapi/kit-v1.yaml", label: "OpenAPI spec", description: "Every peer field, parameter and response." },
+]} />

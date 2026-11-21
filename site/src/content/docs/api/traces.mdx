@@ -1,0 +1,198 @@
+---
+title: "Traces API"
+description: "/v1/traces: ingest session, block and chunk rows, list and read sessions, delete them everywhere, search with Layer auto-routing, and aggregate stats and facet values."
+group: "API"
+sidebarLabel: "Traces"
+edition: "pro"
+endpoint: "/v1/traces/*"
+skill: "hev-traces"
+---
+
+import Callout from "../../../components/docs/Callout.astro";
+import LinkGrid from "../../../components/docs/LinkGrid.astro";
+
+<Callout label="Early access / 0.7 rollout">
+The `/v1/traces` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
+</Callout>
+
+The traces API is the hosted form of the trace archive. In OSS, `hev traces`
+writes and reads `~/.hev/traces/<namespace>/` (legacy `~/.hev/archive/`); in Pro the same rows go to
+`/v1/traces`, and every machine on the account searches one archive. The
+`hev-traces` skill and `hev traces search` work the same in both. See
+[Traces](/docs/traces) for what is captured.
+
+| Route | Does | Replaces |
+|-------|------|----------|
+| `POST /v1/traces/sessions` | Ingest session rows | indexer upsert to `<ns>-sessions` |
+| `POST /v1/traces/blocks` | Ingest read-side block rows | indexer upsert to `<ns>-blocks` |
+| `POST /v1/traces/chunks` | Ingest searchable chunk rows | indexer upsert to `<ns>` |
+| `GET /v1/traces/sessions` | List sessions, newest first | `GET /api/sessions` |
+| `GET /v1/traces/sessions/{id}` | Read one session with its blocks | `GET /api/session/{id}` |
+| `DELETE /v1/traces/sessions/{id}` | Delete a session everywhere | `DeleteSessionArchive` |
+| `GET /v1/traces/search` | Search transcripts and evaluations | `GET /api/search` |
+| `GET /v1/traces/stats` | Aggregate spend, tokens and activity | `GET /api/stats` |
+| `GET /v1/traces/values` | Count one facet's values | `GET /api/values` |
+| `PUT`, `GET /v1/traces/images/{sha256}` | Upload or fetch a transcript image | `GET /api/image/{sha256}` |
+
+## Folder to API
+
+| OSS archive | API |
+|-------------|-----|
+| `sessions/<shard>/<key>.json` (one `SessionRow`) | `POST`, `GET /v1/traces/sessions`; `GET`, `DELETE /v1/traces/sessions/{id}` |
+| `blocks/<shard>/<key>.jsonl` (`BlockRow`s) | `POST /v1/traces/blocks`; returned in session detail |
+| `chunks/<shard>/<key>.jsonl` (search rows) | `POST /v1/traces/chunks`; read only through search |
+| `evals.jsonl` | Returned in session detail; searched by `/v1/traces/search` |
+| `blobs/sha256/…` | `PUT`, `GET /v1/traces/images/{sha256}` |
+| `index.jsonl` (newest-first listing) | The list route's ordering |
+
+## Ingest
+
+Three routes take a batch of 1 to 1,000 rows of one kind in `rows`. They are
+the same three row kinds the indexer writes today, minus the namespace, which
+the key now resolves.
+
+```sh
+curl -s https://kit.hevmind.com/v1/traces/sessions \
+  -H "Authorization: Bearer $HEV_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"rows":[{"id":"s-019a…","session_id":"019a…","harness":"claude","start":1763575622000,"end":1763579222000}]}'
+```
+
+```json
+{ "accepted": 1, "rejected": [] }
+```
+
+- **`POST /v1/traces/sessions`** upserts `SessionRow`s by `id`. Re-sending a
+  row replaces it, so a retried batch is safe. A later outcome pass may send
+  the same row again with its outcome fields filled (`pr_state`, `ci_state`,
+  `reverted` and the rest).
+- **`POST /v1/traces/blocks`** upserts `BlockRow`s by `id`: one whole
+  transcript block each. Sorting by `seq` rebuilds the transcript.
+- **`POST /v1/traces/chunks`** upserts `ChunkRow`s by their content-addressed
+  `id`. The server embeds `text` and full-text indexes it; you never send
+  vectors.
+
+A batch with bad rows still writes the rest. `rejected` lists each one by
+`index` in the request, with its `id` and `error`. Chunk ids are content
+hashes and session and block ids are stable, so retries are idempotent even
+without an `Idempotency-Key`. Too large a batch is `413`; too many requests is
+`429` with `Retry-After`.
+
+`SessionRow`, `BlockRow` and `ChunkRow` keep the JSON names kit writes to the
+archive. `start`, `end` and `prompt_ts` stay epoch milliseconds, the one
+exception to ISO-8601 in the API. The spec lists every field.
+
+## List sessions
+
+```sh
+curl -s "https://kit.hevmind.com/v1/traces/sessions?harness=claude&since=7d&limit=20" \
+  -H "Authorization: Bearer $HEV_API_KEY"
+```
+
+Sessions come back ordered by `end` descending, then `id`, as a page of
+`SessionRow`s. The same filters apply to list, search, stats and values:
+
+| Filter | Keeps |
+|--------|-------|
+| `since`, `until` | Sessions in the time window. |
+| `harness`, `model`, `host` | Sessions with any of these values. |
+| `project` | A project name (the last path element of the repo) or a literal `repo_url`. |
+| `skill` | Sessions that loaded any of these skills. |
+| `tool` | Sessions that called any of these tools. |
+| `exclude_harness`, `exclude_model`, `exclude_host`, `exclude_project` | Drops these values; exclusion wins. |
+| `branch` | One branch (list and search). |
+| `order` | Sessions launched by this dispatch order (list only). |
+| `poor` | `true` keeps sessions whose latest evaluation is poor; `false` drops them and keeps ungraded ones (list only). |
+
+## Read a session
+
+`GET /v1/traces/sessions/{id}` takes the harness session id and returns a
+`TraceSessionDetail`:
+
+```json
+{
+  "session": { "session_id": "019a…", "harness": "claude", "order": "kit-docs-overhaul-20261119", "...": "..." },
+  "blocks": [ { "seq": 1, "role": "user", "block_type": "text", "...": "..." } ],
+  "evals": [ { "poor": false, "summary": "…" } ],
+  "trace_context": { "trace_id": "4650e875…", "parent_span_id": "9a1c6e4b…", "order": "kit-docs-overhaul-20261119" }
+}
+```
+
+`blocks` are in `seq` order. `trace_context` is set when an order launched the
+session, and joins it to the dispatch ask and run spans.
+
+## Delete a session
+
+`DELETE /v1/traces/sessions/{id}` removes the session's chunks, blocks and
+session row: an exact `session_id` filter on each namespace, verified empty
+afterwards. It returns `204`. Image blobs are content-addressed and shared
+between sessions, so they stay.
+
+## Search
+
+```sh
+curl -s -G https://kit.hevmind.com/v1/traces/search \
+  -H "Authorization: Bearer $HEV_API_KEY" \
+  --data-urlencode "q=why did the docs build fail" \
+  --data-urlencode "also=astro build broken link" \
+  --data-urlencode "since=14d"
+```
+
+One search over transcript chunks and evaluations, ranked per session. Filters
+select the candidate sessions first, so ranking covers the whole filtered
+archive. Transcript and evaluation hits are ranked together and each session
+keeps its best hit.
+
+| Parameter | |
+|-----------|-|
+| `q` | The query, 1 to 8,192 bytes. Required. |
+| `also` | Up to seven more phrasings of the same question. Mix a natural-language phrasing with the literal tokens you expect. |
+| `mode` | `hybrid` (default) or `phrase` for a contiguous-text match. |
+| `role` | Only hits in `user`, `assistant` or `system` blocks. |
+| the session filters | `since`, `until`, `harness`, `model`, `host`, `project`, `skill`, `tool`, `branch`. |
+
+Each hit is a `TraceSearchHit`: the `session` row, the best `snippet`, its
+`turn_uuid`, `role`, `block_type`, `tool_name` and `hit_ts`, a `score` (the
+fused RRF score; `0` for phrase scans) and `source` (`transcript` or `eval`).
+The response also carries the [search fields](/docs/api#search) (`route`,
+`engine`, `semantic`) and `candidate_truncated`, which says whether the
+transcript or eval leg hit its candidate limit.
+
+Search is Layer auto-routed: `layer.multi_query` by default,
+`layer.hybrid_text` when the store has no multi-query, and `phrase.scan` for
+`mode=phrase`. A store failure is `502`; a mode the account's store cannot run
+is `503`.
+
+## Stats and facet values
+
+`GET /v1/traces/stats` folds the latest row of every matching session
+(`aggregation: kit_latest_rows`) into spend, tokens and activity: totals,
+`api_hours`, a 7 by 24 `prompt_grid` (Sunday first) in the `tz` you pass,
+`daily` buckets in UTC, per-model and per-project breakdowns. It takes the
+time window and every include and exclude filter.
+
+`GET /v1/traces/values?facet=model` counts one facet's values (`project`,
+`model`, `tool`, `skill`, `harness` or `host`) across the sessions every other
+filter keeps, most frequent first:
+
+```json
+{ "values": [ { "v": "claude-opus-5-5", "n": 412 }, { "v": "gpt-5.5", "n": 96 } ], "total": 2, "truncated": false }
+```
+
+The facet's own inclusion is ignored, so a picker never hides its siblings;
+exclusions still apply.
+
+## Images
+
+`PUT /v1/traces/images/{sha256}` uploads the raw bytes of a transcript image.
+It is content-addressed and write-once: the server checks the bytes hash to
+`sha256` and answers `201` when new, `200` when already stored, with the
+type (PNG, JPEG, GIF or WebP), size and dimensions. `GET` returns the bytes
+with the sha256 as `ETag`. Blocks point at images through
+`images[].sha256`; `skipped` says why a capturing host did not upload one.
+
+<LinkGrid links={[
+	{ href: "/docs/traces", label: "Traces", description: "What kit captures and how to search it from the CLI." },
+	{ href: "/docs/api", label: "API overview", description: "Auth, pagination, errors and search routing." },
+	{ href: "/openapi/kit-v1.yaml", label: "OpenAPI spec", description: "Every trace field, parameter and response." },
+]} />
