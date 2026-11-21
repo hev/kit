@@ -1,9 +1,9 @@
 # Dispatch workspaces
 
-Starter Kit and community Layer use normal Git worktrees. A host with a
-valid Pro Layer license can share build caches across attempts and reclaim
-finished worktrees. The receiver decides eligibility from its local license
-projection.
+Starter Kit uses normal Git worktrees. A host with a
+[Kit Pro license](licensing.md) in the licensed or grace state can share build
+caches across attempts and reclaim finished worktrees. The receiver reads
+Kit’s local license status to decide eligibility.
 
 In the receiver's dispatch config:
 
@@ -17,7 +17,7 @@ auto_compact_done = false
 ```
 
 `auto` enables Pro features when licensed. `oss` selects plain Git worktrees.
-`pro` requires a valid Pro license. The legacy top-level string
+`pro` requires an active Kit Pro license. The legacy top-level string
 `workspace = "~/workspace"` still sets the repository search directory.
 The `cow` driver tries an APFS clone or Linux reflink and falls back to Git
 checkout. Set `driver = "git"` to always use Git checkout.

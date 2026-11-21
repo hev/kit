@@ -97,6 +97,7 @@ func New(salt []byte) (*Scrubber, error) {
 		return nil, rulesErr
 	}
 	extra := []rule{
+		{id: "paseto-v4-public", re: publicToken},
 		{id: "pem", re: regexp.MustCompile(`(?s)-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY|CERTIFICATE)-----.*?-----END (?:[A-Z0-9 ]*PRIVATE KEY|CERTIFICATE)-----`)},
 		{id: "authorization", re: regexp.MustCompile(`(?i)\bauthorization["']?\s*:\s*["']?(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+)?([^\r\n"'\x60]+)`), group: 1},
 		{id: "url-credentials", re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://([^\s/@]+:[^\s/@]+)@`), group: 1},
