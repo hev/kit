@@ -1,4 +1,4 @@
-package jobs
+package cron
 
 import (
 	"context"
@@ -38,7 +38,7 @@ type Details struct {
 }
 
 func (r Runner) dir(j Job) string {
-	return filepath.Join(r.Home, ".hev", "jobs", j.Name)
+	return filepath.Join(r.Home, ".hev", "cron", j.Name)
 }
 
 func (r Runner) Pause(ctx context.Context, j Job, paused bool) error {
@@ -224,9 +224,9 @@ func (r Runner) run(ctx context.Context, j Job, a attempt) (Run, error) {
 	secondFailure, err := r.finish(j, result)
 	a.release()
 	if secondFailure && r.Notice != nil {
-		notice := attention.New(attention.KindDone, attention.SourceJob, r.Membership.Self, j.Name,
+		notice := attention.New(attention.KindDone, attention.SourceCron, r.Membership.Self, j.Name,
 			result.Start.Format(time.RFC3339Nano), "failed", "Job failed twice consecutively",
-			attention.Links{Run: "hev jobs show " + j.Name})
+			attention.Links{Run: "hev cron show " + j.Name})
 		notifyCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
 		if err := r.Notice(notifyCtx, notice); err != nil && r.Logger != nil {

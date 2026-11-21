@@ -352,7 +352,7 @@ func SetActiveBucket(name string) (string, error) {
 	if !found {
 		return "", fmt.Errorf("bucket %q not found in %s", name, path)
 	}
-	// Update the full document so independently loaded settings such as jobs,
+	// Update the full document so independently loaded settings such as cron,
 	// cluster and notifications survive a bucket change.
 	var doc map[string]any
 	if _, err := toml.Decode(string(raw), &doc); err != nil {

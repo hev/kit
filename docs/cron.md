@@ -1,10 +1,10 @@
-# Scheduled jobs
+# Cron schedules
 
-Add one or more `[[jobs]]` entries to `~/.hev/config.toml` (or the file selected by
+Add one or more `[[cron]]` entries to `~/.hev/config.toml` (or the file selected by
 `HEV_CONFIG`). Restart the full `hevd` daemon to pick up changes.
 
 ```toml
-[[jobs]]
+[[cron]]
 name = "refresh-index"
 every = "15m"
 cmd = ["refresh-index", "--incremental"]
@@ -13,7 +13,7 @@ timeout = "2m"
 cooldown = "5m"
 env_refs = { INDEX_TOKEN = "secret://index/token" }
 
-[[jobs]]
+[[cron]]
 name = "daily-summary"
 at = "09:30"
 tz = "America/New_York"
@@ -42,7 +42,7 @@ scrubs stdout and stderr separately, replacing resolved values with `[REDACTED]`
 kit's gitleaks scrubber and removes known local paths before joining the streams. Oversized captures are
 discarded to avoid persisting partial secrets at the capture boundary.
 
-State lives in `~/.hev/jobs/<name>/state.json`, with the newest 20 entries under
+State lives in `~/.hev/cron/<name>/state.json`, with the newest 20 entries under
 `runs/`. Each entry holds at most 64 KiB of output. A tick that overlaps a
 running job records `skipped_busy`. By default a job is enabled. Set
 `enabled = false` to turn it off in config. Pause and resume persist locally
@@ -71,10 +71,10 @@ idempotent commands for jobs that move between hosts.
 
 ## Commands
 
-- `hev jobs ls [--json]` lists schedule, status, last exit/time and next tick.
-- `hev jobs show <name> [--json]` shows state and recent redacted output.
-- `hev jobs run <name>` executes immediately if enabled, unpaused, eligible for
+- `hev cron ls [--json]` lists schedule, status, last exit/time and next tick.
+- `hev cron show <name> [--json]` shows state and recent redacted output.
+- `hev cron run <name>` executes immediately if enabled, unpaused, eligible for
   placement, outside cooldown and idle. A job with secret references needs the
   local daemon's secrets endpoint.
-- `hev jobs pause <name>` and `hev jobs resume <name>` change local scheduling
+- `hev cron pause <name>` and `hev cron resume <name>` change local scheduling
   state. Pausing leaves a running execution to finish.

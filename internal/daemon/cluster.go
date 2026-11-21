@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/cluster"
+	"github.com/hev/kit/internal/cron"
 	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/jobs"
 	"github.com/hev/kit/internal/secrets"
 )
 
@@ -18,9 +18,9 @@ func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 	return stop
 }
 
-func startCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) (jobs.Membership, func()) {
+func startCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) (cron.Membership, func()) {
 	host, _ := os.Hostname()
-	m := jobs.Membership{Self: host}
+	m := cron.Membership{Self: host}
 	cfg, e := cluster.LoadConfig("")
 	if e != nil {
 		logger.Warn("cluster disabled; daemon continues", "err", e)
@@ -46,9 +46,9 @@ func startCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 		name = host
 	}
 	m.Self, m.Enabled = name, true
-	m.Members = func(context.Context) []cluster.Member { return s.JobMembers() }
+	m.Members = func(context.Context) []cluster.Member { return s.CronMembers() }
 	m.Reserve = func(_ context.Context, key string, until time.Time) (bool, error) {
-		return s.ReserveJobCooldown(key, until)
+		return s.ReserveCronCooldown(key, until)
 	}
 	cache.AttachCluster(&usageBridge{service: s, node: name})
 	publishCtx, cancelPublish := context.WithCancel(ctx)

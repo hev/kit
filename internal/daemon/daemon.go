@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hev/kit/internal/cron"
 	"github.com/hev/kit/internal/index"
-	"github.com/hev/kit/internal/jobs"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
@@ -98,7 +98,7 @@ func Run(ctx context.Context) error {
 		return ErrRestart
 	}
 
-	configuredJobs, err := jobs.Load(DefaultConfigPath())
+	configuredCron, err := cron.Load(DefaultConfigPath())
 	if err != nil {
 		return err
 	}
@@ -167,16 +167,16 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
-	jobRunner := jobs.Runner{
+	cronRunner := cron.Runner{
 		Home: home, Membership: membership, Logger: logger,
 		Resolve: func(ctx context.Context, refs []secrets.Ref) (map[string]string, error) {
-			return cache.ResolveAs(ctx, "hevd jobs", refs)
+			return cache.ResolveAs(ctx, "hevd cron", refs)
 		},
 		Notice: func(ctx context.Context, notice attention.Notice) error {
 			return attention.Default().Emit(ctx, notice, "")
 		},
 	}
-	defer jobRunner.Start(ctx, configuredJobs)()
+	defer cronRunner.Start(ctx, configuredCron)()
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {
@@ -398,7 +398,7 @@ func startSecrets(ctx context.Context, logger *slog.Logger) func() {
 	return stop
 }
 
-func startSecretSidecars(ctx context.Context, logger *slog.Logger) (*secrets.Cache, jobs.Membership, func()) {
+func startSecretSidecars(ctx context.Context, logger *slog.Logger) (*secrets.Cache, cron.Membership, func()) {
 	cache := secrets.New()
 	closeSecrets, err := secrets.Serve(ctx, cache)
 	membership, closeCluster := startCluster(ctx, cache, logger)

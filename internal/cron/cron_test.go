@@ -1,4 +1,4 @@
-package jobs
+package cron
 
 import (
 	"bytes"
@@ -27,9 +27,9 @@ func TestJobConfigRules(t *testing.T) {
 		}
 		return Load(p)
 	}
-	base := "[[jobs]]\nname='index'\ncmd=['bin','']\n"
+	base := "[[cron]]\nname='index'\ncmd=['bin','']\n"
 	valid := base + "every='10s'\n" +
-		"[[jobs]]\nname='daily'\nat='09:30'\ntz='America/New_York'\ncmd=['bin']\nenv_refs={ TOKEN='op://vault/item/field' }\n"
+		"[[cron]]\nname='daily'\nat='09:30'\ntz='America/New_York'\ncmd=['bin']\nenv_refs={ TOKEN='op://vault/item/field' }\n"
 	jobs, err := load(valid)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestJobCaptureHistoryAndNotices(t *testing.T) {
 		run(fixtureJob(t, "test", mode, "recovered"), want)
 	}
 	if len(notices) != 2 || notices[0].Event != "done" || notices[0].State != "failed" ||
-		notices[0].Thread != "job:test/test" || notices[0].ID == notices[1].ID {
+		notices[0].Thread != "cron:test/test" || notices[0].ID == notices[1].ID {
 		t.Fatal("one deduplicated notice is required on the second failure in each streak")
 	}
 	for i := 0; i < 25; i++ {
@@ -280,7 +280,7 @@ func TestJobTimeoutAndNonOverlap(t *testing.T) {
 	}
 }
 
-func TestJobsSWIMFailover(t *testing.T) {
+func TestCronSWIMFailover(t *testing.T) {
 	t.Setenv("GORACE", "atexit_sleep_ms=0")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	key := make([]byte, 32)
@@ -303,7 +303,7 @@ func TestJobsSWIMFailover(t *testing.T) {
 		return Runner{Home: t.TempDir(), Membership: Membership{Self: name, Enabled: true,
 			Members: func(context.Context) []cluster.Member { return node.Members() },
 			Reserve: func(_ context.Context, key string, until time.Time) (bool, error) {
-				return node.ReserveJobCooldown(key, until)
+				return node.ReserveCronCooldown(key, until)
 			},
 		}}
 	}

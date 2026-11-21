@@ -345,7 +345,7 @@ func TestSchemaMatchesNotice(t *testing.T) {
 	if s.Title != Schema || s.Properties["schema"].Const != Schema || !reflect.DeepEqual(s.Properties["event"].Enum, Kinds) {
 		t.Fatal("schema version or kinds drifted")
 	}
-	if got := s.Properties["source"].Enum; !reflect.DeepEqual(got, []string{SourceRun, SourceOrchestrator, SourceFollow, SourceSwarm, SourceSteer, SourceJob, SourceLegacyExpedite}) {
+	if got := s.Properties["source"].Enum; !reflect.DeepEqual(got, []string{SourceRun, SourceOrchestrator, SourceFollow, SourceSwarm, SourceSteer, SourceCron, SourceLegacyExpedite}) {
 		t.Fatal(got)
 	}
 	n := sample(KindNeedsYou, "k").For("teammate")

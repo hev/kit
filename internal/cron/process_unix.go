@@ -1,6 +1,6 @@
 //go:build !windows
 
-package jobs
+package cron
 
 import (
 	"os/exec"

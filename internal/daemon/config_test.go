@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"github.com/hev/kit/internal/cluster"
-	"github.com/hev/kit/internal/jobs"
+	"github.com/hev/kit/internal/cron"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/update"
 	"os"
@@ -96,7 +96,7 @@ func TestSetActiveBucketPreservesUpdateSettings(t *testing.T) {
 	}
 }
 
-func TestSetActiveBucketPreservesScheduledJobs(t *testing.T) {
+func TestSetActiveBucketPreservesCron(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	t.Setenv("HEV_CONFIG", path)
 	text := `
@@ -105,7 +105,7 @@ active_bucket = "old"
 [[buckets]]
 name = "example"
 
-[[jobs]]
+[[cron]]
 name = "placed"
 at = "09:30"
 tz = "America/New_York"
@@ -129,7 +129,7 @@ key_ref = "op://test/item/cluster"
 	if err != nil || cfg.ActiveBucket != "example" {
 		t.Fatal("expected bucket selection to change")
 	}
-	schedules, err := jobs.Load(path)
+	schedules, err := cron.Load(path)
 	if err != nil || len(schedules) != 1 {
 		t.Fatal("bucket selection lost the scheduled job")
 	}

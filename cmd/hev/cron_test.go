@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hev/kit/internal/cron"
 	"github.com/hev/kit/internal/daemon"
-	"github.com/hev/kit/internal/jobs"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/secrets/fakeop"
 )
 
-func TestJobsCLIAndDaemonShareStateAndSecretsCache(t *testing.T) {
+func TestCronCLIAndDaemonShareStateAndSecretsCache(t *testing.T) {
 	h := newShellHost(t, false)
 	t.Setenv("HEV_SECRETS_ENDPOINT", filepath.Join(h.root, "secrets.sock"))
 	t.Setenv("HEV_SECRETS_CACHE", "")
@@ -34,7 +34,7 @@ func TestJobsCLIAndDaemonShareStateAndSecretsCache(t *testing.T) {
 [capture]
 scan_roots = ["fixture-root"]
 
-[[jobs]]
+[[cron]]
 name = "scheduled"
 every = "10s"
 cmd = ["/bin/sh", "-c", 'printf "%s\n" "$FIXTURE_TOKEN"; printf "%s\n" "manual; literal"']
@@ -58,7 +58,7 @@ env_refs = { FIXTURE_TOKEN = "op://test/item/token" }
 	})
 	call := func(args ...string) (string, error) {
 		var out bytes.Buffer
-		cmd := newJobsCommand()
+		cmd := newCronCommand()
 		cmd.SetOut(&out)
 		cmd.SetErr(&out)
 		cmd.SetArgs(args)
@@ -77,7 +77,7 @@ env_refs = { FIXTURE_TOKEN = "op://test/item/token" }
 		case <-tick.C:
 		}
 	}
-	var detail jobs.Details
+	var detail cron.Details
 	for {
 		out, err := call("show", "scheduled", "--json")
 		if err != nil || json.Unmarshal([]byte(out), &detail) != nil {
@@ -94,6 +94,9 @@ env_refs = { FIXTURE_TOKEN = "op://test/item/token" }
 	}
 	if detail.Runs[0].Status != "ok" || detail.Runs[0].Output != "[REDACTED]\nmanual; literal\n" {
 		t.Fatal("expected scheduled tick to use the cache and redact its output")
+	}
+	if _, err := os.Stat(filepath.Join(h.home, ".hev", "cron", "scheduled", "state.json")); err != nil {
+		t.Fatal("expected hevd to persist state under the cron directory")
 	}
 	assertCall := func(expected string, args ...string) {
 		t.Helper()

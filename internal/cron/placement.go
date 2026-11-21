@@ -1,4 +1,4 @@
-package jobs
+package cron
 
 import (
 	"bytes"
@@ -76,21 +76,21 @@ func (m Membership) cooling(ctx context.Context, j Job, start time.Time) (bool, 
 	return m.Reserve(ctx, hex.EncodeToString(key.Sum(nil)[:16]), start.Add(j.cooldown))
 }
 
-// RemoteMembership uses the daemon's same-user cluster endpoint for manual jobs.
+// RemoteMembership uses the daemon's same-user cluster endpoint for manual cron.
 func RemoteMembership(self string, enabled bool) Membership {
 	return Membership{
 		Self: self, Enabled: enabled,
 		Members: func(ctx context.Context) []cluster.Member {
 			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
-			r, _ := cluster.Query(ctx, cluster.Request{Action: "job-members"})
+			r, _ := cluster.Query(ctx, cluster.Request{Action: "cron-members"})
 			return r.Members
 		},
 		Reserve: func(ctx context.Context, key string, until time.Time) (bool, error) {
 			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
-			r, err := cluster.Query(ctx, cluster.Request{Action: "reserve-job-cooldown", JobKey: key, JobUntil: &until})
-			return r.JobCooling, err
+			r, err := cluster.Query(ctx, cluster.Request{Action: "reserve-cron-cooldown", CronKey: key, CronUntil: &until})
+			return r.CronCooling, err
 		},
 	}
 }

@@ -29,16 +29,16 @@ type lockedListener struct {
 func (l *lockedListener) Close() error { e := l.Listener.Close(); l.once.Do(l.release); return e }
 
 type Request struct {
-	JobKey   string     `json:"job_key,omitempty"`
-	JobUntil *time.Time `json:"job_until,omitempty"`
-	Action   string     `json:"action"`
-	Address  string     `json:"address,omitempty"`
+	CronKey   string     `json:"cron_key,omitempty"`
+	CronUntil *time.Time `json:"cron_until,omitempty"`
+	Action    string     `json:"action"`
+	Address   string     `json:"address,omitempty"`
 }
 type Response struct {
-	JobCooling bool     `json:"job_cooling,omitempty"`
-	Status     *Status  `json:"status,omitempty"`
-	Members    []Member `json:"members,omitempty"`
-	Error      string   `json:"error,omitempty"`
+	CronCooling bool     `json:"cron_cooling,omitempty"`
+	Status      *Status  `json:"status,omitempty"`
+	Members     []Member `json:"members,omitempty"`
+	Error       string   `json:"error,omitempty"`
 }
 
 func Serve(ctx context.Context, s *Service) (func(), error) {
@@ -89,13 +89,13 @@ func serveConn(ctx context.Context, s *Service, c net.Conn) {
 		r.Status = &st
 	case "ls":
 		r.Members = s.Members()
-	case "job-members":
-		r.Members = s.JobMembers()
-	case "reserve-job-cooldown":
-		if q.JobUntil == nil {
+	case "cron-members":
+		r.Members = s.CronMembers()
+	case "reserve-cron-cooldown":
+		if q.CronUntil == nil {
 			e = ErrBound
 		} else {
-			r.JobCooling, e = s.ReserveJobCooldown(q.JobKey, *q.JobUntil)
+			r.CronCooling, e = s.ReserveCronCooldown(q.CronKey, *q.CronUntil)
 		}
 	case "join":
 		e = s.Join(q.Address)

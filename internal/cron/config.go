@@ -1,5 +1,5 @@
-// Package jobs runs bounded, user-configured schedules for hevd.
-package jobs
+// Package cron runs bounded, user-configured schedules for hevd.
+package cron
 
 import (
 	"errors"
@@ -38,7 +38,7 @@ var (
 
 func Load(path string) ([]Job, error) {
 	var file struct {
-		Jobs []Job `toml:"jobs"`
+		Cron []Job `toml:"cron"`
 	}
 	md, err := toml.DecodeFile(path, &file)
 	if os.IsNotExist(err) {
@@ -47,30 +47,30 @@ func Load(path string) ([]Job, error) {
 	if err != nil {
 		var parse toml.ParseError
 		if errors.As(err, &parse) {
-			return nil, fmt.Errorf("invalid jobs configuration at line %d", parse.Position.Line)
+			return nil, fmt.Errorf("invalid cron configuration at line %d", parse.Position.Line)
 		}
-		return nil, errors.New("could not read jobs configuration")
+		return nil, errors.New("could not read cron configuration")
 	}
 	for _, key := range md.Undecoded() {
-		if len(key) > 1 && key[0] == "jobs" {
-			return nil, errors.New("unknown field in [[jobs]]")
+		if len(key) > 1 && key[0] == "cron" {
+			return nil, errors.New("unknown field in [[cron]]")
 		}
 	}
-	if len(file.Jobs) > 128 {
+	if len(file.Cron) > 128 {
 		return nil, errors.New("at most 128 jobs may be configured")
 	}
-	seen := make(map[string]bool, len(file.Jobs))
-	for i := range file.Jobs {
-		j := &file.Jobs[i]
+	seen := make(map[string]bool, len(file.Cron))
+	for i := range file.Cron {
+		j := &file.Cron[i]
 		if err := j.validate(); err != nil {
-			return nil, fmt.Errorf("jobs entry %d: %w", i+1, err)
+			return nil, fmt.Errorf("cron entry %d: %w", i+1, err)
 		}
 		if seen[j.Name] {
-			return nil, fmt.Errorf("jobs entry %d has a duplicate name", i+1)
+			return nil, fmt.Errorf("cron entry %d has a duplicate name", i+1)
 		}
 		seen[j.Name] = true
 	}
-	return file.Jobs, nil
+	return file.Cron, nil
 }
 
 func duration(value string, fallback, min, max time.Duration) (time.Duration, bool) {

@@ -18,14 +18,14 @@ import (
 
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/cluster"
+	"github.com/hev/kit/internal/cron"
 	"github.com/hev/kit/internal/daemon"
-	"github.com/hev/kit/internal/jobs"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
-func newJobsCommand() *cobra.Command {
-	root := &cobra.Command{Use: "jobs", Short: "List, inspect and run hevd scheduled jobs"}
+func newCronCommand() *cobra.Command {
+	root := &cobra.Command{Use: "cron", Short: "List, inspect and run hevd cron schedules"}
 	for _, action := range []string{"ls", "show", "run", "pause", "resume"} {
 		use, args := action+" NAME", cobra.ExactArgs(1)
 		if action == "ls" {
@@ -36,7 +36,7 @@ func newJobsCommand() *cobra.Command {
 			asJSON, _ := cmd.Flags().GetBool("json")
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return runJobs(ctx, cmd.OutOrStdout(), action, args, asJSON)
+			return runCron(ctx, cmd.OutOrStdout(), action, args, asJSON)
 		}}
 		if action == "ls" || action == "show" {
 			c.Flags().Bool("json", false, "Print JSON")
@@ -46,11 +46,11 @@ func newJobsCommand() *cobra.Command {
 	return root
 }
 
-func init() { rootCmd.AddCommand(newJobsCommand()) }
+func init() { rootCmd.AddCommand(newCronCommand()) }
 
-func runJobs(ctx context.Context, out io.Writer, action string, args []string, asJSON bool) error {
+func runCron(ctx context.Context, out io.Writer, action string, args []string, asJSON bool) error {
 	path := daemon.DefaultConfigPath()
-	configured, err := jobs.Load(path)
+	configured, err := cron.Load(path)
 	if err != nil {
 		return err
 	}
@@ -63,10 +63,10 @@ func runJobs(ctx context.Context, out io.Writer, action string, args []string, a
 	if cfg != nil && cfg.Name != "" {
 		self = cfg.Name
 	}
-	r := jobs.Runner{
-		Home: home, Membership: jobs.RemoteMembership(self, cfg != nil || clusterErr != nil),
+	r := cron.Runner{
+		Home: home, Membership: cron.RemoteMembership(self, cfg != nil || clusterErr != nil),
 		Resolve: func(ctx context.Context, refs []secrets.Ref) (map[string]string, error) {
-			return secrets.ResolveWith(ctx, refs, secrets.Options{CacheOnly: true, Caller: "hev jobs"})
+			return secrets.ResolveWith(ctx, refs, secrets.Options{CacheOnly: true, Caller: "hev cron"})
 		},
 		Notice: func(ctx context.Context, n attention.Notice) error {
 			return attention.Default().Emit(ctx, n, "")
@@ -82,10 +82,10 @@ func runJobs(ctx context.Context, out io.Writer, action string, args []string, a
 			get := sync.OnceValue(func() []cluster.Member { return members(ctx) })
 			r.Membership.Members = func(context.Context) []cluster.Member { return get() }
 		}
-		return listJobs(ctx, out, r, configured, asJSON)
+		return listCron(ctx, out, r, configured, asJSON)
 	}
 
-	i := slices.IndexFunc(configured, func(j jobs.Job) bool { return j.Name == args[0] })
+	i := slices.IndexFunc(configured, func(j cron.Job) bool { return j.Name == args[0] })
 	if i == -1 {
 		return errors.New("job is not configured")
 	}
@@ -132,7 +132,7 @@ func runJobs(ctx context.Context, out io.Writer, action string, args []string, a
 		_, err := fmt.Fprintln(out, j.Name, action+"d")
 		return err
 	}
-	return errors.New("unknown jobs command")
+	return errors.New("unknown cron command")
 }
 
 func jobTime(t *time.Time) string {
@@ -149,7 +149,7 @@ func jobExit(code *int) string {
 	return fmt.Sprint(*code)
 }
 
-func jobStatus(s jobs.Summary) string {
+func jobStatus(s cron.Summary) string {
 	status := s.Status
 	if status == "standby" && s.Winner != "" {
 		status += " (" + s.Winner + ")"
@@ -160,8 +160,8 @@ func jobStatus(s jobs.Summary) string {
 	return status
 }
 
-func listJobs(ctx context.Context, out io.Writer, r jobs.Runner, configured []jobs.Job, asJSON bool) error {
-	rows := make([]jobs.Summary, 0, len(configured))
+func listCron(ctx context.Context, out io.Writer, r cron.Runner, configured []cron.Job, asJSON bool) error {
+	rows := make([]cron.Summary, 0, len(configured))
 	for _, j := range configured {
 		d, err := r.Inspect(ctx, j, false)
 		if err != nil {
@@ -181,7 +181,7 @@ func listJobs(ctx context.Context, out io.Writer, r jobs.Runner, configured []jo
 	return w.Flush()
 }
 
-func printJobRun(out io.Writer, run jobs.Run) error {
+func printJobRun(out io.Writer, run cron.Run) error {
 	_, err := fmt.Fprintf(out, "%s  %s  exit %s  %s\n", jobTime(&run.Start), run.Status, jobExit(run.ExitCode), run.Duration.Round(time.Millisecond))
 	if err != nil {
 		return err
