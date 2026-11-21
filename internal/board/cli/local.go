@@ -32,7 +32,7 @@ var localDir string
 // server, which holds the key, as before.
 func connect() error {
 	local, localDir = nil, ""
-	if settings.Current.URLSet {
+	if KitClient != nil || settings.Current.URLSet {
 		return nil
 	}
 	o := layer.KeyOptions

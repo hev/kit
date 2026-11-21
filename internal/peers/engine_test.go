@@ -70,7 +70,7 @@ func TestInboxRegistrationOnUnregisteredShell(t *testing.T) {
 	old := e.Command
 	e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 		if name == "tmux" && args[0] == "list-panes" {
-			return "desk\t%7\t700\tbash\t/work\t\t\n", nil
+			return "desk\x1f%7\x1f700\x1fbash\x1f/work\x1f\x1f\n", nil
 		}
 		return old(ctx, name, in, args...)
 	}
@@ -181,7 +181,7 @@ func TestInboxOnlyStableDelivery(t *testing.T) {
 	e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 		result, err := old(ctx, name, in, args...)
 		if name == "tmux" && args[0] == "list-panes" {
-			result = strings.ReplaceAll(result, "\ton\n", "\t\n")
+			result = strings.ReplaceAll(result, "\x1fon\n", "\x1f\n")
 		}
 		return result, err
 	}
