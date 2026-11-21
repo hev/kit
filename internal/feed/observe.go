@@ -320,6 +320,8 @@ func (o Observer) ObserveLifecycle(event string, payload []byte) {
 			kind = ThreadOrchestrator
 		} else if strings.HasPrefix(n.Thread, "cron:") {
 			kind = ThreadCron
+		} else if strings.HasPrefix(n.Thread, "service:") {
+			kind = ThreadService
 		}
 		h := n.Host
 		if h == "" {
