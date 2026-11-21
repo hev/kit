@@ -19,3 +19,7 @@ sign-in. An explicitly provisioned key can be supplied through
 `HEV_API_KEY` with `--origin`. The host must have a non-empty
 `[admission].repos` allowlist. Use `--sync-peers` on a periodic poll to publish
 registered local inbox peers and their consume and acknowledge receipts.
+
+Relay operations use the execution account's selected workspace. For an
+isolated workspace, pass the API origin and provision its dedicated key
+instead of relying on the default Club Kit sign-in.

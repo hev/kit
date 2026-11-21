@@ -29,7 +29,12 @@ func dispatchRelayCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			key := os.Getenv("HEV_API_KEY")
 			base := origin
-			if cfg := kitSignedIn(); cfg != nil {
+			selected, err := currentWorkspace()
+			if err != nil {
+				return err
+			}
+			ctx := dispatch.WorkspaceContext(cmd.Context(), selected)
+			if cfg := kitSignedIn(); cfg != nil && !selected.IsolatedStorage() {
 				if base == "" {
 					base = cfg.API
 					if key == "" {
@@ -41,15 +46,15 @@ func dispatchRelayCommand() *cobra.Command {
 			}
 			u, err := url.Parse(base)
 			if err != nil || !kitapi.ValidBaseURL(base) || u.Scheme != "https" ||
-				(u.Path != "" && u.Path != "/") || !dispatch.ValidLabel(host) || !strings.HasPrefix(key, "hk_") {
+				(u.Path != "" && u.Path != "/") || !dispatch.ValidLabel(host) || !selected.AllowsHost(host) || !strings.HasPrefix(key, "hk_") {
 				return errors.New("relay requires an HTTPS origin, a host label and a kit key")
 			}
 			u.Path = hostrelay.Path
-			if err := pollRelay(cmd.Context(), u.String(), host, key); err != nil {
+			if err := pollRelay(ctx, u.String(), host, key); err != nil {
 				return err
 			}
 			if syncPeers {
-				return relayPeerPresence(cmd.Context(), base, host, key)
+				return relayPeerPresence(ctx, base, host, key)
 			}
 			return nil
 		},

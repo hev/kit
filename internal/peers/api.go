@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/peers/compat"
+	"github.com/hev/kit/internal/workspace"
 )
 
 type apiRequest struct {
@@ -45,10 +47,30 @@ func (e *Engine) apiExecute(ctx context.Context, q apiRequest) (int, any) {
 	if q.Action != "list" && host != e.Host {
 		return 404, nil
 	}
+	selected, err := dispatch.APIWorkspace(ctx)
+	if err != nil || !selected.AllowsHost(e.Host) {
+		return 403, nil
+	}
+	cfg, err := workspace.Read(workspace.ConfigPath())
+	if err != nil {
+		return 503, nil
+	}
+	scope := compat.Scope{Workspace: selected, Workspaces: cfg.Workspaces}
 	peers, err := e.list(ctx, false)
 	if err != nil {
 		return 503, nil
 	}
+	filtered := peers[:0]
+	for _, peer := range peers {
+		row := &compat.Row{Session: peer.Session, Cwd: peer.Cwd}
+		if peer.Run {
+			row.Dispatch = peer.Session
+		}
+		if scope.AllowsLocal(row) {
+			filtered = append(filtered, peer)
+		}
+	}
+	peers = filtered
 	if q.Action == "list" {
 		result := []Message{}
 		seen := map[string]bool{}

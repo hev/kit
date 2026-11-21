@@ -19,20 +19,21 @@ import (
 
 // OrchestratorSpec is the opt-in declaration. The body is the standing brief.
 type OrchestratorSpec struct {
-	Fallbacks    FallbackChain `yaml:"fallbacks,omitempty" json:"fallbacks"`
-	Kind         string        `yaml:"kind" json:"kind"`
-	Name         string        `yaml:"name" json:"name"`
-	Goal         string        `yaml:"goal" json:"goal"`
-	Host         string        `yaml:"host,omitempty" json:"host,omitempty"`
-	Mode         string        `yaml:"mode,omitempty" json:"mode"`
-	Every        string        `yaml:"every,omitempty" json:"every,omitempty"`
-	Until        string        `yaml:"until,omitempty" json:"until,omitempty"`
-	RoundTimeout string        `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
-	MaxLifetime  string        `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
-	Harness      string        `yaml:"harness,omitempty" json:"harness"`
-	Model        string        `yaml:"model,omitempty" json:"model,omitempty"`
-	Effort       string        `yaml:"effort,omitempty" json:"effort,omitempty"`
-	Reply        string        `yaml:"reply,omitempty" json:"reply,omitempty"`
+	WorkspaceName string        `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	Fallbacks     FallbackChain `yaml:"fallbacks,omitempty" json:"fallbacks"`
+	Kind          string        `yaml:"kind" json:"kind"`
+	Name          string        `yaml:"name" json:"name"`
+	Goal          string        `yaml:"goal" json:"goal"`
+	Host          string        `yaml:"host,omitempty" json:"host,omitempty"`
+	Mode          string        `yaml:"mode,omitempty" json:"mode"`
+	Every         string        `yaml:"every,omitempty" json:"every,omitempty"`
+	Until         string        `yaml:"until,omitempty" json:"until,omitempty"`
+	RoundTimeout  string        `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
+	MaxLifetime   string        `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
+	Harness       string        `yaml:"harness,omitempty" json:"harness"`
+	Model         string        `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort        string        `yaml:"effort,omitempty" json:"effort,omitempty"`
+	Reply         string        `yaml:"reply,omitempty" json:"reply,omitempty"`
 	// NotifyRoute pull keeps owner notices queued for notices pull.
 	NotifyRoute string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
 	Manages     struct {

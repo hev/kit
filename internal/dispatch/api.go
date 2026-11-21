@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/redact"
+	"github.com/hev/kit/internal/workspace"
 )
 
 // CheckAPIOrder applies the host's repository policy before an API submission
@@ -165,4 +167,14 @@ func cancelQueuedAPI(entry queueEntry) error {
 	}
 	committed = true
 	return nil
+}
+
+// APIWorkspace resolves the execution account's operator-selected workspace.
+// API callers cannot send a workspace name in a hosted order or relay job.
+func APIWorkspace(ctx context.Context) (workspace.Selection, error) {
+	if selected, _ := ctx.Value(workspaceContextKey{}).(string); selected != "" {
+		return workspace.Named(selected)
+	}
+	cwd, _ := os.Getwd()
+	return workspace.Resolve("", cwd)
 }

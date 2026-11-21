@@ -119,6 +119,9 @@ func controlQueued(q Request) (Response, bool, error) {
 		if e.Request.Name != q.Name {
 			continue
 		}
+		if err := checkRunWorkspace(q.WorkspaceName, e.Request.Meta); err != nil {
+			return Response{}, true, err
+		}
 		r := Response{Message: fmt.Sprintf("queued %s (position %d): waiting for a free host slot and earlier FIFO orders", q.Name, i+1), Files: map[string]string{"order.md": e.Request.Order}}
 		if q.Action == "stop" {
 			if q.APILocalOnly {

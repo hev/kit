@@ -49,8 +49,11 @@ func newDispatchCommand() *cobra.Command {
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
 	load := func() (dispatch.Config, error) {
 		configPath = dispatch.ConfigPath(configPath)
-		c, e := dispatch.Load(configPath)
+		c, e := loadWorkspaceDispatch(configPath)
 		if e == nil && host != "" {
+			if err := c.SelectedWorkspace.RequireHost(host); err != nil {
+				return c, err
+			}
 			if _, ok := c.Hosts[host]; !ok {
 				return c, fmt.Errorf("unknown host %s", host)
 			}
@@ -109,6 +112,9 @@ func newDispatchCommand() *cobra.Command {
 				return e
 			}
 		}
+		if err := c.SelectedWorkspace.RequireHost(o.Host); err != nil {
+			return err
+		}
 		h, ok := c.Hosts[o.Host]
 		if !ok {
 			return fmt.Errorf("unknown or missing host %s", o.Host)
@@ -122,7 +128,7 @@ func newDispatchCommand() *cobra.Command {
 		return dispatch.FollowRedirect(args[0], args[1])
 	}})
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
-	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return dispatch.Load(dispatch.ConfigPath(configPath)) }, &host))
+	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return loadWorkspaceDispatch(dispatch.ConfigPath(configPath)) }, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate", "adopt"} {
 		action := action
 		c := &cobra.Command{Use: action, Args: cobra.NoArgs}
@@ -160,6 +166,22 @@ func newDispatchCommand() *cobra.Command {
 			if e != nil {
 				return e
 			}
+			if len(args) > 0 {
+				namedHost, name, err := dispatch.SplitRunAddress(args[0])
+				if err == nil && namedHost != "" {
+					if err = cfg.SelectedWorkspace.RequireHost(namedHost); err != nil {
+						return err
+					}
+					if host != "" && host != namedHost {
+						return fmt.Errorf("run address and --host disagree")
+					}
+					if action != "validate" {
+						host = namedHost
+						args[0] = name
+					}
+				}
+			}
+			cmd.SetContext(dispatch.WorkspaceContext(cmd.Context(), cfg.SelectedWorkspace))
 			if action == "validate" {
 				ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
 				defer cancel()
@@ -243,7 +265,7 @@ func newDispatchCommand() *cobra.Command {
 				}
 			}
 			if len(matches) != 1 {
-				return fmt.Errorf("order not found or ambiguous; select --host; inventory: %v", inv)
+				return fmt.Errorf("order not found or ambiguous; select --host; inventory hosts: %v", dispatch.SortedHosts(inv))
 			}
 			h := cfg.Hosts[matches[0]]
 			if action == "attach" {
@@ -307,6 +329,9 @@ func newDispatchCommand() *cobra.Command {
 				}
 				if o.Name != name {
 					return fmt.Errorf("amend cannot change name")
+				}
+				if err := cfg.SelectedWorkspace.RequireHost(o.Host); err != nil {
+					return err
 				}
 				_, ok := cfg.Hosts[o.Host]
 				if !ok {
@@ -450,13 +475,22 @@ func newDispatchCommand() *cobra.Command {
 			// their own runs); the generic peers RPC is for unrestricted callers.
 			r, e = dispatch.HandleGrant(q, grant.Name, grant.Allow)
 		} else if q.Action == "orders-api" {
-			payload, err := json.Marshal(ordersapi.HandleRPC(cmd.Context(), q.Note))
+			selected, err := currentWorkspace()
+			if err != nil {
+				return err
+			}
+			ctx := dispatch.WorkspaceContext(cmd.Context(), selected)
+			payload, err := json.Marshal(ordersapi.HandleRPC(ctx, q.Note))
 			if err != nil {
 				return err
 			}
 			return emit(dispatch.Response{Log: string(payload), Version: version.Version})
 		} else if q.Action == "peers-api" {
-			return emit(peers.HandleAPIRPC(cmd.Context(), q.Note))
+			selected, err := currentWorkspace()
+			if err != nil {
+				return err
+			}
+			return emit(peers.HandleAPIRPC(dispatch.WorkspaceContext(cmd.Context(), selected), q.Note))
 		} else if q.Action == "peers" {
 			r = peers.HandleRPC(cmd.Context(), q.Note)
 			r.Version = version.Version
@@ -484,6 +518,10 @@ func dispatchMessage(cmd *cobra.Command, args []string) (string, error) {
 }
 
 func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dispatch.Order, text, configPath, traceRef, supersedes string) error {
+	if err := c.SelectedWorkspace.RequireHost(o.Host); err != nil {
+		return err
+	}
+	cmd.SetContext(dispatch.WorkspaceContext(cmd.Context(), c.SelectedWorkspace))
 	text = effectiveOrderHost(text, o.Host)
 	var e error
 	var old supersededRun
@@ -799,4 +837,16 @@ func hostUpdateColumn(r dispatch.Response) string {
 		return "-"
 	}
 	return strings.Join(parts, "; ")
+}
+
+func loadWorkspaceDispatch(path string) (dispatch.Config, error) {
+	w, err := currentWorkspace()
+	if err != nil {
+		return dispatch.Config{}, err
+	}
+	c, err := dispatch.Load(path)
+	if err == nil {
+		c.ScopeWorkspace(w)
+	}
+	return c, err
 }

@@ -79,15 +79,19 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 	if req.Action != "list" && !dispatch.ValidAddress(req.ID) {
 		return Reply{}, ErrInvalid
 	}
-	q := dispatch.Request{APILocalOnly: true, Action: req.Action, Name: req.ID, Order: req.Order, Note: req.Note,
+	selected, err := dispatch.APIWorkspace(ctx)
+	if err != nil || !selected.AllowsHost(req.Host) {
+		return Reply{}, ErrForbidden
+	}
+	q := dispatch.Request{WorkspaceName: selected.Name, APILocalOnly: true, Action: req.Action, Name: req.ID, Order: req.Order, Note: req.Note,
 		Resolve: req.Resolve, Level: req.Level, HaltTimeout: req.HaltTimeout, Offset: req.Offset,
 		Caller: &dispatch.Caller{Sender: req.Actor}}
 	switch req.Action {
 	case "list":
-		rows, err := list()
+		rows, err := list(q.WorkspaceName)
 		return Reply{Rows: rows}, err
 	case "show":
-		return get(q.Name)
+		return get(q.Name, q.WorkspaceName)
 	case "logs":
 		return logs(q, req)
 	case "start", "amend":
@@ -102,7 +106,7 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 			return Reply{}, ErrForbidden
 		}
 		o.Host = req.Host
-		q.Meta = dispatch.Meta{Order: o, Sender: req.Actor, RequestedBy: req.Actor}
+		q.Meta = dispatch.Meta{Order: o, WorkspaceName: selected.Name, Sender: req.Actor, RequestedBy: req.Actor}
 		if req.Trace != "" {
 			trace, parent, err := dispatch.ParseTraceRef(req.Trace)
 			if err != nil {
@@ -129,7 +133,7 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 		return Reply{}, ErrInvalid
 	}
 	if q.Action != "start" {
-		current, err := get(q.Name)
+		current, err := get(q.Name, q.WorkspaceName)
 		if err != nil {
 			return Reply{}, err
 		}
@@ -164,7 +168,7 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 	if req.Action == "clean" || req.Action == "stop" && strings.HasPrefix(out.Message, "cancelled queued ") {
 		return Reply{}, nil
 	}
-	reply, err := get(q.Name)
+	reply, err := get(q.Name, q.WorkspaceName)
 	if err == nil && req.Action == "stop" {
 		if reply.Active {
 			reply.Order["state"] = "halting"
@@ -175,8 +179,8 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 	return reply, err
 }
 
-func list() ([]map[string]any, error) {
-	out, err := dispatch.Handle(dispatch.Request{APILocalOnly: true, Action: "list"})
+func list(workspaceName string) ([]map[string]any, error) {
+	out, err := dispatch.Handle(dispatch.Request{APILocalOnly: true, WorkspaceName: workspaceName, Action: "list"})
 	if err != nil {
 		return nil, ErrUnavailable
 	}
@@ -189,8 +193,8 @@ func list() ([]map[string]any, error) {
 	return rows, nil
 }
 
-func get(id string) (Reply, error) {
-	rows, err := list()
+func get(id, workspaceName string) (Reply, error) {
+	rows, err := list(workspaceName)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -198,7 +202,7 @@ func get(id string) (Reply, error) {
 		if row["id"] != id {
 			continue
 		}
-		out, err := dispatch.Handle(dispatch.Request{APILocalOnly: true, Action: "show", Name: id})
+		out, err := dispatch.Handle(dispatch.Request{APILocalOnly: true, WorkspaceName: workspaceName, Action: "show", Name: id})
 		if err != nil {
 			return Reply{}, ErrNotFound
 		}
@@ -305,11 +309,11 @@ func logs(q dispatch.Request, req Request) (Reply, error) {
 	if req.Limit < 1 || req.Limit > maxLog || req.Offset < 0 || req.Round < 0 {
 		return Reply{}, ErrInvalid
 	}
-	current, err := get(req.ID)
+	current, err := get(req.ID, q.WorkspaceName)
 	if err != nil {
 		return Reply{}, err
 	}
-	out, err := dispatch.Handle(dispatch.Request{APILocalOnly: true, Action: q.Action, Name: q.Name, Offset: req.Offset, APILogLimit: req.Limit, Round: req.Round})
+	out, err := dispatch.Handle(dispatch.Request{APILocalOnly: true, WorkspaceName: q.WorkspaceName, Action: q.Action, Name: q.Name, Offset: req.Offset, APILogLimit: req.Limit, Round: req.Round})
 	if err != nil {
 		return Reply{}, ErrNotFound
 	}
