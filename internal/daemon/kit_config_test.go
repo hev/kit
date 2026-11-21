@@ -83,7 +83,7 @@ func TestDaemonFailsOpenWhenKitAPIDown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.LastError != "" || s.LastRun.IsZero() || !strings.Contains(s.Notice, "kit API") {
+	if s.LastError != "" || s.LastRun.IsZero() || !strings.Contains(s.Notice, "Club Kit API") {
 		t.Fatalf("status %+v", s)
 	}
 	if strings.Contains(s.Notice, "not wired yet") {
