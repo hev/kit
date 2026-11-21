@@ -33,7 +33,8 @@ with its kit key:
   answers again. A `402 billing_read_only` (the team is read-only for billing)
   keeps everything queued and says so; uploads resume once the team pays.
   Batches the API refuses for good are kept in `failed/` with the reason. Each team’s
-  outbox is bounded (20,000 batches or 1 GiB with `failed/`): at the bound the
+  outbox is bounded (20,000 batches or 1 GiB with `failed/`, with up to
+  500 rows per ingest batch): at the bound the
   oldest refused batches go first, then new batches are not queued (logged and
   counted in `hev d status`; the rows stay in the local archive). Batches
   queued by an earlier kit directly in `~/.hev/kit/outbox` are never sent,
@@ -49,7 +50,8 @@ with its kit key:
   machine's own board.
 - **History.** `hev login --import` copies this machine's file archive and
   file board to the API with progress. It is idempotent and resumable: run it
-  again to finish an interrupted import. Imported posts name their original
+  again to finish an interrupted import. Import scrubs archived text before
+  uploading it, including history captured before sign-in. Imported posts name their original
   poster and time in their first line.
 
 The default config path is `~/.hev/config.toml`. Existing sign-ins and team

@@ -18,8 +18,10 @@ import (
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/pkg/kitapi"
+	rowredact "github.com/hev/kit/pkg/redact"
 )
 
 // kitImportState is how far `hev login --import` got, per kit key, so a
@@ -121,6 +123,23 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("signed in, but the capture target is not the Club Kit API")
 	}
 	c := kitClient(cfg.Kit)
+	if cfg.Kit.TeamID == "" {
+		return kitcapture.ErrNoTeam
+	}
+	who, err := c.Whoami(ctx)
+	if err != nil {
+		return err
+	}
+	if who.Team.ID != cfg.Kit.TeamID {
+		return kitcapture.ErrTeamMismatch
+	}
+	scrubber, err := redact.LoadFile(cfg.ConfigPath)
+	if err != nil {
+		return fmt.Errorf("load import redaction: %s", redact.HideKitKeys(err.Error(), cfg.Kit.Key))
+	}
+	if scrubber == nil {
+		return errors.New("enable capture.redact before importing to Club Kit")
+	}
 
 	if pending, err := target.Kit.Outbox.Pending(); err != nil {
 		return err
@@ -129,7 +148,7 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 			return fmt.Errorf("pending traces are still queued: %w", err)
 		}
 	}
-	queued, queueErr := kitQueueSessions(target.Kit, state, out)
+	queued, queueErr := kitQueueSessions(ctx, target.Kit, state, out, scrubber)
 	if queueErr != nil && !errors.Is(queueErr, kitcapture.ErrFull) {
 		return queueErr
 	}
@@ -158,7 +177,7 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("import reached the outbox limit; run hev login --import again to continue: %w", queueErr)
 	}
 
-	threads, posts, err := kitImportBoard(ctx, c, state, out)
+	threads, posts, err := kitImportBoard(ctx, c, state, out, scrubber)
 	if err != nil {
 		return err
 	}
@@ -168,7 +187,7 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 
 // kitQueueSessions queues every session in the local archive not yet
 // queued under this key, saving progress as it goes.
-func kitQueueSessions(a *kitcapture.Archive, state *kitImportState, out io.Writer) (int, error) {
+func kitQueueSessions(ctx context.Context, a *kitcapture.Archive, state *kitImportState, out io.Writer, scrubber *redact.Scrubber) (int, error) {
 	rows, err := a.Store.ListSessionRows(-1, nil)
 	if err != nil {
 		return 0, err
@@ -189,6 +208,9 @@ func kitQueueSessions(a *kitcapture.Archive, state *kitImportState, out io.Write
 		if state.Sessions[id] {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
 		blocks, err := a.Store.ListBlockRows(id)
 		if err != nil {
 			return n, err
@@ -200,9 +222,14 @@ func kitQueueSessions(a *kitcapture.Archive, state *kitImportState, out io.Write
 		own := chunks[:0]
 		for _, ch := range chunks {
 			if ch.SessionID == id {
+				rowredact.Chunk(scrubber, &ch)
 				own = append(own, ch)
 			}
 		}
+		for i := range blocks {
+			rowredact.Block(scrubber, &blocks[i])
+		}
+		rowredact.Session(scrubber, &r)
 		// Sessions last, so a session row never arrives before its blocks.
 		if err := kitcapture.EnqueueRows(a.Outbox, kitcapture.KindChunks, own); err != nil {
 			return n, err
@@ -227,7 +254,7 @@ func kitQueueSessions(a *kitcapture.Archive, state *kitImportState, out io.Write
 
 // kitImportBoard recreates this machine's file board through the Club Kit API.
 // A board kept in Layer is not this machine's to copy and is skipped.
-func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState, out io.Writer) (int, int, error) {
+func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState, out io.Writer, scrubber *redact.Scrubber) (int, int, error) {
 	dir := settings.Dir()
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return 0, 0, nil
@@ -255,6 +282,7 @@ func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState
 	once.Retries = 0
 	threads, posts := 0, 0
 	for _, t := range all {
+		t.Title, _ = scrubber.Text(t.Title)
 		key := fmt.Sprint(t.ID)
 		done := state.Threads[key]
 		ps, err := st.Posts(ctx, t.ID)
@@ -266,7 +294,7 @@ func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState
 		}
 		for i := done.Posts; i < len(ps); i++ {
 			p := ps[i]
-			body := kitImportBody(t, p)
+			body, _ := scrubber.Text(kitImportBody(t, p))
 			sent := false
 			for attempt := 0; !sent; attempt++ {
 				if done.Sending == i+1 {

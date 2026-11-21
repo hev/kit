@@ -5,12 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/attention"
-	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/feed"
-	"github.com/hev/kit/internal/harness"
-
-	"github.com/hev/kit/internal/kitcapture"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,8 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/cron"
+	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/feed"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
@@ -188,7 +187,16 @@ func Run(ctx context.Context) error {
 	if target.Kit != nil {
 		drainer = &kitcapture.Drainer{Outbox: target.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
 		target.Kit.Outbox.Logger = logger
-		go drainer.Run(ctx)
+		drainCtx, stopDrain := context.WithCancel(ctx)
+		drainDone := make(chan struct{})
+		go func() {
+			defer close(drainDone)
+			drainer.Run(drainCtx)
+		}()
+		defer func() {
+			stopDrain()
+			<-drainDone
+		}()
 	}
 	outcomeCursor := ""
 	archive := target.Archive()

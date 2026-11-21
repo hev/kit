@@ -311,20 +311,20 @@ func TestKitLoginImportsHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UnixMilli()
-	if _, err := files.WriteSessions([]trace.SessionRow{{ID: "old-1", SessionID: "old-1", Harness: "codex", Host: "box", Start: now, End: now, Summary: "older work"}}); err != nil {
+	if _, err := files.WriteSessions([]trace.SessionRow{{ID: "old-1", SessionID: "old-1", Harness: "codex", Host: "box", Start: now, End: now, Summary: "older work " + fakeKitKey}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := files.WriteBlocks([]trace.BlockRow{{ID: "old-1:1", SessionID: "old-1", Seq: 1, Role: "user", BlockType: "text", Text: "the quokka migration"}}); err != nil {
+	if _, err := files.WriteBlocks([]trace.BlockRow{{ID: "old-1:1", SessionID: "old-1", Seq: 1, Role: "user", BlockType: "text", Text: "the quokka migration " + fakeKitKey}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := files.Write([]layer.Row{{ID: "old-1:c", SessionID: "old-1", Text: "the quokka migration", Harness: "codex"}}); err != nil {
+	if _, err := files.Write([]layer.Row{{ID: "old-1:c", SessionID: "old-1", Text: "the quokka migration " + fakeKitKey, Harness: "codex"}}); err != nil {
 		t.Fatal(err)
 	}
 	local, err := boardstore.NewFiles(filepath.Join(home, ".hev", "board"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	lt, err := local.CreateThread(ctx, boardstore.NewThread{Board: "learnings", Title: "local finding", Body: "found locally", Poster: boardstore.Poster{Author: "bob", Role: "agent", Host: "box"}})
+	lt, err := local.CreateThread(ctx, boardstore.NewThread{Board: "learnings", Title: "local finding", Body: "found locally " + fakeKitKey, Poster: boardstore.Poster{Author: "bob", Role: "agent", Host: "box"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestKitLoginImportsHistory(t *testing.T) {
 		t.Fatalf("progress: %s", out.String())
 	}
 	rows, _ := api.Traces.ListSessionRows(-1, nil)
-	if len(rows) != 1 || rows[0].SessionID != "old-1" {
+	if len(rows) != 1 || rows[0].SessionID != "old-1" || strings.Contains(rows[0].Summary, fakeKitKey) || !strings.Contains(rows[0].Summary, "older work") {
 		t.Fatalf("API sessions = %+v", rows)
 	}
 	if hits, _, _ := api.Traces.PhraseHits("quokka migration", 10, nil); len(hits) != 1 {
@@ -359,7 +359,7 @@ func TestKitLoginImportsHistory(t *testing.T) {
 		t.Fatalf("API threads = %+v", threads)
 	}
 	posts, _ := api.Board.Posts(ctx, threads[0].ID)
-	if len(posts) != 2 || !strings.Contains(posts[0].Body, "posted by bob") || !strings.Contains(posts[1].Body, "and a reply") {
+	if len(posts) != 2 || strings.Contains(posts[0].Body, fakeKitKey) || !strings.Contains(posts[0].Body, "posted by bob") || !strings.Contains(posts[1].Body, "and a reply") {
 		t.Fatalf("API posts = %+v", posts)
 	}
 

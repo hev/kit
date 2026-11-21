@@ -4,17 +4,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hev/kit/internal/kitcapture"
-
 	"github.com/hev/kit/internal/archive"
 	"github.com/hev/kit/internal/blob"
-	"github.com/hev/kit/internal/trace"
-
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/storagemode"
+	"github.com/hev/kit/internal/trace"
 )
 
 // RetiredStore is the store kind the retired local Docker lane (Layer CE on
