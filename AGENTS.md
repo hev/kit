@@ -1,5 +1,10 @@
 # AGENTS.md
 
+hev kit is a meta-harness for Claude Code, Codex, Antigravity, Pi, and OpenCode
+on macOS, Linux, and Windows. A workspace binds subscriptions and authentication
+to a home folder and a private network with a cluster. The cluster is the set
+of machines running hevd and using SWIM for membership.
+
 Rules for every agent run in this repository. Each one is here because a
 past run broke it. Keep this file short: link to docs instead of copying them.
 

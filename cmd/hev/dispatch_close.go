@@ -15,14 +15,14 @@ import (
 
 // newDispatchClose is hev dispatch close: a terminal disposition for an ended
 // run whose work was finished another way or superseded. It never launches a
-// worker and keeps the run's log, reports and worktree.
+// worker and keeps the run's log and reports.
 func newDispatchClose(load func() (dispatch.Config, error), host *string, asJSON *bool) *cobra.Command {
 	var reason, supersededBy string
 	c := &cobra.Command{
 		Use:   "close [HOST/]NAME [REASON...]",
 		Short: "Close an ended run whose work finished elsewhere or was superseded",
 		Long: "Close records a terminal closed state on a run that is not running (blocked, needs-review, halted, failed, timeout, done or died).\n" +
-			"An open decision is settled without a rework. Logs, reports, the worktree and the worker's own reason are kept.\n" +
+			"An open decision is settled without a rework. Logs, reports and the worker's own reason are kept. Pro compacts eligible worktrees.\n" +
 			"A later rework, retry or amend starts a fresh attempt and reopens the run.",
 		Args: cobra.MinimumNArgs(1),
 	}

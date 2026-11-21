@@ -20,6 +20,7 @@ import (
 	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/kitcapture"
+	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
@@ -171,6 +172,7 @@ func Run(ctx context.Context) error {
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	go refreshWorkspaceLicense(ctx, client)
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
 	cronRunner := cron.Runner{
 		Home: home, Membership: membership, Logger: logger,
@@ -458,4 +460,33 @@ func startSecretSidecars(ctx context.Context, logger *slog.Logger) (*secrets.Cac
 		return cache, membership, closeCluster
 	}
 	return cache, membership, func() { closeCluster(); closeSecrets() }
+}
+
+// Refresh the gateway's local projection independently of indexing and dispatch.
+func refreshWorkspaceLicense(ctx context.Context, client *layer.Client) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for ctx.Err() == nil {
+		if client == nil {
+			_ = dispatch.CacheWorkspaceLicense(false, time.Now())
+			return
+		}
+		if lic, err := client.License(); err == nil {
+			now := time.Now()
+			until := now.Add(3 * time.Minute)
+			remaining := lic.Gateway.SecondsToDeadline
+			if lic.Gateway.State == "grace" {
+				remaining = lic.Gateway.GraceSecondsRemaining
+			}
+			if remaining > 0 && remaining < 180 {
+				until = now.Add(time.Duration(remaining) * time.Second)
+			}
+			_ = dispatch.CacheWorkspaceLicense(lic.Valid && !lic.Community(), until)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }
