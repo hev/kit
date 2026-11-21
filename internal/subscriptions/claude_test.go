@@ -364,7 +364,7 @@ func TestCachedReadingPastResetRollsOver(t *testing.T) {
 func TestUnknownName(t *testing.T) {
 	_, err := ReadOne(context.Background(), testEnv(t), "gemini")
 	var u UnknownNameError
-	if !errors.As(err, &u) || !strings.Contains(err.Error(), "claude, codex") {
+	if !errors.As(err, &u) || !strings.Contains(err.Error(), "agy, claude, codex") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -380,7 +380,7 @@ func TestConfiguredPlansNamed(t *testing.T) {
 	env.Plans = plans
 	l := ReadAll(context.Background(), env)
 	for _, s := range l.Subscriptions {
-		want := map[string]string{"claude": "", "codex": "Fixture codex plan"}[s.Name]
+		want := map[string]string{"agy": "", "claude": "", "codex": "Fixture codex plan"}[s.Name]
 		if strings.Join(s.ConfiguredPlans, ",") != want {
 			t.Fatalf("%s configured = %v", s.Name, s.ConfiguredPlans)
 		}

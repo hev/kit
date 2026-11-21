@@ -1,12 +1,14 @@
-// Package subscriptions reads which flat-rate agent plans (a Claude
-// subscription, a ChatGPT plan for Codex) this machine is signed in to, and
-// how much of each usage window is used. It is the plan side of kit; the
-// spend side stays in internal/cost and subscriptions.toml.
+// Package subscriptions reads which flat-rate agent plans (a Google AI plan
+// for Antigravity, a Claude subscription, a ChatGPT plan for Codex) this
+// machine is signed in to, and how much of each usage window is used. It is
+// the plan side of kit; the spend side stays in internal/cost and
+// subscriptions.toml.
 //
 // Readings come from local files where the harness already records them
-// (Codex rollouts) or from one rate-limited provider request whose last good
-// answer is cached (Claude). Credentials are read at use and never stored,
-// logged or returned.
+// (Codex rollouts, Antigravity transcripts) or from one rate-limited provider
+// check whose last good answer is cached (Claude OAuth usage, Antigravity
+// model-tier probe). Credentials are read at use and never stored, logged or
+// returned.
 package subscriptions
 
 import (
@@ -59,6 +61,25 @@ type Meter struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
+// WindowActivity counts measured local sessions, model turns and tokens on
+// this host inside a rolling window.
+type WindowActivity struct {
+	WindowMinutes   int   `json:"window_minutes"`
+	Sessions        int   `json:"sessions"`
+	Turns           int   `json:"turns"`
+	InputTokens     int64 `json:"input_tokens"`
+	OutputTokens    int64 `json:"output_tokens"`
+	CacheReadTokens int64 `json:"cache_read_tokens"`
+	TotalTokens     int64 `json:"total_tokens"`
+}
+
+// Activity carries measured local harness activity on this host when a
+// provider does not expose quota percentages outside its interactive TUI.
+type Activity struct {
+	Session *WindowActivity `json:"session,omitempty"`
+	Weekly  *WindowActivity `json:"weekly,omitempty"`
+}
+
 // Status is everything known about one subscription on this machine.
 type Status struct {
 	Name           string     `json:"name"`
@@ -70,6 +91,7 @@ type Status struct {
 	Meters         []Meter    `json:"meters"`
 	Weekly         *Meter     `json:"weekly"`
 	WeeklyReason   string     `json:"weekly_reason,omitempty"`
+	Activity       *Activity  `json:"activity,omitempty"`
 	Source         string     `json:"source"`
 	ObservedAt     *time.Time `json:"observed_at"`
 	AgeSeconds     *int64     `json:"age_seconds"`
@@ -95,6 +117,15 @@ type Detail struct {
 	Subscription Status    `json:"subscription"`
 }
 
+// AgyProbeResult is the sanitized outcome of an Antigravity CLI probe. It
+// holds state flags and validated model IDs only, never raw output or tokens.
+type AgyProbeResult struct {
+	Installed bool
+	SignedOut bool
+	Expired   bool
+	Models    []string
+}
+
 // Env is where a read looks. Tests replace every field; nothing in it
 // defaults to the network or a real keychain inside a test.
 type Env struct {
@@ -105,7 +136,18 @@ type Env struct {
 	// Keychain returns the Claude Code credential JSON from the OS keychain,
 	// or an error when there is none. Nil means no keychain.
 	Keychain func(ctx context.Context) ([]byte, error)
-	HTTP     *http.Client
+	// AgyKeychain checks whether an Antigravity OAuth entry exists in the OS
+	// keyring without returning secret bytes. Nil means no OS keyring check.
+	AgyKeychain func(ctx context.Context) (bool, error)
+	// AgyProbe runs a bounded `agy models` check when needed to determine the
+	// account's available models or silent-auth status. Nil disables probing.
+	AgyProbe        func(ctx context.Context) (AgyProbeResult, error)
+	AgyProbeTimeout time.Duration
+	// DispatchConfig overrides the host dispatch.toml path checked for
+	// [harnesses.agy] settings. Empty uses $HEV_DISPATCH_CONFIG or
+	// ~/.config/hev/dispatch.toml under Home.
+	DispatchConfig string
+	HTTP           *http.Client
 	// ClaudeUsageURL overrides the Claude OAuth usage endpoint.
 	ClaudeUsageURL string
 	// MinInterval is the minimum age before a cached provider reading is
@@ -121,13 +163,20 @@ func DefaultEnv() (Env, error) {
 	if err != nil {
 		return Env{}, err
 	}
+	var agyProbe func(context.Context) (AgyProbeResult, error) = newDefaultAgyProbe(home)
+	if customDir := strings.TrimSpace(os.Getenv("HEV_AGY_DATA_DIR")); customDir != "" && filepath.Clean(customDir) != filepath.Join(home, ".gemini", "antigravity-cli") {
+		// `agy models` always reads $HOME/.gemini/antigravity-cli, not HEV_AGY_DATA_DIR.
+		agyProbe = nil
+	}
 	return Env{
-		Home:     home,
-		StateDir: filepath.Join(home, ".hev"),
-		Now:      time.Now,
-		Getenv:   os.Getenv,
-		Keychain: systemKeychain,
-		HTTP:     &http.Client{Timeout: 10 * time.Second},
+		Home:        home,
+		StateDir:    filepath.Join(home, ".hev"),
+		Now:         time.Now,
+		Getenv:      os.Getenv,
+		Keychain:    systemKeychain,
+		AgyKeychain: systemAgyKeychain,
+		AgyProbe:    agyProbe,
+		HTTP:        &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
 
@@ -152,6 +201,13 @@ func (e Env) minInterval() time.Duration {
 	return e.MinInterval
 }
 
+func (e Env) agyProbeTimeout() time.Duration {
+	if e.AgyProbeTimeout <= 0 {
+		return DefaultAgyProbeTimeout
+	}
+	return e.AgyProbeTimeout
+}
+
 // Provider checks one subscription.
 type Provider struct {
 	Name    string
@@ -163,6 +219,7 @@ type Provider struct {
 // subscription is one Provider here and its Read function.
 func Providers() []Provider {
 	p := []Provider{
+		{Name: "agy", Harness: "agy", Read: readAgy},
 		{Name: "claude", Harness: "claude", Read: readClaude},
 		{Name: "codex", Harness: "codex", Read: readCodex},
 	}
@@ -281,7 +338,7 @@ func read(ctx context.Context, env Env, p Provider) Status {
 	}
 	s.ConfiguredPlans = []string{}
 	for _, c := range env.Plans {
-		if c.Harness == p.Harness {
+		if strings.EqualFold(c.Harness, p.Harness) && c.Name != "" {
 			s.ConfiguredPlans = append(s.ConfiguredPlans, c.Name)
 		}
 	}

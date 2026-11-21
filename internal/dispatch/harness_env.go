@@ -30,10 +30,12 @@ import (
 //
 // ModelProvider (agy only) names the provider agy is told to use with
 // --settings '{"modelProvider":"NAME"}'. Without it, agy still gets
-// "gemini" whenever GEMINI_API_KEY is set in its environment.
+// "gemini" whenever GEMINI_API_KEY is set in its environment. Plan optionally
+// annotates the subscription tier (for example "ultra") for hev subscriptions.
 type HarnessConfig struct {
 	EnvRefs       map[string]string `toml:"env_refs"`
 	ModelProvider string            `toml:"model_provider"`
+	Plan          string            `toml:"plan"`
 }
 
 // harnessSecretTTL is how long the secrets cache may keep an env_refs value.
@@ -69,6 +71,9 @@ func checkHarnesses(hs map[string]HarnessConfig) error {
 			if !providerPattern.MatchString(h.ModelProvider) {
 				return fmt.Errorf("harnesses.%s.model_provider: invalid provider %q", n, h.ModelProvider)
 			}
+		}
+		if h.Plan != "" && !providerPattern.MatchString(h.Plan) {
+			return fmt.Errorf("harnesses.%s.plan: invalid plan %q", n, h.Plan)
 		}
 	}
 	return nil

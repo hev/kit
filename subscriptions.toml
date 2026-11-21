@@ -5,6 +5,7 @@
 # name = "your-plan"
 # monthly_usd = 100.0 # synthetic example; omit for labelled operator-editable placeholder
 # tier = "" # Codex tier placeholder: operator fills actual paid tier
+# plan = "" # optional plan tier annotation for hev subscriptions (e.g. "ultra" on harness = "agy")
 # reset_day = 1
 # reset_hour = 0
 # reset_minute = 0
