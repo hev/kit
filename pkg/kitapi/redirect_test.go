@@ -104,3 +104,19 @@ func TestKitClientHidesKeysInErrorText(t *testing.T) {
 		}
 	}
 }
+
+func TestKitClientRawPathCannotChangeOrigin(t *testing.T) {
+	client := kitapi.New("https://api.example.test", "hk_synthetic")
+	client.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.example.test" {
+			t.Fatal("request reached a different origin")
+		}
+		return httptest.NewRecorder().Result(), nil
+	})
+	if _, err := client.DoRaw(context.Background(), http.MethodGet, "@elsewhere.example.net/v1/whoami", nil, nil); err == nil {
+		t.Fatal("accepted non-path input")
+	}
+	if _, err := client.DoRaw(context.Background(), http.MethodGet, "/v1/whoami", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}

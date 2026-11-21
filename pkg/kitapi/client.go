@@ -151,6 +151,9 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Value
 	if !ValidBaseURL(c.API) {
 		return nil, errors.New("invalid Club Kit API URL")
 	}
+	if !strings.HasPrefix(path, "/") {
+		return nil, errors.New("Club Kit API path must start with a slash")
+	}
 	u := c.API + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()

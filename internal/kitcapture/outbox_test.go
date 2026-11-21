@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -162,18 +161,17 @@ func TestDrainerRecovers(t *testing.T) {
 	srv.SetDown(false)
 	d.Kick()
 	for {
-		p, _ := a.Outbox.Pending()
-		if len(p) == 0 {
+		p, pendingErr := a.Outbox.Pending()
+		last, drainErr := d.Last()
+		// The queue can be empty just before Run publishes the completed drain.
+		if pendingErr == nil && len(p) == 0 && drainErr == nil && last.Pending == 0 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("outbox still holds %v", p)
+			t.Fatalf("drain did not recover: queued=%v (%v), result=%+v (%v)", p, pendingErr, last, drainErr)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
 	<-done
-	if _, err := d.Last(); err != nil && !strings.Contains(err.Error(), "canceled") {
-		t.Fatalf("last drain: %v", err)
-	}
 }

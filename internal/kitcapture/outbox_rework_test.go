@@ -267,16 +267,13 @@ func TestDrainerReadOnlyRecovers(t *testing.T) {
 	go func() { d.Run(ctx); close(done) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := d.Last(); kitapi.ReadOnly(err) {
+		if _, err := d.Last(); kitapi.ReadOnly(err) && strings.Contains(logs.String(), "read-only for billing") {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("drainer never saw the 402")
+			t.Fatalf("drainer never reported the 402: %s", logs.String())
 		}
 		time.Sleep(5 * time.Millisecond)
-	}
-	if !strings.Contains(logs.String(), "read-only for billing") {
-		t.Fatalf("no billing diagnostic in the log:\n%s", logs.String())
 	}
 	srv.SetReadOnly(false)
 	for {
