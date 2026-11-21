@@ -105,9 +105,9 @@ func TestSwarmSurfaceAndHelp(t *testing.T) {
 	}
 	root := &cobra.Command{Use: "hev"}
 	root.AddCommand(newSwarmCommand())
-	groupFactoryCommands(root)
-	if root.Commands()[0].GroupID != "factory" {
-		t.Fatal("hev swarm outside the Factory group")
+	groupClusterCommands(root)
+	if root.Commands()[0].GroupID != "cluster" {
+		t.Fatal("hev swarm outside the Cluster group")
 	}
 	if !strings.Contains(rootCmd.Long, "hev swarm") {
 		t.Fatal("bare hev --help does not list hev swarm")
