@@ -50,3 +50,24 @@ func TestAPILogRoundAndRotatedOffset(t *testing.T) {
 		t.Fatalf("missing round: %v", err)
 	}
 }
+
+func TestQueueAPICancelKeepsHaltedRecord(t *testing.T) {
+	queueTestHome(t)
+	q := queueRequest("cancelled-api")
+	q.APILocalOnly = true
+	if _, err := enqueue(q); err != nil {
+		t.Fatal(err)
+	}
+	_, found, err := controlQueued(Request{Action: "stop", Name: q.Name, APILocalOnly: true})
+	if !found || err != nil {
+		t.Fatalf("queued stop: %t, %v", found, err)
+	}
+	entries, err := queueEntries()
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("cancelled run remained queued: %d, %v", len(entries), err)
+	}
+	var result Result
+	if err := readJSON(filepath.Join(Root(), q.Name, "result.json"), &result); err != nil || State(&result, false) != "halted" {
+		t.Fatalf("cancelled run is not readable as halted: %v", err)
+	}
+}
