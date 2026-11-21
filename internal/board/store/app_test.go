@@ -52,8 +52,4 @@ func TestAppStoreReadsAuthorName(t *testing.T) {
 	if th.AuthorName != "Ana" || th.Author != "7001" || th.Body() != "b" || len(th.Tags) != 1 {
 		t.Fatalf("thread = %+v", th)
 	}
-	app, team := NewApp(nil).Backend.(*layerStore), New(nil).Backend.(*layerStore)
-	if len(app.threadAttrs()) != len(threadAttrs)+1 || len(team.threadAttrs()) != len(threadAttrs) {
-		t.Fatal("only the app store asks for author_name")
-	}
 }

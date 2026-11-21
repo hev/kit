@@ -519,7 +519,7 @@ func TestHarnessEnvRefsRejectPluginOnlyNames(t *testing.T) {
 	installEnvDump(t, bin, "agy")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DISPATCH_ENV_DUMP", dump)
-	const want = "harnesses.agy.env_refs.GEMINI_API_KEY: reserved for a source plugin"
+	const want = "harnesses.agy.env_refs.GEMINI_API_KEY: reserved for a source exec command"
 
 	dir := filepath.Join(Root(), "agy-plugin")
 	if err := os.MkdirAll(filepath.Join(dir, "wt"), 0700); err != nil {

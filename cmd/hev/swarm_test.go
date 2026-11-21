@@ -103,13 +103,17 @@ func TestSwarmSurfaceAndHelp(t *testing.T) {
 	if ps.Flags().Lookup("json") == nil {
 		t.Fatal("ps lacks --json")
 	}
-	root := &cobra.Command{Use: "hev"}
-	root.AddCommand(newSwarmCommand())
+	root := &cobra.Command{Use: "hev", Long: rootCmd.Long}
+	root.AddCommand(c)
 	groupClusterCommands(root)
-	if root.Commands()[0].GroupID != "cluster" {
-		t.Fatal("hev swarm outside the Cluster group")
+	var out bytes.Buffer
+	root.SetOut(&out)
+	if err := root.Help(); err != nil || strings.Contains(out.String(), "swarm") {
+		t.Fatalf("root help exposed swarm: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(rootCmd.Long, "hev swarm") {
-		t.Fatal("bare hev --help does not list hev swarm")
+	out.Reset()
+	root.SetArgs([]string{"swarm", "up", "--help"})
+	if err := root.Execute(); err != nil || !strings.Contains(out.String(), "hev swarm up") {
+		t.Fatalf("direct swarm help failed: %v\n%s", err, out.String())
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/hev/kit/internal/cluster"
@@ -14,72 +16,110 @@ import (
 const clusterHint = "Cluster is disabled; add [cluster] with bind and key_ref to ~/.hev/config.toml (or HEV_CONFIG)."
 
 func newClusterCommand() *cobra.Command {
-	root := &cobra.Command{Use: "cluster", Short: "Inspect encrypted hevd membership and usage facts"}
-	for _, action := range []string{"ls", "status", "join", "leave"} {
-		action := action
-		use := action
-		args := cobra.NoArgs
-		if action == "join" {
-			use += " ADDR"
-			args = cobra.ExactArgs(1)
+	root := newNodesCommand()
+	root.Use = "cluster"
+	root.Short = "Manage cluster membership and SSH dispatch access"
+	root.Hidden = false
+
+	for _, c := range root.Commands() {
+		switch c.Name() {
+		case "join":
+			joinSSH := c.RunE
+			c.Use += " | join ADDR:PORT"
+			c.Short = "Join with an SSH invitation or an encrypted cluster address"
+			c.RunE = func(cmd *cobra.Command, args []string) error {
+				// Invite codes are base64url and cannot contain a colon.
+				if len(args) == 1 && strings.Contains(args[0], ":") {
+					return runClusterCommand(cmd, "join", args[0])
+				}
+				return joinSSH(cmd, args)
+			}
+		case "ls":
+			listSSH := c.RunE
+			var sshOnly bool
+			c.Flags().BoolVar(&sshOnly, "ssh", false, "List SSH dispatch access even when encrypted membership is configured")
+			c.Short = "List cluster members or SSH dispatch access"
+			c.RunE = func(cmd *cobra.Command, args []string) error {
+				if sshOnly {
+					return listSSH(cmd, args)
+				}
+				cfg, err := cluster.LoadConfig("")
+				if err != nil {
+					return err
+				}
+				if cfg == nil {
+					return listSSH(cmd, args)
+				}
+				return queryCluster(cmd, "ls", "")
+			}
 		}
-		c := &cobra.Command{Use: use, Args: args, RunE: func(cmd *cobra.Command, args []string) error {
-			selected, e := currentWorkspace()
-			if e != nil {
-				return e
-			}
-			if action != "ls" {
-				if e = selected.RequireHost(selfHostLabel()); e != nil {
-					return e
-				}
-			}
-			cfg, e := cluster.LoadConfig("")
-			if e != nil {
-				return e
-			}
-			if cfg == nil {
-				cmd.SilenceUsage = true
-				cmd.SilenceErrors = true
-				fmt.Fprintln(cmd.OutOrStdout(), clusterHint)
-				return errors.New("cluster disabled")
-			}
-			q := cluster.Request{Action: action}
-			if len(args) > 0 {
-				q.Address = args[0]
-			}
-			r, e := cluster.Query(cmd.Context(), q)
-			if e != nil {
-				return e
-			}
-			asJSON, _ := cmd.Flags().GetBool("json")
-			if action == "ls" {
-				members := make([]cluster.Member, 0, len(r.Members))
-				for _, m := range r.Members {
-					if selected.AllowsHost(m.Name) || (m.Self && selected.AllowsHost(selfHostLabel())) {
-						members = append(members, m)
-					}
-				}
-				r.Members = members
-				if asJSON {
-					return json.NewEncoder(cmd.OutOrStdout()).Encode(r.Members)
-				}
-				return printClusterMembers(cmd.OutOrStdout(), r.Members)
-			}
-			if action == "status" {
-				if asJSON {
-					return json.NewEncoder(cmd.OutOrStdout()).Encode(r.Status)
-				}
-				return printClusterStatus(cmd.OutOrStdout(), r.Status)
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "cluster "+action+": ok")
-			return nil
-		}}
-		if action == "ls" || action == "status" {
-			c.Flags().Bool("json", false, "Print JSON")
-		}
-		root.AddCommand(c)
 	}
+
+	status := &cobra.Command{Use: "status", Short: "Show encrypted hevd membership and usage status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return runClusterCommand(cmd, "status", "")
+	}}
+	status.Flags().Bool("json", false, "Print JSON")
+	root.AddCommand(status,
+		&cobra.Command{Use: "leave", Short: "Leave encrypted hevd membership", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			return runClusterCommand(cmd, "leave", "")
+		}},
+	)
 	return root
+}
+
+func runClusterCommand(cmd *cobra.Command, action, address string) error {
+	selected, err := currentWorkspace()
+	if err != nil {
+		return err
+	}
+	if err := selected.RequireHost(selfHostLabel()); err != nil {
+		return err
+	}
+	cfg, err := cluster.LoadConfig("")
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		fmt.Fprintln(cmd.OutOrStdout(), clusterHint)
+		return errors.New("cluster disabled")
+	}
+	return queryCluster(cmd, action, address)
+}
+
+func queryCluster(cmd *cobra.Command, action, address string) error {
+	r, err := cluster.Query(cmd.Context(), cluster.Request{Action: action, Address: address})
+	if err != nil {
+		return err
+	}
+	asJSON, _ := cmd.Flags().GetBool("json")
+	switch action {
+	case "ls":
+		selected, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
+		local := selfHostLabel()
+		r.Members = slices.DeleteFunc(r.Members, func(member cluster.Member) bool {
+			return !selected.AllowsHost(member.Name) && !(member.Self && selected.AllowsHost(local))
+		})
+		if r.Members == nil {
+			r.Members = []cluster.Member{}
+		}
+		if asJSON {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(r.Members)
+		}
+		return printClusterMembers(cmd.OutOrStdout(), r.Members)
+	case "status":
+		if asJSON {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(r.Status)
+		}
+		return printClusterStatus(cmd.OutOrStdout(), r.Status)
+	default:
+		fmt.Fprintln(cmd.OutOrStdout(), "cluster "+action+": ok")
+		return nil
+	}
 }
 func printClusterMembers(out io.Writer, members []cluster.Member) error {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)

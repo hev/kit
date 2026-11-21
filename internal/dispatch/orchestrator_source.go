@@ -61,12 +61,12 @@ func (s *OrchestratorSource) UnmarshalYAML(n *yaml.Node) error {
 func (s OrchestratorSource) Validate() error {
 	if s.Plugin == "" {
 		if len(s.Rules) > 0 || s.Team != "" || len(s.Args) > 0 || len(s.Env) > 0 {
-			return fmt.Errorf("source plugin required")
+			return fmt.Errorf("source.plugin required")
 		}
 		return nil
 	}
 	if !ValidName(s.Plugin) {
-		return fmt.Errorf("invalid source plugin")
+		return fmt.Errorf("invalid source.plugin")
 	}
 	if e := validatePluginEnv("source.env", s.Env); e != nil {
 		return e
@@ -161,7 +161,7 @@ func fetchSource(ctx context.Context, s OrchestratorSpec) (SourceBatch, error) {
 		return batch, e
 	}
 	if !desc.Source {
-		return batch, fmt.Errorf("plugin does not advertise source support")
+		return batch, fmt.Errorf("source exec command does not advertise source support")
 	}
 	batch.Ack, batch.AckBatch = desc.Ack, desc.Ack && desc.AckBatch
 	var cursor struct {

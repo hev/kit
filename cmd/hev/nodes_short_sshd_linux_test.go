@@ -159,10 +159,10 @@ func TestShortInviteOverRealSSHD(t *testing.T) {
 		}
 		return out
 	}
-	joinLine := regexp.MustCompile(`hev nodes join (\S+@127\.0\.0\.1) ([0-9A-Z]{2}-[0-9A-Z]{4}-[0-9A-Z]{4})`)
+	joinLine := regexp.MustCompile(`hev cluster join (\S+@127\.0\.0\.1) ([0-9A-Z]{2}-[0-9A-Z]{4}-[0-9A-Z]{4})`)
 	invite := func(name string) (string, string) {
-		out := must(ownerHome, "nodes", "invite", name, "--address", "127.0.0.1", "--user", me.Username, "--host-key", hostKey+".pub", "--expires", "30m")
-		t.Logf("$ hev nodes invite %s ...\n%s", name, out)
+		out := must(ownerHome, "cluster", "invite", name, "--address", "127.0.0.1", "--user", me.Username, "--host-key", hostKey+".pub", "--expires", "30m")
+		t.Logf("$ hev cluster invite %s ...\n%s", name, out)
 		m := joinLine.FindStringSubmatch(out)
 		if m == nil || len(out) > 600 {
 			t.Fatalf("invite output: %s", out)
@@ -178,8 +178,8 @@ func TestShortInviteOverRealSSHD(t *testing.T) {
 	if !enrollOpen() {
 		t.Fatal("invite did not open the enrollment key")
 	}
-	out := must(teamHome, "nodes", "join", target, code)
-	t.Logf("$ hev nodes join %s %s\n%s", target, code, out)
+	out := must(teamHome, "cluster", "join", target, code)
+	t.Logf("$ hev cluster join %s %s\n%s", target, code, out)
 	if !strings.Contains(out, "Waiting for the owner to approve") {
 		t.Fatalf("join: %s", out)
 	}
@@ -190,15 +190,15 @@ func TestShortInviteOverRealSSHD(t *testing.T) {
 	if enrollOpen() {
 		t.Fatal("enrollment key still open with no open invitation")
 	}
-	out = must(ownerHome, "nodes", "pending")
-	t.Logf("$ hev nodes pending\n%s", out)
+	out = must(ownerHome, "cluster", "pending")
+	t.Logf("$ hev cluster pending\n%s", out)
 	if !strings.Contains(out, "alex invite=pending") || !strings.Contains(out, "key="+memberFP[1]) {
 		t.Fatalf("pending: %s", out)
 	}
 	if out, err := run(otherHome, "nodes", "join", target, code); err == nil || !strings.Contains(out, "Permission denied") {
 		t.Fatalf("reused code after enrollment closed: %v %s", err, out)
 	}
-	must(ownerHome, "nodes", "accept", "alex")
+	must(ownerHome, "cluster", "accept", "alex")
 	authorized, _ := os.ReadFile(authorizedKeys)
 	if !strings.HasPrefix(string(authorized), "restrict,command=") || !strings.Contains(string(authorized), "dispatch rpc --node") || strings.Contains(string(authorized), "nodes enroll") {
 		t.Fatalf("authorized_keys after accept: %s", authorized)
@@ -236,7 +236,7 @@ func TestShortInviteOverRealSSHD(t *testing.T) {
 	if out, err := run(otherHome, "nodes", "join", target, code); err == nil || (!strings.Contains(out, "locked") && !strings.Contains(out, "Permission denied")) {
 		t.Fatalf("right code after lockout: %v %s", err, out)
 	}
-	if out := must(ownerHome, "nodes", "pending"); !strings.Contains(out, "sam invite=locked") {
+	if out := must(ownerHome, "cluster", "pending"); !strings.Contains(out, "sam invite=locked") {
 		t.Fatalf("pending after lockout: %s", out)
 	}
 	if enrollOpen() {
