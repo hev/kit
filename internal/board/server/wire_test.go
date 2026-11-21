@@ -14,8 +14,8 @@ import (
 	"github.com/hev/kit/internal/board/store"
 )
 
-// These responses were recorded from the legacy server with the same fixed
-// Layer row. They protect the API independently of the new client types.
+// The legacy responses and the added pin outcome protect the API against
+// the same fixed Layer row independently of the client types.
 func TestLegacyServerGoldenWire(t *testing.T) {
 	row, err := os.ReadFile("../testdata/row.json")
 	if err != nil {
@@ -46,7 +46,7 @@ func TestLegacyServerGoldenWire(t *testing.T) {
 			w.Write(append(append([]byte(`{"rows":[`), row...), []byte(`]}`)...))
 			return
 		}
-		w.Write([]byte(`{"status":"OK"}`))
+		w.Write([]byte(`{"status":"OK","rows_affected":1}`))
 	}))
 	defer backend.Close()
 	s, err := New(store.New(layer.New(backend.URL, "test-key", "wire-test", "")))
