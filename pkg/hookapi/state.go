@@ -63,6 +63,7 @@ func (s *Service) openState(ctx context.Context) error {
 			PRIMARY KEY(account, kind, id)
 		);
 		CREATE INDEX IF NOT EXISTS hook_due_kind ON hook_rows(kind, due, account, id) WHERE due != 0;
+		CREATE INDEX IF NOT EXISTS hook_due_account ON hook_rows(kind, account, due, id) WHERE due != 0;
 		CREATE INDEX IF NOT EXISTS hook_completed ON hook_rows(account,kind,at,id) WHERE done = 1;
 	`)
 	if err != nil {
@@ -116,36 +117,35 @@ func (s *Service) openState(ctx context.Context) error {
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := s.loadRows(ctx); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	for id, a := range s.accounts {
-		var changed []stateRow
-		for key, j := range a.Jobs {
-			if j.Completed == nil && (j.Content && len(j.Reference) == 0 || j.Blocking || j.Test) {
-				j.Status, j.Completed, j.Next, j.Payload = "failed", &now, nil, nil
-				j.FailedOpen = j.Blocking
-				if j.Blocking {
-					j.Decision = "allow"
-				}
-				a.Jobs[key] = j
-				changed = append(changed, jobRow(j))
-			}
-		}
-		for key, e := range a.Events {
-			if e.Pending {
-				e.Pending = false
-				e.Failed = e.Blocking
-				a.Events[key] = e
-				changed = append(changed, eventRow(e))
-			}
-		}
-		if err := s.write(ctx, id, changed...); err != nil {
-			return err
-		}
-	}
+	s.accounts = make(map[string]*account)
 	return nil
+}
+
+func (s *Service) recoverAccount(ctx context.Context, id string, a *account) error {
+	now := time.Now().UTC()
+	var changed []stateRow
+	for key, j := range a.Jobs {
+		// Any volatile payload pins its account. If this account had to be
+		// loaded from disk, those payloads belonged to a previous process.
+		if j.Completed == nil && (j.Content && len(j.Reference) == 0 || j.Blocking || j.Test) {
+			j.Status, j.Completed, j.Next, j.Payload = "failed", &now, nil, nil
+			j.FailedOpen = j.Blocking
+			if j.Blocking {
+				j.Decision = "allow"
+			}
+			a.setJob(key, j)
+			changed = append(changed, jobRow(j))
+		}
+	}
+	for key, e := range a.Events {
+		if e.Pending {
+			e.Pending = false
+			e.Failed = e.Blocking
+			a.Events[key] = e
+			changed = append(changed, eventRow(e))
+		}
+	}
+	return s.write(ctx, id, changed...)
 }
 
 func rowAAD(account, kind, id string) []byte {
@@ -153,27 +153,30 @@ func rowAAD(account, kind, id string) []byte {
 	return raw
 }
 
-func (s *Service) loadRows(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT account,kind,id,body FROM hook_rows WHERE kind NOT IN ('key','publication')")
+func (s *Service) loadAccount(ctx context.Context, id string, a *account) error {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	if err := s.readAccount(ctx, id, a); err != nil {
+		return err
+	}
+	return s.recoverAccount(ctx, id, a)
+}
+
+func (s *Service) readAccount(ctx context.Context, id string, a *account) error {
+	rows, err := s.db.QueryContext(ctx, "SELECT kind,id,body FROM hook_rows WHERE account=? AND kind NOT IN ('key','publication')", id)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	s.accounts = make(map[string]*account)
 	for rows.Next() {
-		var id, kind, key string
+		var kind, key string
 		var ciphertext []byte
-		if err := rows.Scan(&id, &kind, &key, &ciphertext); err != nil {
+		if err := rows.Scan(&kind, &key, &ciphertext); err != nil {
 			return err
 		}
 		body, err := s.seal.Open(nil, nil, ciphertext, rowAAD(id, kind, key))
 		if err != nil {
 			return err
-		}
-		a := s.accounts[id]
-		if a == nil {
-			a = freshAccount()
-			s.accounts[id] = a
 		}
 		switch kind {
 		case "hook":
@@ -187,7 +190,7 @@ func (s *Service) loadRows(ctx context.Context) error {
 		case "job":
 			var j job
 			err = json.Unmarshal(body, &j)
-			a.Jobs[key] = j
+			a.setJob(key, j)
 		case "create":
 			var r createReceipt
 			err = json.Unmarshal(body, &r)
@@ -200,6 +203,25 @@ func (s *Service) loadRows(ctx context.Context) error {
 		}
 	}
 	return rows.Err()
+}
+
+func (s *Service) accountPage(ctx context.Context, after string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT account FROM hook_rows WHERE account>? ORDER BY account LIMIT 128", after)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (s *Service) writeRow(ctx context.Context, tx *sql.Tx, account string, r stateRow) error {
@@ -257,7 +279,7 @@ func (s *Service) oldest(ctx context.Context, account, kind string, count int) (
 	if err := result.Err(); err != nil {
 		return nil, err
 	}
-	if len(rows) < count {
+	if kind == "event" && len(rows) < count {
 		return nil, errors.New("hook queue capacity reached")
 	}
 	return rows, nil

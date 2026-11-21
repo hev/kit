@@ -332,7 +332,7 @@ func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int
 		rankBy = []any{"id", "asc"}
 	}
 	body["rank_by"] = rankBy
-	return s.cl.Query(body)
+	return s.cl.QueryContext(ctx, body)
 }
 
 func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
@@ -465,6 +465,23 @@ func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 	}
 	t := threadOf(rows[0])
 	return &t, nil
+}
+
+// Post looks up a single board post by its deterministic Layer row ID.
+func (s *layerStore) Post(ctx context.Context, threadID int64, n int) (*Post, error) {
+	id := fmt.Sprintf("p:%d:%d", threadID, n)
+	if n == 1 {
+		id = fmt.Sprintf("t:%d", threadID)
+	}
+	rows, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, append(postAttrs, "body"))
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNotFound
+	}
+	p := postOf(rows[0])
+	return &p, nil
 }
 
 func (s *layerStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {

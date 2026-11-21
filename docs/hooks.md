@@ -188,7 +188,11 @@ Hosted webhook registrations accept public HTTPS endpoints. Deliveries use
 `X-Hev-Signature-256` with an HMAC-SHA256 over the Unix timestamp, a period,
 and the exact request body. Verify the timestamp and signature before using
 the payload. Observe deliveries can be repeated under the same delivery ID.
-Blocking deliveries run once and fail open on errors or timeout.
+Blocking deliveries run once and fail open on errors or timeout. Observe
+delivery workers share capacity across accounts, with one attempt in flight per
+account. Each hook can queue up to 96 pending observe deliveries and 8 MiB of
+volatile payloads. New observe deliveries above either limit are recorded as failed while blocking hooks and
+other webhooks continue to receive events.
 
 Hosted event IDs replay the original blocking decision and optional text while
 the event is retained. The event history keeps up to 30 days and evicts the

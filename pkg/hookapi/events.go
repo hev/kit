@@ -90,10 +90,11 @@ func validPublication(accountID, eventID, name string, full, redacted []byte) bo
 
 func (s *Service) publish(ctx context.Context, accountID string, e record, full []byte, canBlock bool, start time.Time, publication *publication) (gate, error) {
 	out := gate{ID: e.ID, Decision: "allow"}
-	a := s.account(accountID, true)
-	if a == nil {
-		return out, errors.New("account capacity reached")
+	a, err := s.acquire(ctx, accountID)
+	if err != nil {
+		return out, err
 	}
+	defer s.release(accountID, a)
 	a.mu.Lock()
 	now := time.Now().UTC()
 	if wait := a.waiting[e.ID]; wait != nil {
@@ -116,14 +117,20 @@ func (s *Service) publish(ctx context.Context, accountID string, e record, full 
 		return gate{ID: e.ID, Decision: old.Decision, Blocking: old.Blocking, Failed: old.Failed, Elapsed: old.Elapsed}, nil
 	}
 	var candidates []storedHook
+	shed := make(map[string]bool)
 	newContent := 0
 	for _, h := range a.Hooks {
 		if h.Enabled && matches(h.Events, e.Event) {
 			candidates = append(candidates, h)
 			if canBlock && h.Blocking {
 				e.Blocking++
-			} else if h.IncludeContent && publication == nil {
-				newContent += len(full)
+			} else {
+				volatile := h.IncludeContent && publication == nil
+				shed[h.ID] = a.pendingObserve[h.ID] >= observeQueueLimit ||
+					volatile && a.contentByHook[h.ID]+len(full) > observeContentLimit
+				if volatile && !shed[h.ID] {
+					newContent += len(full)
+				}
 			}
 		}
 	}
@@ -146,6 +153,10 @@ func (s *Service) publish(ctx context.Context, accountID string, e record, full 
 	if err != nil {
 		a.mu.Unlock()
 		return out, err
+	}
+	if newContent > 0 && !a.reserveContent(newContent) {
+		a.mu.Unlock()
+		return out, errors.New("hook content capacity reached")
 	}
 	observeBody := e.Body
 	e.Pending = e.Blocking > 0
@@ -170,6 +181,8 @@ func (s *Service) publish(ctx context.Context, accountID string, e record, full 
 			}
 			call, cancel := context.WithCancel(ctx)
 			calls = append(calls, pendingCall{h.private(), d, payload, call, cancel})
+		} else if shed[h.ID] {
+			j.Status, j.Completed = "failed", &now
 		} else if !h.IncludeContent {
 			j.Payload = observeBody
 		} else if publication != nil {
@@ -179,6 +192,7 @@ func (s *Service) publish(ctx context.Context, accountID string, e record, full 
 		rows = append(rows, jobRow(j))
 	}
 	if err := s.write(ctx, accountID, rows...); err != nil {
+		a.releaseContentReservation(newContent)
 		for _, call := range calls {
 			call.cancel()
 		}
@@ -188,10 +202,9 @@ func (s *Service) publish(ctx context.Context, accountID string, e record, full 
 	applyRemovals(a, evicted)
 	a.Events[e.ID] = e
 	for _, j := range jobs {
-		a.Jobs[j.ID] = j
-		if j.Content && !j.Blocking && len(j.Reference) == 0 {
-			a.content[j.ID] = full
-			a.contentBytes += len(full)
+		a.setJob(j.ID, j)
+		if j.Content && !j.Blocking && j.Completed == nil && len(j.Reference) == 0 {
+			a.keepContent(j, full)
 		}
 	}
 	for _, call := range calls {
@@ -277,11 +290,12 @@ func (s *Service) test(w http.ResponseWriter, r *http.Request, id Identity, key 
 		return
 	}
 	now := time.Now().UTC()
-	a := s.account(id.Account, false)
-	if a == nil {
-		missing(w)
+	a, err := s.acquire(r.Context(), id.Account)
+	if err != nil {
+		unavailable(w)
 		return
 	}
+	defer s.release(id.Account, a)
 	a.mu.Lock()
 	h, ok := a.Hooks[key]
 	if !ok {
@@ -319,13 +333,13 @@ func (s *Service) test(w http.ResponseWriter, r *http.Request, id Identity, key 
 		return
 	}
 	applyRemovals(a, evicted)
-	a.Jobs[d.ID] = j
+	a.setJob(d.ID, j)
 	call, cancel := context.WithCancel(r.Context())
 	a.active[d.ID] = cancel
 	a.mu.Unlock()
 	defer cancel()
 	sent, answer := s.send(call, h.private(), d, body)
-	s.finish(id.Account, h.hook, d, sent, answer)
+	s.finish(id.Account, a, h.hook, d, sent, answer)
 	settle(&d, sent, answer, time.Now().UTC())
 	sendJSON(w, 200, d)
 }

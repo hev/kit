@@ -200,7 +200,7 @@ func (s *Service) send(ctx context.Context, h hook, d delivery, body []byte) (a 
 		return
 	}
 	// Both spellings of context may be present in one response.
-	const wireLimit = kitapi.HookResultBytes + 6*kitapi.HookTextRunes
+	const wireLimit = kitapi.HookResultBytes + kitapi.HookTextWireBytes
 	raw, err := io.ReadAll(io.LimitReader(response.Body, wireLimit+1))
 	if err != nil || len(raw) > wireLimit {
 		a.Error = "invalid response body"

@@ -187,7 +187,7 @@ func TestHooksHTTPContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer loaded.db.Close()
-	if loaded.accounts[owner.Account].Hooks[obj.ID].Secret != next.Secret {
+	if cachedAccount(t, loaded, owner.Account).Hooks[obj.ID].Secret != next.Secret {
 		t.Fatal("secret did not survive restart")
 	}
 	call(owner, "DELETE", path, template, "", "204")

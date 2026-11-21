@@ -190,11 +190,12 @@ func (s *Service) Serve(w http.ResponseWriter, r *http.Request, id Identity) {
 }
 
 func (s *Service) get(w http.ResponseWriter, id Identity, key string) {
-	a := s.account(id.Account, false)
-	if a == nil {
-		missing(w)
+	a, err := s.acquire(context.Background(), id.Account)
+	if err != nil {
+		unavailable(w)
 		return
 	}
+	defer s.release(id.Account, a)
 	a.mu.Lock()
 	h, ok := a.Hooks[key]
 	out := view(a, h, time.Now())
@@ -209,7 +210,7 @@ func (s *Service) get(w http.ResponseWriter, id Identity, key string) {
 func freshAccount() *account {
 	return &account{
 		Hooks: map[string]storedHook{}, Jobs: map[string]job{}, Events: map[string]record{}, Creates: map[string]createReceipt{},
-		waiting: map[string]chan struct{}{}, content: map[string][]byte{}, active: map[string]context.CancelFunc{},
+		waiting: map[string]chan struct{}{}, content: map[string][]byte{}, active: map[string]context.CancelFunc{}, pendingObserve: map[string]int{}, contentByHook: map[string]int{},
 	}
 }
 
@@ -245,15 +246,12 @@ func (s *Service) change(w http.ResponseWriter, r *http.Request, id Identity, ke
 		idem = fmt.Sprintf("%x", sha256.Sum256([]byte(idem)))
 	}
 	now := time.Now().UTC()
-	a := s.account(id.Account, key == "")
-	if a == nil {
-		if key == "" {
-			unavailable(w)
-		} else {
-			missing(w)
-		}
+	a, err := s.acquire(r.Context(), id.Account)
+	if err != nil {
+		unavailable(w)
 		return
 	}
+	defer s.release(id.Account, a)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	var h storedHook
@@ -323,11 +321,12 @@ func (s *Service) change(w http.ResponseWriter, r *http.Request, id Identity, ke
 }
 
 func (s *Service) remove(w http.ResponseWriter, id Identity, key string) {
-	a := s.account(id.Account, false)
-	if a == nil {
-		missing(w)
+	a, err := s.acquire(context.Background(), id.Account)
+	if err != nil {
+		unavailable(w)
 		return
 	}
+	defer s.release(id.Account, a)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, ok := a.Hooks[key]; !ok {
@@ -516,10 +515,12 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request, id Identity, key,
 		rows = append(rows, listRow{at, key, body})
 	}
 	eventMatches := func(name string) bool { return len(q["event"]) == 0 || matches(q["event"], name) }
-	a := s.account(id.Account, false)
-	if a == nil {
-		a = freshAccount()
+	a, err := s.acquire(r.Context(), id.Account)
+	if err != nil {
+		unavailable(w)
+		return
 	}
+	defer s.release(id.Account, a)
 	a.mu.Lock()
 	switch kind {
 	case "hooks":

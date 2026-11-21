@@ -528,6 +528,24 @@ func (f *fileStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 	return &t, nil
 }
 
+func (f *fileStore) Post(ctx context.Context, threadID int64, n int) (*Post, error) {
+	ft, err := f.get(threadID)
+	if err != nil {
+		return nil, err
+	}
+	if n == 1 {
+		p := ft.opener()
+		return &p, nil
+	}
+	for _, reply := range ft.Replies {
+		if reply.N == n {
+			p := ft.reply(reply)
+			return &p, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
 func (f *fileStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
 	out := []Post{}
 	ft, err := f.get(threadID)

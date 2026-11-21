@@ -1,6 +1,7 @@
 package layer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -146,6 +147,14 @@ func (c *Client) write(body map[string]any) error {
 	}
 	return nil
 }
+
+// QueryContext uses the caller's deadline for a board row query.
+func (c *Client) QueryContext(ctx context.Context, body map[string]any) ([]Row, error) {
+	scoped := *c
+	scoped.transport = c.transport.WithContext(ctx)
+	return scoped.Query(body)
+}
+
 func (c *Client) Query(body map[string]any) ([]Row, error) {
 	var out struct {
 		Rows  []Row  `json:"rows"`

@@ -13,14 +13,24 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hev/kit/internal/hooks"
 	"github.com/oklog/ulid/v2"
 )
 
-const retention = 30 * 24 * time.Hour
+const (
+	retention            = 30 * 24 * time.Hour
+	accountCacheSize     = 1024
+	observeWorkers       = 32
+	observeQueueLimit    = 96
+	observeContentLimit  = 8 << 20
+	volatileAccountLimit = 128
+	volatileByteLimit    = 128 << 20
+)
 
 // Identity is supplied by the host's authenticated router.
 type Identity struct {
@@ -105,27 +115,42 @@ type createReceipt struct {
 }
 
 type account struct {
-	mu           sync.Mutex
-	content      map[string][]byte
-	active       map[string]context.CancelFunc
-	Hooks        map[string]storedHook
-	Jobs         map[string]job
-	Events       map[string]record
-	Creates      map[string]createReceipt
-	waiting      map[string]chan struct{}
-	contentBytes int
+	mu             sync.Mutex
+	content        map[string][]byte
+	active         map[string]context.CancelFunc
+	Hooks          map[string]storedHook
+	Jobs           map[string]job
+	Events         map[string]record
+	Creates        map[string]createReceipt
+	waiting        map[string]chan struct{}
+	contentBytes   int
+	contentByHook  map[string]int
+	pendingObserve map[string]int
+	service        *Service
+	// Cache metadata is protected by Service.mu.
+	refs    int
+	used    uint64
+	ready   chan struct{}
+	loadErr error
 }
 
 // Service owns an encrypted single-process state database.
 type Service struct {
-	mu       sync.RWMutex
-	accounts map[string]*account
-	db       *sql.DB
-	source   PublicationSource
-	client   *http.Client
-	path     string
-	seal     cipher.AEAD
-	wake     chan struct{}
+	mu               sync.Mutex
+	cacheClock       uint64
+	volatileBytes    atomic.Int64
+	volatileAccounts atomic.Int32
+	lastAccount      string
+	scheduleMu       sync.Mutex
+	sending          map[string]bool
+	retryAfter       time.Time
+	accounts         map[string]*account
+	db               *sql.DB
+	source           PublicationSource
+	client           *http.Client
+	path             string
+	seal             cipher.AEAD
+	wake             chan struct{}
 }
 
 // Open loads encrypted state and starts bounded workers for observe deliveries.
@@ -167,7 +192,7 @@ func open(ctx context.Context, path string, key []byte) (*Service, error) {
 	}
 	s := &Service{
 		accounts: make(map[string]*account), client: webhookClient(),
-		path: path, seal: seal, wake: make(chan struct{}, 4),
+		path: path, seal: seal, wake: make(chan struct{}, observeWorkers), sending: make(map[string]bool),
 	}
 	if err := s.openState(ctx); err != nil {
 		if s.db != nil {
@@ -207,68 +232,117 @@ func (s *Service) signal() {
 	}
 }
 
-func (s *Service) account(id string, create bool) *account {
-	s.mu.RLock()
-	a := s.accounts[id]
-	s.mu.RUnlock()
-	if a != nil || !create {
-		return a
-	}
+// acquire pins an account while callers use its mutable state. Durable queued
+// jobs need no pin. Jobs with volatile payloads pin their account until settled.
+func (s *Service) acquire(ctx context.Context, id string) (*account, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if a = s.accounts[id]; a == nil && len(s.accounts) < 1024 {
+	a := s.accounts[id]
+	load := a == nil
+	if load {
 		a = freshAccount()
+		a.service = s
+		a.ready = make(chan struct{})
 		s.accounts[id] = a
 	}
-	return a
+	a.refs++
+	s.mu.Unlock()
+
+	if load {
+		a.loadErr = s.loadAccount(ctx, id, a)
+		close(a.ready)
+	} else {
+		select {
+		case <-a.ready:
+		case <-ctx.Done():
+			s.release(id, a)
+			return nil, ctx.Err()
+		}
+	}
+	if a.loadErr != nil {
+		s.release(id, a)
+		return nil, a.loadErr
+	}
+	return a, nil
+}
+
+func (s *Service) release(id string, a *account) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a.refs--
+	s.cacheClock++
+	a.used = s.cacheClock
+	if a.refs == 0 && a.loadErr != nil {
+		delete(s.accounts, id)
+	}
+	for len(s.accounts) > accountCacheSize {
+		var oldest *account
+		var key string
+		for id, candidate := range s.accounts {
+			if candidate.refs == 0 && candidate.contentBytes == 0 &&
+				(oldest == nil || candidate.used < oldest.used) {
+				oldest, key = candidate, id
+			}
+		}
+		if oldest == nil {
+			return
+		}
+		delete(s.accounts, key)
+	}
 }
 
 func (s *Service) prune(ctx context.Context, now time.Time) {
-	s.mu.RLock()
-	ids := make([]string, 0, len(s.accounts))
-	for id := range s.accounts {
-		ids = append(ids, id)
+	// Walk persisted accounts in bounded pages, including evicted accounts.
+	for after := ""; ctx.Err() == nil; {
+		ids, err := s.accountPage(ctx, after)
+		if err != nil || len(ids) == 0 {
+			return
+		}
+		for _, id := range ids {
+			if a, err := s.acquire(ctx, id); err == nil {
+				s.pruneAccount(ctx, id, a, now)
+				s.release(id, a)
+			}
+		}
+		after = ids[len(ids)-1]
 	}
-	s.mu.RUnlock()
-	for _, id := range ids {
-		a := s.account(id, false)
-		a.mu.Lock()
-		rows := []stateRow{}
-		for key, e := range a.Events {
-			if e.Time.Before(now.Add(-retention)) && !e.Pending {
-				rows = append(rows, stateRow{kind: "event", id: key})
-			}
+}
+
+func (s *Service) pruneAccount(ctx context.Context, id string, a *account, now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var rows []stateRow
+	for key, e := range a.Events {
+		if e.Time.Before(now.Add(-retention)) && !e.Pending {
+			rows = append(rows, stateRow{kind: "event", id: key})
 		}
-		for key, j := range a.Jobs {
-			if j.Created.Before(now.Add(-retention)) && j.Completed != nil {
-				rows = append(rows, stateRow{kind: "job", id: key})
-			}
+	}
+	for key, j := range a.Jobs {
+		if j.Created.Before(now.Add(-retention)) && j.Completed != nil {
+			rows = append(rows, stateRow{kind: "job", id: key})
 		}
-		for key, r := range a.Creates {
-			if r.At.Before(now.Add(-24 * time.Hour)) {
-				rows = append(rows, stateRow{kind: "create", id: key})
-			}
+	}
+	for key, r := range a.Creates {
+		if r.At.Before(now.Add(-24 * time.Hour)) {
+			rows = append(rows, stateRow{kind: "create", id: key})
 		}
-		for key, h := range a.Hooks {
-			if h.OldSecret != "" && !h.OldUntil.After(now) {
-				h.OldSecret, h.OldUntil = "", time.Time{}
-				rows = append(rows, stateRow{kind: "hook", id: key, value: h})
-			}
+	}
+	for key, h := range a.Hooks {
+		if h.OldSecret != "" && !h.OldUntil.After(now) {
+			h.OldSecret, h.OldUntil = "", time.Time{}
+			rows = append(rows, stateRow{kind: "hook", id: key, value: h})
 		}
-		if s.write(ctx, id, rows...) != nil {
-			a.mu.Unlock()
-			continue
+	}
+	if s.write(ctx, id, rows...) != nil {
+		return
+	}
+	applyRemovals(a, rows)
+	for _, r := range rows {
+		switch r.kind {
+		case "hook":
+			a.Hooks[r.id] = r.value.(storedHook)
+		case "create":
+			delete(a.Creates, r.id)
 		}
-		applyRemovals(a, rows)
-		for _, r := range rows {
-			if r.kind == "hook" {
-				a.Hooks[r.id] = r.value.(storedHook)
-			}
-			if r.kind == "create" {
-				delete(a.Creates, r.id)
-			}
-		}
-		a.mu.Unlock()
 	}
 }
 
@@ -281,7 +355,7 @@ func applyRemovals(a *account, rows []stateRow) {
 		case "event":
 			delete(a.Events, r.id)
 		case "job":
-			delete(a.Jobs, r.id)
+			a.removeJob(r.id)
 		}
 	}
 }
@@ -315,34 +389,56 @@ func (s *Service) worker(ctx context.Context) {
 }
 
 func (s *Service) deliverNext(ctx context.Context) bool {
-	query, stop := context.WithTimeout(ctx, 500*time.Millisecond)
-	rows, err := s.db.QueryContext(query, "SELECT account,id FROM hook_rows WHERE kind='job' AND due!=0 AND due<=? ORDER BY due,account,id LIMIT ?", time.Now().UnixMilli(), cap(s.wake))
-	type candidate struct{ account, id string }
-	var due []candidate
-	if err == nil {
-		for rows.Next() {
-			var c candidate
-			if rows.Scan(&c.account, &c.id) != nil {
-				break
-			}
-			due = append(due, c)
-		}
-		rows.Close()
-	}
-	stop()
-	for _, c := range due {
-		if s.deliver(ctx, c.account, c.id) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Service) deliver(ctx context.Context, accountID, id string) bool {
-	a := s.account(accountID, false)
-	if a == nil {
+	accountID, id := s.claimDue(ctx)
+	if id == "" {
 		return false
 	}
+	defer func() {
+		s.scheduleMu.Lock()
+		delete(s.sending, accountID)
+		s.scheduleMu.Unlock()
+	}()
+	a, err := s.acquire(ctx, accountID)
+	if err != nil {
+		return false
+	}
+	defer s.release(accountID, a)
+	return s.deliver(ctx, accountID, id, a)
+}
+
+// Walk accounts in round-robin order and take the oldest due job within
+// the selected account. A busy account cannot occupy multiple workers.
+func (s *Service) claimDue(ctx context.Context) (accountID, id string) {
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+	if time.Now().Before(s.retryAfter) {
+		return "", ""
+	}
+	query, stop := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer stop()
+	args := []any{time.Now().UnixMilli(), s.lastAccount}
+	filter := ""
+	if len(s.sending) != 0 {
+		filter = " AND account NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(s.sending)), ",") + ")"
+		for account := range s.sending {
+			args = append(args, account)
+		}
+	}
+	const selectDue = "SELECT account,id FROM hook_rows WHERE kind='job' AND due!=0 AND due<=?"
+	const ordered = " ORDER BY account,due,id LIMIT 1"
+	err := s.db.QueryRowContext(query, selectDue+" AND account>?"+filter+ordered, args...).Scan(&accountID, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = s.db.QueryRowContext(query, selectDue+" AND account<=?"+filter+ordered, args...).Scan(&accountID, &id)
+	}
+	if err != nil {
+		return "", ""
+	}
+	s.sending[accountID] = true
+	s.lastAccount = accountID
+	return accountID, id
+}
+
+func (s *Service) deliver(ctx context.Context, accountID, id string, a *account) bool {
 	a.mu.Lock()
 	j, exists := a.Jobs[id]
 	h, ok := a.Hooks[j.HookID]
@@ -378,8 +474,15 @@ func (s *Service) deliver(ctx context.Context, accountID, id string) bool {
 		result, answer = s.send(call, h.private(), j.delivery, body)
 	}
 	cancel()
-	s.finish(accountID, h.hook, j.delivery, result, answer)
-	return true
+	if s.finish(accountID, a, h.hook, j.delivery, result, answer) {
+		return true
+	}
+	// A failed state write leaves the old due time in SQLite. Pace retries
+	// during a database outage instead of repeatedly sending the same job.
+	s.scheduleMu.Lock()
+	s.retryAfter = time.Now().Add(time.Second)
+	s.scheduleMu.Unlock()
+	return false
 }
 
 func (h storedHook) private() hook {
@@ -388,8 +491,69 @@ func (h storedHook) private() hook {
 	return out
 }
 
+func (j job) pendingObserve() bool {
+	return !j.Blocking && !j.Test && j.Completed == nil && j.ID != ""
+}
+
+func (a *account) setJob(id string, j job) {
+	a.removeJob(id)
+	a.Jobs[id] = j
+	if j.pendingObserve() {
+		a.pendingObserve[j.HookID]++
+	}
+}
+
+func (a *account) removeJob(id string) {
+	if j := a.Jobs[id]; j.pendingObserve() {
+		if a.pendingObserve[j.HookID] <= 1 {
+			delete(a.pendingObserve, j.HookID)
+		} else {
+			a.pendingObserve[j.HookID]--
+		}
+	}
+	delete(a.Jobs, id)
+}
+
+func (a *account) reserveContent(size int) bool {
+	if a.contentBytes == 0 && a.service.volatileAccounts.Add(1) > volatileAccountLimit {
+		a.service.volatileAccounts.Add(-1)
+		return false
+	}
+	if a.service.volatileBytes.Add(int64(size)) > volatileByteLimit {
+		a.releaseContentReservation(size)
+		return false
+	}
+	return true
+}
+
+func (a *account) releaseContentReservation(size int) {
+	if size == 0 {
+		return
+	}
+	a.service.volatileBytes.Add(-int64(size))
+	if a.contentBytes == 0 {
+		a.service.volatileAccounts.Add(-1)
+	}
+}
+
+func (a *account) keepContent(j job, body []byte) {
+	a.content[j.ID] = body
+	a.contentBytes += len(body)
+	a.contentByHook[j.HookID] += len(body)
+}
+
 func (a *account) dropContent(id string) {
-	a.contentBytes -= len(a.content[id])
+	size := len(a.content[id])
+	if size == 0 {
+		return
+	}
+	hookID := a.Jobs[id].HookID
+	a.contentByHook[hookID] -= size
+	if a.contentByHook[hookID] == 0 {
+		delete(a.contentByHook, hookID)
+	}
+	a.contentBytes -= size
+	a.releaseContentReservation(size)
 	delete(a.content, id)
 }
 
@@ -417,24 +581,22 @@ func (a *account) applyCanceledJobs(rows []stateRow) {
 		}
 		a.dropContent(row.id)
 		if row.value == nil {
-			delete(a.Jobs, row.id)
+			a.removeJob(row.id)
 		} else {
-			a.Jobs[row.id] = row.value.(job)
+			a.setJob(row.id, row.value.(job))
 		}
 	}
 }
 
-func (s *Service) finish(accountID string, h hook, d delivery, result attempt, answer hooks.Response) {
-	a := s.account(accountID, false)
-	if a == nil {
-		return
-	}
+func (s *Service) finish(accountID string, a *account, h hook, d delivery, result attempt, answer hooks.Response) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	rows, apply := a.finishRows(h, d, result, answer)
-	if s.write(context.Background(), accountID, rows...) == nil {
-		apply()
+	if s.write(context.Background(), accountID, rows...) != nil {
+		return false
 	}
+	apply()
+	return true
 }
 
 func (a *account) finishRows(h hook, d delivery, result attempt, answer hooks.Response) ([]stateRow, func()) {
@@ -477,7 +639,7 @@ func (a *account) finishRows(h hook, d delivery, result attempt, answer hooks.Re
 		rows = append(rows, stateRow{kind: "hook", id: h.ID, value: current})
 	}
 	return append(rows, canceled...), func() {
-		a.Jobs[d.ID] = j
+		a.setJob(d.ID, j)
 		if j.Completed != nil {
 			a.dropContent(d.ID)
 		}
