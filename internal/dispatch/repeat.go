@@ -58,7 +58,11 @@ func Supervise(name string) error {
 		_ = sweepQueue(name)
 	}()
 	if m.Every == "" && loadSchedule(dir).Rounds == 0 {
-		return superviseRound(name)
+		err := superviseRound(name)
+		if err == nil && m.Parent == "" {
+			autoCompactDone(dir)
+		}
+		return err
 	}
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, terminationSignals()...)

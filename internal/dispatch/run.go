@@ -16,12 +16,17 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 type Meta struct {
 	Dequeued        bool            `json:"dequeued,omitempty"`
+	Compacted       bool            `json:"compacted,omitempty"`
+	HeadSHA         string          `json:"head_sha,omitempty"`
+	WorkspaceBase   string          `json:"workspace_base,omitempty"`
+	WorkspaceCap    int             `json:"workspace_cap,omitempty"`
 	Implementer     *FallbackTarget `json:"implementer,omitempty"`
 	AllowSameModel  bool            `json:"allow_same_model,omitempty"`
 	RequestedBy     string          `json:"requested_by,omitempty"`
@@ -737,8 +742,34 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
 	childEnv, args, secretValues, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
+	var slotLock *os.File
+	var workspaceCap int
+	if m.WorkspaceCap > 0 && harnessErr == nil {
+		workspaceCap, err = dispatchWorkspaceCap()
+		if err != nil {
+			return err
+		}
+	}
+	if workspaceCap > 0 {
+		pool, err := workspacePool(wt)
+		if err != nil {
+			return err
+		}
+		slot, lock, release, err := leaseWorkspaceSlot(pool, workspaceCap)
+		if err != nil {
+			return err
+		}
+		defer release()
+		slotLock = lock
+		childEnv = cargoWorkspaceEnvironment(childEnv, wt, slot)
+	}
 	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
+	// On Unix the harness keeps the flock if the supervisor is killed first.
+	// Windows launches the harness in a kill-on-close job.
+	if slotLock != nil && runtime.GOOS != "windows" {
+		child.ExtraFiles = append(child.ExtraFiles, slotLock)
+	}
 	// Output reaches the log with resolved env_refs values redacted.
 	waitChild := harnessOutput(child, log, secretValues)
 	child.Env = childEnv

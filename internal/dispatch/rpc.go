@@ -488,6 +488,15 @@ func Handle(q Request) (r Response, handleErr error) {
 	if q.Action == "sweep" {
 		return r, SweepQueue()
 	}
+	if q.Action == "workspace-gc" {
+		count, err := gcWorkspaceSlots(time.Now())
+		r.Message = fmt.Sprintf("removed %d idle workspace slots", count)
+		return r, err
+	}
+	if q.Action == "compact-all" {
+		r.Message, e = compactDispatch("", true)
+		return r, e
+	}
 	if q.Action == "list" {
 		policy, err := targetPolicy()
 		if err != nil {
@@ -799,6 +808,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, e
 			}
 			m = q.Meta
+			m.Compacted, m.HeadSHA, m.WorkspaceBase, m.WorkspaceCap = false, "", "", 0
 			if m.Sender == "" {
 				m.Sender = LocalSender()
 			}
@@ -891,6 +901,13 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
 				return r, fmt.Errorf("target config: %w", err)
 			}
+			pro, err := workspacePro(policy.WorkspacePolicy)
+			if err != nil {
+				return r, err
+			}
+			if pro {
+				m.WorkspaceCap = policy.Cap
+			}
 			resolveLaunch(&m, cfg)
 			workspace := q.Workspace
 			if workspace == "" {
@@ -914,7 +931,17 @@ func Handle(q Request) (r Response, handleErr error) {
 				gitArgs = []string{"-C", repo, "worktree", "add", "--detach", filepath.Join(dir, "wt"), m.Revision}
 				_ = os.MkdirAll(filepath.Join(dir, "evidence"), 0700)
 			}
-			if _, e = command("", append([]string{"git"}, gitArgs...)...); e != nil {
+			if pro {
+				base := "refs/remotes/origin/" + m.Base
+				if m.Parent != "" {
+					base = m.Revision
+				}
+				if m.WorkspaceBase, e = command(repo, "git", "rev-parse", "--verify", "--end-of-options", base+"^{commit}"); e != nil {
+					return r, fmt.Errorf("cannot resolve workspace base")
+				}
+				gitArgs[len(gitArgs)-1] = m.WorkspaceBase
+			}
+			if e = addDispatchWorkspace(gitArgs, m.WorkspaceBase, pro && policy.WorkspacePolicy.Driver != "git"); e != nil {
 				return r, e
 			}
 			m.WorktreeCreated = true
@@ -926,15 +953,31 @@ func Handle(q Request) (r Response, handleErr error) {
 			if e = admitClass(policy.Classes, m.Class, q.Name, live); e != nil {
 				return r, e
 			}
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, err
+			}
+			pro, err := workspacePro(policy.WorkspacePolicy)
+			if err != nil {
+				return r, err
+			}
+			if m.Compacted {
+				if e = admitTargetRepo(m.ResolvedRepo, m.Repo, m.Host); e != nil {
+					return r, e
+				}
+				if e = restoreWorkspace(dir, &m); e != nil {
+					return r, e
+				}
+			}
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
 				return r, fmt.Errorf("worktree was cleaned")
 			}
 			if e = admitTargetRepo(filepath.Join(dir, "wt"), m, originalAction); e != nil {
 				return r, e
 			}
-			cfg, err := loadTarget(m.ConfigPath, m.Host)
-			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
-				return r, err
+			m.WorkspaceCap = 0
+			if pro {
+				m.WorkspaceCap = policy.Cap
 			}
 
 			if q.FromValidation {
@@ -1134,6 +1177,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "review-fetch":
 		r.Review, e = reviewFetch(dir, m, q)
+	case "compact":
+		r.Message, e = compactDispatch(q.Name, false)
 	case "close":
 		var closed Response
 		closed, e = closeRun(dir, q)
@@ -1191,6 +1236,24 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		r.Message = "stopping " + q.Name
 	case "clean":
+		unlock, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		defer unlock()
+		live, err = liveNames()
+		if err == nil {
+			err = addReservations(live)
+		}
+		if err != nil {
+			return r, err
+		}
+		if err := readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
+			return r, fmt.Errorf("order not found: %s", q.Name)
+		}
+		if m.Forward != nil {
+			return r, fmt.Errorf("run moved to another host")
+		}
 		if live[q.Name] {
 			return r, fmt.Errorf("stop running order before clean")
 		}

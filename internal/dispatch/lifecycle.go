@@ -45,6 +45,9 @@ func resolveLaunch(m *Meta, cfg Config) {
 	for _, name := range []string{"HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT", "HEVLAYER_STORE"} {
 		keys = append(keys, "LAYER_"+strings.TrimPrefix(name, "HEVLAYER_"))
 	}
+	if m.WorkspaceCap > 0 {
+		keys = append(keys, "CARGO_TARGET_DIR")
+	}
 	names := map[string]bool{}
 	for _, key := range keys {
 		if _, ok := os.LookupEnv(key); ok {

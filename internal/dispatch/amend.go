@@ -179,8 +179,14 @@ func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool)
 		return cfg, err
 	}
 	repo := filepath.Join(Root(), q.Name, "wt")
+	if existing && m.Compacted {
+		repo = m.ResolvedRepo
+	}
 	if !existing {
 		repo = resolveRepo(m.Repo, cfg.Workspace)
+	}
+	if _, err := workspacePro(policy.WorkspacePolicy); err != nil {
+		return cfg, err
 	}
 	return cfg, admitTargetRepo(repo, m, "amend")
 }
@@ -233,6 +239,10 @@ func amend(q Request) (Response, error) {
 	rev := Revision{Number: len(h.Revisions) + 1, Time: time.Now().UTC(), Order: q.Order, Diff: orderDiff(before, q.Order)}
 	askSpan := recordAsk(&next, "amend", amendAskText(rev.Number, rev.Diff), q.Caller)
 	if o.Host != m.Host {
+		if err = restoreWorkspace(dir, &m); err != nil {
+			return r, err
+		}
+		next.Compacted = m.Compacted
 		beginAttempt(&next, askSpan)
 		return migrateAmend(q, m, next, live)
 	}
@@ -240,6 +250,13 @@ func amend(q Request) (Response, error) {
 	var contextErr error
 	if restarting {
 		cfg, err = checkAmendAdmission(q, next, live, true)
+		if err != nil {
+			return r, err
+		}
+		if err = restoreWorkspace(dir, &next); err != nil {
+			return r, err
+		}
+		next.WorkspaceCap, err = dispatchWorkspaceCap()
 		if err != nil {
 			return r, err
 		}
