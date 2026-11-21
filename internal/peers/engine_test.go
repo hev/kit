@@ -181,7 +181,7 @@ func TestInboxOnlyStableDelivery(t *testing.T) {
 	e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 		result, err := old(ctx, name, in, args...)
 		if name == "tmux" && args[0] == "list-panes" {
-			result = strings.ReplaceAll(result, "\ton\n", "\t\n")
+			result = strings.ReplaceAll(result, "\x1fon\n", "\x1f\n")
 		}
 		return result, err
 	}
