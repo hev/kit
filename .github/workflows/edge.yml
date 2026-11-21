@@ -64,7 +64,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  picker:
+    if: github.repository == 'hev/kit'
+    uses: ./.github/workflows/picker-build.yml
+    with:
+      upload: true
+
   edge:
+    needs: picker
     if: github.repository == 'hev/kit'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -89,8 +96,13 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "Edge build $v" >> "$GITHUB_STEP_SUMMARY"
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: picker-*
+          path: picker-builds
+
       - name: Build
-        run: GITHUB_REF_NAME="v${{ steps.version.outputs.version }}" ./.github/build-release.sh
+        run: GITHUB_REF_NAME="v${{ steps.version.outputs.version }}" PICKER_BUILDS=picker-builds ./.github/build-release.sh
 
       - name: Manifest
         run: |
@@ -102,7 +114,9 @@ jobs:
       # `gh attestation verify <archive> --repo hev/kit`.
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "dist/kit_*"
+          subject-path: |
+            dist/kit_*
+            dist/hev-pick_*
 
       - name: Publish
         env:

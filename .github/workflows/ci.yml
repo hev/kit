@@ -16,6 +16,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  picker:
+    uses: ./.github/workflows/picker-build.yml
+
   go:
     name: go
     runs-on: ubuntu-latest

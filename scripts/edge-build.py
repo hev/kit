@@ -38,6 +38,7 @@ TRAIN = re.compile(r"v(\d+)\.(\d+)", re.ASCII)
 EDGE_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)-edge\.([0-9a-f]{7,40})", re.ASCII)
 EDGE_TAG = re.compile(r"edge-((\d+)\.(\d+)\.\d+-edge\.[0-9a-f]{7,40})", re.ASCII)
 ASSET = re.compile(r"kit_(.+)_(darwin|linux|windows)_(amd64|arm64)\.(tar\.gz|zip)", re.ASCII)
+PICKER_ASSET = re.compile(r"hev-pick_.+_(darwin|linux)_(arm64|amd64)\.tar\.gz")
 FULL_SHA = re.compile(r"[0-9a-f]{40}", re.ASCII)
 IMAGE_REPO = "hevlayer/kit"
 EDGE_IMAGE_TAG = "edge"
@@ -222,7 +223,7 @@ def notes(version: str, train: str, commit: str) -> str:
 
 def publish(repo: str, dist: Path, version: str, commit: str, train: str) -> None:
     tag = f"edge-{version}"
-    files = sorted(str(p) for p in dist.iterdir() if ASSET.fullmatch(p.name) or p.name in ("checksums.txt", "manifest.json"))
+    files = sorted(str(p) for p in dist.iterdir() if ASSET.fullmatch(p.name) or PICKER_ASSET.fullmatch(p.name) or p.name in ("checksums.txt", "manifest.json"))
     if not any(f.endswith("manifest.json") for f in files):
         raise EdgeError("dist has no manifest.json")
     exists = subprocess.run(["gh", "release", "view", tag, "--repo", repo, "--json", "isPrerelease,isDraft"],
