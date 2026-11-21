@@ -37,7 +37,9 @@ to import shell themes and client lists.
 Provision the same workspace name on the dispatch target. With `login = "own"`,
 harness profiles live under `~/.hev/workspaces/NAME/harnesses/`. Use
 `claude_config_dir`, `codex_home`, or `agy_data_dir` under `subscriptions`
-to override a profile. The target resolves subscription `env_refs` at launch.
+to override a profile. Antigravity uses its profile as its home directory,
+including for OAuth and transcripts. The target resolves subscription
+`env_refs` at launch.
 
 Set `layer.endpoint`, `traces_namespace`, `board_namespace`, `board_url`, and
 `api_key_op_ref` under the workspace to select hosted targets. Client

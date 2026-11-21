@@ -167,8 +167,7 @@ func edit(path string, change func(*Config) error) error {
 
 func Expand(dir string) string {
 	if dir == "~" || (strings.HasPrefix(dir, "~/") || (filepath.Separator == '\\' && strings.HasPrefix(dir, "~\\"))) {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, strings.TrimLeft(strings.TrimPrefix(dir, "~"), "/\\"))
+		return filepath.Join(HostHome(), strings.TrimLeft(strings.TrimPrefix(dir, "~"), "/\\"))
 	}
 	return dir
 }

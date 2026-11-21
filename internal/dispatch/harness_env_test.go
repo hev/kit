@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/workspace"
 )
 
 const (
@@ -613,5 +614,37 @@ func TestWorkspaceHarnessProfilesAndSecretRedaction(t *testing.T) {
 	env, _, _, err = workspaceHarnessLaunch("hev", context.Background(), cfg, "codex", "test", base, []string{"prompt"})
 	if err != nil || len(*asked) != 0 || envValue(env, "CODEX_HOME") != "shared" || envValue(env, "CLIENT_TOKEN") != "" {
 		t.Fatal("default workspace inherited client settings")
+	}
+}
+
+func TestWorkspaceAntigravityUsesPrivateHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv(workspace.HostHomeEnv, "")
+	config := filepath.Join(home, "kit.toml")
+	t.Setenv("HEV_CONFIG", config)
+	if err := os.WriteFile(config, []byte("[workspaces.bcc]\nlogin='own'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := writeDispatchConfig(t, "")
+	base := []string{"HOME=" + home, "USERPROFILE=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "ambient"), "GEMINI_API_KEY=ambient"}
+	env, _, _, err := workspaceHarnessLaunch("bcc", context.Background(), cfg, "agy", "test", base, []string{"--print=fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := filepath.Join(home, ".hev", "workspaces", "bcc", "harnesses", "agy")
+	for key, want := range map[string]string{
+		"HOME": profile, "USERPROFILE": profile, "HEV_AGY_DATA_DIR": filepath.Join(profile, ".gemini", "antigravity-cli"),
+		"XDG_CONFIG_HOME": filepath.Join(profile, ".config"), "GEMINI_API_KEY": "",
+		workspace.HostHomeEnv: home, "HEV_CONFIG": config, "HEV_DISPATCH_CONFIG": cfg,
+	} {
+		if envValue(env, key) != want {
+			t.Errorf("wrong workspace value for %s", key)
+		}
+	}
+	env, _, _, err = workspaceHarnessLaunch("hev", context.Background(), cfg, "agy", "test", base, []string{"--print=fixture"})
+	if err != nil || envValue(env, "HOME") != home || envValue(env, "GEMINI_API_KEY") != "ambient" {
+		t.Fatal("shared profile did not retain its home and account")
 	}
 }

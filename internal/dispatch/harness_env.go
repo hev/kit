@@ -9,9 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
-
-	"github.com/hev/kit/internal/layerenv"
-	"github.com/hev/kit/internal/workspace"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -21,7 +19,10 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/hevpaths"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/workspace"
 )
 
 // HarnessConfig is one optional [harnesses.NAME] table in dispatch.toml.
@@ -221,7 +222,13 @@ func workspaceHarnessLaunch(name string, ctx context.Context, configPath, harnes
 		if name != workspace.Default || w.Login == "own" || w.Subscriptions.EnvRefs != nil {
 			h.EnvRefs = w.Subscriptions.EnvRefs
 			for key := range h.EnvRefs {
-				for _, reserved := range []string{"HEV_WORKSPACE", "HEV_CONFIG", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_DATA_HOME", "HEV_AGY_DATA_DIR", "GEMINI_CLI_HOME"} {
+				for _, reserved := range []string{
+					"HEV_WORKSPACE", workspace.HostHomeEnv, "HEV_CONFIG", "HEV_DISPATCH_CONFIG",
+					"HEV_ORDERS_DIR", "HEV_PEERS_STATE", secrets.EndpointEnv,
+					"CLAUDE_CONFIG_DIR", "CODEX_HOME", "HEV_AGY_DATA_DIR", "GEMINI_CLI_HOME",
+					"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+					"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+				} {
 					if strings.EqualFold(key, reserved) {
 						return env, args, nil, fmt.Errorf("workspace subscription environment name %q is reserved", key)
 					}
@@ -256,7 +263,23 @@ func workspaceHarnessLaunch(name string, ctx context.Context, configPath, harnes
 			case "codex":
 				env = append(env, "CODEX_HOME="+profile)
 			case "agy":
-				env = append(env, "XDG_DATA_HOME="+profile, "GEMINI_CLI_HOME="+profile, "HEV_AGY_DATA_DIR="+w.AgyTranscriptDir())
+				// Antigravity reads OAuth, settings and sessions under its home.
+				// Keep kit's control files reachable with explicit host paths.
+				env = append(env,
+					"HOME="+profile, "USERPROFILE="+profile,
+					"APPDATA="+filepath.Join(profile, "AppData", "Roaming"),
+					"LOCALAPPDATA="+filepath.Join(profile, "AppData", "Local"),
+					"XDG_CONFIG_HOME="+filepath.Join(profile, ".config"),
+					"XDG_DATA_HOME="+filepath.Join(profile, ".local", "share"),
+					"XDG_CACHE_HOME="+filepath.Join(profile, ".cache"),
+					"HEV_AGY_DATA_DIR="+w.AgyTranscriptDir(),
+					workspace.HostHomeEnv+"="+workspace.HostHome(),
+					"HEV_CONFIG="+workspace.ConfigPath(),
+					"HEV_DISPATCH_CONFIG="+ConfigPath(configPath),
+					"HEV_ORDERS_DIR="+Root(),
+					"HEV_PEERS_STATE="+hevpaths.Dir(hevpaths.Peers),
+					secrets.EndpointEnv+"="+secrets.Endpoint(),
+				)
 			}
 		}
 		env = append(env, "HEV_WORKSPACE="+name)

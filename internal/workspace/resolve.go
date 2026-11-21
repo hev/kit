@@ -16,6 +16,17 @@ type Selection struct {
 	Workspace
 }
 
+// HostHomeEnv carries the host home into a harness with a private HOME.
+const HostHomeEnv = "HEV_WORKSPACE_HOST_HOME"
+
+func HostHome() string {
+	if home := os.Getenv(HostHomeEnv); filepath.IsAbs(home) {
+		return home
+	}
+	home, _ := os.UserHomeDir()
+	return home
+}
+
 func ConfigPath() string {
 	if p := os.Getenv("HEV_CONFIG"); p != "" {
 		return p
