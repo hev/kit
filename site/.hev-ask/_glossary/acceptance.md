@@ -1,6 +1,6 @@
 ---
 term: "acceptance"
-aliases: ["acceptance criteria","definition of done","## Acceptance"]
+aliases: ["acceptance criteria","Acceptance section"]
 ---
 
-The required section of an order listing observable, checkable facts the worker must meet and reviewers or validators check.
+The contract in an order that the worker must meet and validators and reviewers check item by item.

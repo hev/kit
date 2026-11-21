@@ -2,11 +2,14 @@
 title: "Writing orders"
 description: "How to write an ORDER.md that a worker can finish and prove it finished."
 group: "Use"
+command: "hev dispatch ORDER.md"
+skill: "hev-dispatch"
 ---
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import Edition from "../../components/docs/Edition.astro";
 
 An order is a Markdown file that tells one worker what to do, where to do it,
 and how you will know it is done. `hev dispatch ORDER.md` sends it to a host.
@@ -16,6 +19,21 @@ you send rework.
 An order has two parts. The frontmatter says where the work runs. The body says
 what the work is. The body must contain a `## Acceptance` section, or dispatch
 refuses the order.
+
+<Edition only="oss">
+
+In OSS, orders are folders: each dispatched order and its run live in
+`~/.hev/orders/<name>/` (or a kept `~/dispatch/<name>/`) on the host that runs it, and `hev dispatch` reads them
+over SSH. There is no API.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro, orders and their run records are also served by a hosted API, so the
+team sees one list of orders across every node.
+
+</Edition>
 
 ## A small example
 
@@ -76,13 +94,13 @@ rules the parser applies to it.
 Most orders need four fields:
 
 - `name` is the run's ID. It names the branch (`d/<name>`), the run directory
-  on the host (`~/dispatch/<name>/`), and the tag on every trace the run
+  on the host (`~/.hev/orders/<name>/`), and the tag on every trace the run
   produces. Use lowercase letters, digits and hyphens. A date suffix keeps
   names unique when the same kind of work comes back.
 - `host` is the machine from your dispatch config. `--host` overrides it.
 - `repo` is the repository, relative to the host's workspace, or an absolute
   or `~/` path. The host must already have a clone with an `origin` remote.
-- `harness` is `codex` (the default) or `claude`.
+- `harness` is `codex` (the default), `claude` or `agy` (the Antigravity CLI).
 
 Set `timeout` (minutes, default 120) to something you'd be surprised to
 exceed. Set `reply` if your notify command routes results somewhere. Set
@@ -90,6 +108,11 @@ exceed. Set `reply` if your notify command routes results somewhere. Set
 through a page; see [Dispatch](/docs/dispatch#browser-validation). Set `trace`
 to send the order as part of work already under way; see
 [ask-rooted traces](/docs/traces#ask-rooted-traces).
+
+Set `skills: [pack/skill]` to give this one run skills from the host's
+[skills shelf](/docs/skills-shelf); a run without it sees no shelf skill. Set
+`supersedes` to replace an earlier run and close it once the new one is
+admitted; see [Dispatch](/docs/dispatch#close-supersede-and-adopt).
 
 Set `context` to a recipe in the repository to choose exactly which
 instructions and skills the worker is given, whole or narrowed to the

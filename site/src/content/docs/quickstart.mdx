@@ -2,6 +2,7 @@
 title: "Quickstart"
 description: "Install hev, start the daemon, dispatch one order to your own machine and search its trace."
 group: "Start"
+command: "hev up"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
@@ -9,8 +10,8 @@ import LinkGrid from "../../components/docs/LinkGrid.astro";
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
-Joining a team? Start with [Join a host](/docs/join-a-host). Host owners
-can [share a host with their team](/docs/share-a-host).
+Joining a team? Start with [Join a cluster](/docs/clustering#join-a-cluster). Node owners
+can [share a node with their team](/docs/clustering#share-a-node-with-a-team).
 
 This page takes one laptop from nothing to a finished agent run you can search.
 Your laptop plays both parts: it sends the order and it runs the worker.
@@ -62,7 +63,7 @@ hev up
 <AgentPrompt>
 
 ```text
-Run `hev up` to write ~/.hev/config.toml and install the hevd capture daemon (launchd on macOS, systemd user service on Linux). Do not set HEVLAYER_API_KEY; traces should stay in files under ~/.hev/archive/. Then run `hev s` and confirm it shows a recent scan and no error.
+Run `hev up` to write ~/.hev/config.toml and install the hevd capture daemon (launchd on macOS, systemd user service on Linux). Do not set HEVLAYER_API_KEY; traces should stay in files under ~/.hev/traces/. If it starts onboarding, keep the detected harnesses and the default workspace unless I say otherwise. Then run `hev s` and confirm it shows a recent scan and no error.
 Docs: https://hevkit.com/docs/quickstart#2-start-the-daemon (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -70,9 +71,40 @@ Docs: https://hevkit.com/docs/quickstart#2-start-the-daemon (all pages: https://
 
 </CodeTabs>
 
-`hev up` writes `~/.hev/config.toml` and installs the capture daemon, `hevd`,
-under launchd on macOS or systemd on Linux. With no key, `hevd` keeps traces in
-files under `~/.hev/archive/`. It needs no account, no key and no Docker.
+`hev up` writes `~/.hev/config.toml`, creates kit's data folders under
+`~/.hev/` (`traces`, `board`, `orders`, `peers`, `hooks`, `evidence`), installs
+the bundled skills, and installs the capture daemon, `hevd`, under launchd on
+macOS or systemd on Linux, with the dashboard (`hev serve`, Traces and Board)
+as a service on `http://127.0.0.1:8099`. With no key, `hevd` keeps traces in
+files under `~/.hev/traces/`. It needs no account, no key and no Docker.
+
+### Onboard a new machine
+
+On a terminal, the first `hev up` on an unconfigured machine (no
+`~/.hev/config.toml`, no `~/.config/hev/dispatch.toml` and no
+`~/.hev/onboard.toml`) runs `hev onboard` first. Run `hev onboard` yourself at
+any time to go through it again. It asks three things, with no hand-edited
+TOML:
+
+1. **Harnesses.** kit lists the harnesses it knows (Claude Code, Codex, pi,
+   OpenCode, agy) and marks those it finds on `PATH` or by their config
+   directory. Press Enter to keep the detected ones, or type names or numbers
+   (`claude, codex`, `1 2`, `none`).
+2. **Workspace and data.** Confirm where your repositories live (default
+   `~/workspace`). kit shows where each surface will live under `~/.hev/` and
+   names any legacy folder it keeps. Answer `n` and nothing is written.
+3. **Start kit.** It runs `hev up`: the config, the data folders, a dispatch
+   config naming this machine as host `here` (when there is none), the
+   bundled skills, hevd and the dashboard. Then it opens the Picker if one is
+   installed, or prints next steps: `hev s`, the dashboard URL and
+   `hev dispatch`.
+
+Answers are saved in `~/.hev/onboard.toml` (mode 0600) and offered as defaults
+on a re-run, which never rewrites an existing kit or dispatch config.
+Onboarding needs a terminal on stdin and stdout: without one, `hev up` asks
+nothing and `hev onboard` exits with an error. `hev up --non-interactive`
+never asks, for scripts and CI; `hev onboard --no-picker` skips the Picker.
+
 Check it:
 
 <CodeTabs>
@@ -93,13 +125,16 @@ Docs: https://hevkit.com/docs/quickstart#2-start-the-daemon (all pages: https://
 </CodeTabs>
 
 `hev s` shows the daemon's last scan, how many units it indexed and the last
-error. On Linux, `hev up` installs a systemd user service. Without a usable user
+error, and ends with how much each surface holds under `~/.hev`
+([disk usage](/docs/concepts#where-kit-keeps-its-files)). On Linux, `hev up` installs a systemd user service. Without a usable user
 manager, run `hev d` under your own supervisor.
 
 ## 3. Configure one host
 
 Dispatch reads `~/.config/hev/dispatch.toml` on the machine that sends work.
-Create it with one host, the laptop itself:
+With no dispatch config, `hev up` already wrote one naming this machine as the
+local host `here` (`default_host = "here"`). This guide names it `laptop`
+instead; create or edit the file with one host, the laptop itself:
 
 <CodeTabs>
 
@@ -198,7 +233,7 @@ hev dispatch first-run.md
 <AgentPrompt>
 
 ```text
-Dispatch the order: run `hev dispatch first-run.md`. Confirm it created branch d/first-run, a worktree at ~/dispatch/first-run/wt and a tmux session d-first-run. If dispatch refuses, show me the exact error.
+Dispatch the order: run `hev dispatch first-run.md`. Confirm it created branch d/first-run, a worktree at ~/.hev/orders/first-run/wt and a tmux session d-first-run. If dispatch refuses, show me the exact error.
 Docs: https://hevkit.com/docs/quickstart#5-dispatch-it (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -207,9 +242,11 @@ Docs: https://hevkit.com/docs/quickstart#5-dispatch-it (all pages: https://hevki
 </CodeTabs>
 
 Dispatch fetches `origin`, creates branch `d/first-run` from `origin/main` in a
-new worktree at `~/dispatch/first-run/wt`, and starts a supervisor in the tmux
+new worktree at `~/.hev/orders/first-run/wt`, and starts a supervisor in the tmux
 session `d-first-run`. The supervisor owns the timeout and writes the result
-when the agent exits.
+when the agent exits. (On a machine set up before 0.7 that already has
+`~/dispatch/`, run records stay there: read `~/dispatch/first-run/` wherever
+this guide says `~/.hev/orders/first-run/`.)
 
 ## 6. Watch it
 
@@ -247,7 +284,7 @@ hev dispatch say first-run 'Keep the section under ten lines'
 <AgentPrompt>
 
 ```text
-Send the running worker first-run a new instruction: run `hev dispatch say first-run 'Keep the section under ten lines'`. Confirm the message is in ~/dispatch/first-run/inbox.md.
+Send the running worker first-run a new instruction: run `hev dispatch say first-run 'Keep the section under ten lines'`. Confirm the message is in ~/.hev/orders/first-run/inbox.md.
 Docs: https://hevkit.com/docs/quickstart#6-watch-it (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -275,7 +312,7 @@ Docs: https://hevkit.com/docs/quickstart#6-watch-it (all pages: https://hevkit.c
 </CodeTabs>
 
 `show` prints the run's metadata, status notes, report, result and inbox. The
-same files are on disk in `~/dispatch/first-run/`.
+same files are on disk in `~/.hev/orders/first-run/`.
 
 ## 7. Search its trace
 
@@ -301,7 +338,7 @@ Docs: https://hevkit.com/docs/quickstart#7-search-its-trace (all pages: https://
 
 </CodeTabs>
 
-Sessions whose working directory is under `~/dispatch/first-run/` carry
+Sessions whose working directory is under `~/.hev/orders/first-run/` carry
 `order=first-run`, so the worker's whole session comes back under that name.
 Search here matches words. With a [shared archive](/docs/upgrade) it
 also matches meaning, across every machine that shares the archive.
@@ -317,7 +354,7 @@ hev dispatch clean first-run
 <AgentPrompt>
 
 ```text
-Clean up the finished run first-run with `hev dispatch clean first-run`. Confirm ~/dispatch/first-run/wt is gone, the record under ~/dispatch/first-run/ is still there, and branch d/first-run still exists in the repository clone.
+Clean up the finished run first-run with `hev dispatch clean first-run`. Confirm ~/.hev/orders/first-run/wt is gone, the record under ~/.hev/orders/first-run/ is still there, and branch d/first-run still exists in the repository clone.
 Docs: https://hevkit.com/docs/quickstart#8-clean-up (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -330,6 +367,6 @@ leaves the `d/first-run` branch in your clone.
 
 <LinkGrid links={[
 	{ href: "/docs/concepts", label: "Concepts", description: "Hosts, orders, runs, admission, validation and traces." },
-	{ href: "/docs/hosts#add-a-headless-machine", label: "Headless machines", description: "Send orders to a box on your network or in the cloud." },
+	{ href: "/docs/clustering#add-a-headless-machine", label: "Headless machines", description: "Send orders to a box on your network or in the cloud." },
 	{ href: "/docs/order-reference", label: "Order reference", description: "Every frontmatter field and its default." },
 ]} />

@@ -2,6 +2,7 @@
 title: "Install"
 description: "Install the hev binary on macOS, Linux or Windows and start the daemon."
 group: "Start"
+command: "hev version"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
@@ -17,7 +18,7 @@ work to a shared host needs very little.
 
 | You want to | You need |
 | --- | --- |
-| Capture and search your traces | `hev`. Nothing else: traces go to files on this machine. Field Kit or Pro Kit shares one archive across machines; see [Upgrade](/docs/upgrade) |
+| Capture and search your traces | `hev`. Nothing else: traces go to files on this machine. Club Kit or Pro Kit shares one archive across machines; see [Upgrade](/docs/upgrade) |
 | Send work to another machine | `hev` and SSH access to that machine. Nothing else |
 | Run dispatched work on this machine | `hev`, Git, a clone of each repo it works on, and Codex or Claude Code installed and logged in. On macOS and Linux, also tmux; Windows uses a scheduled task instead |
 | See pull request links on runs | GitHub's `gh` CLI, logged in. Optional |
@@ -84,7 +85,7 @@ Docs: https://hevkit.com/docs/install#build-from-source (all pages: https://hevk
 </CodeTabs>
 
 This puts `hev` in `$(go env GOPATH)/bin`. Add it to the PATH seen by SSH,
-or use `path_prefix` in dispatch config. See [hosts](/docs/hosts#add-a-headless-machine).
+or use `path_prefix` in dispatch config. See [Clustering](/docs/clustering#add-a-headless-machine).
 
 ## Start the daemon
 
@@ -99,7 +100,7 @@ hev up
 <AgentPrompt>
 
 ```text
-Run `hev up` to write ~/.hev/config.toml, set up the hevd capture daemon and install hev's skills. On macOS it runs under launchd and on Linux as hevd.service under the systemd user manager. On Windows, also run `hev daemon install` once. Do not set HEVLAYER_API_KEY unless I ask; with no key, traces stay in files under ~/.hev/archive/. Verify with `hev s`: a recent scan and no error. If Linux has no usable user manager, tell me what `hev up` reported.
+Run `hev up` to write ~/.hev/config.toml, set up the hevd capture daemon and install hev's skills. On macOS it runs under launchd and on Linux as hevd.service under the systemd user manager. On Windows, also run `hev daemon install` once. Do not set HEVLAYER_API_KEY unless I ask; with no key, traces stay in files under ~/.hev/traces/. Verify with `hev s`: a recent scan and no error. If Linux has no usable user manager, tell me what `hev up` reported.
 Docs: https://hevkit.com/docs/install#start-the-daemon (all pages: https://hevkit.com/llms.txt)
 ```
 
@@ -110,7 +111,7 @@ Docs: https://hevkit.com/docs/install#start-the-daemon (all pages: https://hevki
 It writes `~/.hev/config.toml`, sets up `hevd` (how depends on the system,
 below), and installs hev's skills for Claude Code, Codex, pi and OpenCode.
 With no key, that is all: `hevd` keeps traces in files under
-`~/.hev/archive/`, your transcripts stay on the machine, and nothing runs in
+`~/.hev/traces/` (a machine set up earlier keeps `~/.hev/archive/`), your transcripts stay on the machine, and nothing runs in
 Docker. To share one archive with your team on your own
 [hev layer](https://hevlayer.com), export a `HEVLAYER_API_KEY` first and the
 archive goes there instead. See [Upgrade](/docs/upgrade).
@@ -167,7 +168,7 @@ that also hosts runs for itself.
 If every host your laptop sends to is one you joined as a member, setup
 installs the member skills: `hev-member` in place of `hev-dispatch`,
 `hev-context` and `hev-expedite`, which teach owner-only commands. See
-[Roles](/docs/share-a-host#roles).
+[Roles](/docs/clustering#roles).
 
 ### Where skills go
 

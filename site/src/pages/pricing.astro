@@ -4,7 +4,7 @@ import { APP_LIVE, SIGNIN_HREF, SIGNUP_HREF } from "../lib/site";
 
 // Every number on this page lives in `pricing` below. They're placeholders:
 // change them here and the markup, the crossover line and the FAQ follow.
-// Field Kit's "Start" goes to hosted sign-up when the build knows where it is
+// Club Kit's "Start" goes to hosted sign-up when the build knows where it is
 // (PUBLIC_KIT_APP_ORIGIN, see lib/site.ts). Otherwise it points at the start
 // note on this page, which says hosted sign-up isn't live yet.
 const START_HREF = APP_LIVE ? SIGNUP_HREF : "#start";
@@ -17,14 +17,14 @@ const pricing = {
 	// Tier titles and the deployment line under each.
 	names: {
 		starter: { name: "Starter Kit", descriptor: "open source, on your machine" },
-		advanced: { name: "Field Kit", descriptor: "hosted by us" },
+		advanced: { name: "Club Kit", descriptor: "hosted by us" },
 		pro: { name: "Pro Kit", descriptor: "BYOC with", link: { text: "hev layer", href: "https://hevlayer.com" } },
 	},
 	cloud: {
 		baseMonthly: 25, // $ / month
 		includedGB: 5, // GB stored, measured monthly
 		includedSearches: 1_000_000, // searches / month
-		perGBMonth: 2, // $ per GB-month stored beyond the included amount
+		perGBMonth: 5, // $ per GB-month stored beyond the included amount
 		perExtraSearchBlock: 10, // $ per block of searches beyond the included amount
 		searchBlock: 1_000_000, // searches in one block
 	},
@@ -148,7 +148,7 @@ const faq = [
 	},
 	{
 		q: "What is the mobile app?",
-		a: `${ADVANCED} and ${PRO} come with a kit app your team installs on any phone from the browser: ask it what your agents are doing, what is waiting on you and what the board says, out loud. Admins set its name, colours, voice and icon under Settings → Mobile app in Field Kit. Try the configurator for a preview. It is a web app, so there is no app store and nothing to update.`,
+		a: `${ADVANCED} and ${PRO} come with a kit app your team installs on any phone from the browser: ask it what your agents are doing, what is waiting on you and what the board says, out loud. Admins set its name, colours, voice and icon under Settings → Mobile app in the hosted kit web UI. It is a web app, so there is no app store and nothing to update.`,
 	},
 	{
 		q: "What counts as a search?",
@@ -195,7 +195,7 @@ const faq = [
 
 <Base
 	title="hev kit pricing: free seats, pay for what you store and search"
-	description="Starter Kit is free and open source on up to three machines. Field Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
+	description="Starter Kit is free and open source on up to three machines. Club Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
 	current="pricing"
 >
 	<main>
@@ -375,7 +375,7 @@ const faq = [
 					faq.map((item) => (
 						<div class="faq-row">
 							<dt>{item.q}</dt>
-							<dd>{item.a.includes("the configurator") ? <>{item.a.split("the configurator")[0]}<a href="/configure">the configurator</a>{item.a.split("the configurator")[1]}</> : item.a}</dd>
+							<dd>{item.a}</dd>
 						</div>
 					))
 				}

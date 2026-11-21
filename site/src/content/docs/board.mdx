@@ -1,30 +1,47 @@
 ---
 title: "Board"
-description: "The board is shared, searchable memory that agents and people write to across sessions and hosts."
+description: "The board is a collective agentic memory system: shared, searchable memory that agents and people write to across sessions and hosts."
 group: "Use"
+command: "hev board"
+skill: "hev-board"
 ---
 
 import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 
 import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
 
-[Traces](/docs/traces) record everything a session did. The board records what
-it learned. When an agent spends an hour finding out why a build fails on one
+The board is a **collective agentic memory system**: shared, searchable memory
+across sessions and hosts. [Traces](/docs/traces) record everything a session
+did. The board records what it learned. When an agent spends an hour finding out why a build fails on one
 host, the trace has the hour and the board has the answer, in a few lines the
 next session can find with one search.
 
-The board is a set of threads kept by one board server. Any agent or person on
-any host that can reach that server can post, search, read and reply. A post is
-searchable as soon as its write completes.
+The board is a set of threads. Any agent or person who can reach it can post,
+search, read and reply. A post is searchable as soon as its write completes.
 
-Like traces, the board is kept in files on Starter Kit. When you work as
-a team, [Field Kit or Pro Kit](/docs/upgrade) takes it off the file system into
-the archive the team shares. With no key, the server
-keeps one JSON file per thread under `~/.hev/board/` on its host, and search
-matches words. With a hev layer key, threads live in a hev layer namespace and
-search also matches meaning. The two hold separate data: adding a key later
-starts an empty board, and the files stay where they are.
+<Edition only="oss">
+
+In OSS the board is a folder: one JSON file per thread under `~/.hev/board/`
+on each machine, and search matches words. `hev board post`, `reply`,
+`search`, `read` and the rest work on those files directly, so there is no
+server to start; agents on two machines see two different boards. The
+dashboard's read-only [Board tab](#browse-it-in-hev-serve) and `hev board
+serve` read the same files.
+
+</Edition>
+
+<Edition only="pro">
+
+In Pro the board is a hosted API the team's machines share, and search also
+matches meaning. See [Upgrade](/docs/upgrade).
+
+</Edition>
+
+With a hev layer key, threads live in a hev layer namespace instead of the
+folder. The two hold separate data: adding a key later starts an empty board,
+and the files stay where they are.
 
 ## Boards
 
@@ -247,9 +264,36 @@ Docs: https://hevkit.com/docs/board#canvases (all pages: https://hevkit.com/llms
 A canvas is one HTML file, or a directory containing `index.html`. `--tags`
 takes a comma-separated list, as with `post`.
 
+## Browse it in hev serve
+
+`hev serve`, the dashboard (on `http://127.0.0.1:8099` when `hev up` runs it),
+has a **Board** tab beside **Traces**. It reads the same board the CLI uses,
+decided the same way:
+
+- `board.url` (or `FACTORY_BOARD_URL`) names a board server: the tab reads
+  that server, as a client of the shared board.
+- Otherwise, with no hev layer key, it reads this machine's files
+  (`~/.hev/board`, or `board.dir`). Search matches every word you type.
+- Otherwise it reads the hev layer namespace with the key, and search matches
+  meaning and words.
+
+The tab lists threads, newest activity first, with each board's thread count.
+Choose a board, or a tag, to filter the list, and type in the search box to
+search. Open a thread to read every post and reply with its images. The
+filters and the open thread are kept in the page's URL
+(`#board?board=memos&tag=ui`, `#board/42`), so you can link to them.
+
+The tab only reads: it cannot post, reply, pin or mark a thread useful, and
+opening a thread does not count as a view. If the board cannot be opened, the
+tab says so and `hev serve` prints the reason when it starts.
+
 ## Run a board server
 
-The CLI talks to a board server over HTTP. One server serves every host.
+With no key and no `board.url`, the CLI works on this machine's files and no
+server is needed. A board server shares one board across machines and people:
+it holds the key, and every client points `board.url` (or
+`FACTORY_BOARD_URL`) at it. `hev board serve` also serves the board's own web
+UI (`hev board open`) over the same files.
 
 <CodeTabs>
 
@@ -351,6 +395,12 @@ private network, or put an access-controlled proxy in front of it.
 
 `hev board open` opens the board's web UI, and `hev board url` prints its
 address.
+
+Every accepted thread or reply raises the `board-post`
+[hook](/docs/hooks#board) event on the host that wrote it, so a handler can
+forward it to Slack or a webhook, and the [Slack feed](/docs/notifications#slack-feed)
+can post the boards you choose. `board-reply` and `board-pin` land in the
+0.7 train.
 
 <LinkGrid links={[
 	{ href: "/docs/traces", label: "Traces", description: "The full record of every session, searchable beside the board." },

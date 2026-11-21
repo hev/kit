@@ -2,6 +2,7 @@
 title: "Orchestrator examples"
 description: "Three complete orchestrator specs to copy: an intake loop over a tracker, a release coordinator, and a Gauntlet loop."
 group: "Use"
+command: "hev orchestrate apply"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
@@ -22,9 +23,7 @@ work.
   independent critic passes it, within a budget.
 
 Every orchestrator spec on this page passes
-`hev orchestrate apply --dry-run` and `schemas/orchestrator.schema.json`. The
-Gauntlet loop also has a [swarm version](#the-same-loop-as-a-swarm), which
-passes `hev swarm up --dry-run` and `schemas/swarm.schema.json`.
+`hev orchestrate apply --dry-run` and `schemas/orchestrator.schema.json`.
 
 None of these has merge authority, because kit has none to give. When work is
 ready, the orchestrator tells `reply` and a person merges. Replace
@@ -277,7 +276,7 @@ record receipts, but start nothing.
 hev orchestrate apply -f intake.md --dry-run   # check the spec; writes nothing
 hev orchestrate apply -f intake.md             # start the loop, rule in dry-run
 hev orchestrate show intake                    # state, rounds, intake signals
-ls ~/dispatch/orch-intake/rounds/001/          # the orders it would have sent
+ls ~/.hev/orders/orch-intake/rounds/001/       # the orders it would have sent
 ```
 
 <AgentPrompt>
@@ -352,7 +351,7 @@ cursor.
 ### How duplicates are avoided
 
 - **A receipt per event.** Receipts are kept in
-  `~/dispatch/orch-intake/source-markers/` and keyed by the source, the
+  `~/.hev/orders/orch-intake/source-markers/` and keyed by the source, the
   event ID, the action and the mode. An event that already has a receipt is
   not dispatched again, however many polls list it.
 - **The event ID decides what counts as new.** This source uses the issue
@@ -785,120 +784,3 @@ Whichever comes first:
 - The same item failed twice: here is the item, with both verdicts. Change the
   work, the bar or the approach yourself.
 - The budget ran out before the work won.
-
-### The same loop as a swarm
-
-A [swarm](/docs/swarms) puts more than one builder on the problem. The
-`build` role races two builders on different harnesses and models. Each attempt is checked by the same
-independent browser validator, and `choose: first-green` takes the first
-builder that ends `done` with a pushed head and a passing verdict. The
-`ship` role then opens one draft PR from the winning branch. There is no
-critic role: a swarm role is a worker that writes code, and kit's critic is
-the validator.
-
-Save as `gauntlet-swarm.md`:
-
-<CodeTabs>
-
-```markdown
----
-kind: swarm
-name: gauntlet-search
-goal: One draft PR whose search empty state passes independent browser validation on every Acceptance item.
-reply: laptop/me
-every: 30m
-max_lifetime: 3d
-harness: claude
-model: claude-opus-5-5
-budget: {concurrent_runs: 3, runs_per_day: 12}
-reconcile_every: 2m
-restart: {limit: 2, backoff: 5m, max_backoff: 30m}
-roles:
-  - name: build
-    shape: race
-    choose: first-green
-    variants:
-      - {harness: codex}
-      - {harness: claude, model: claude-sonnet-5-5}
-    stall: 45m
-    order: {repo: app, base: main, validation: browser, preview: "pnpm --dir web dev --port {port}", timeout: 120}
-  - name: ship
-    shape: single
-    after: [build]
-    effects: pr
-    order: {repo: app, base: main, harness: codex, timeout: 30}
----
-## Problem
-
-Searching for a term with no results shows a blank page. Build the empty
-state in web/ against the reference design/reference/search-empty.png at
-commit 4f2a9c1 on main. Do not change that file.
-
-## Acceptance
-- One draft PR carries the winning build branch, and its validation verdict passes on every item.
-
-## Role: build
-
-Build the empty state. Commit and push as you go. Check it yourself in a
-browser if you like; your own check does not count, the validator's does.
-
-### Acceptance
-- Searching for a term with no results at /search?q=zzzz shows a heading, one sentence of help and a "Clear search" button, and no blank area or spinner.
-- Shown side by side with the reference at commit 4f2a9c1, the page has the same three elements in the same order, and nothing the reference lacks.
-- "Clear search" empties the box and shows the default results.
-- At 375 px wide, nothing overflows horizontally and the button is fully visible.
-- The browser console shows no errors on the page.
-
-## Role: ship
-
-Open one draft PR from the chosen build branch. Change nothing else.
-
-### Acceptance
-- A draft PR is open from the chosen branch, with the validation verdict linked in its description.
-```
-
-<AgentPrompt>
-
-```text
-Write the swarm file gauntlet-swarm.md. The swarm: kind swarm, name gauntlet-search, a goal of one draft PR whose search empty state passes browser validation on every item, reply laptop/me, every 30m, max_lifetime 3d, harness claude, model claude-opus-5-5, budget concurrent_runs 3 and runs_per_day 12, reconcile_every 2m, restart limit 2 with backoff 5m and max_backoff 30m. Role build: shape race, choose first-green, variants codex and claude with model claude-sonnet-5-5, stall 45m, order on repo app base main with browser validation, preview "pnpm --dir web dev --port {port}" and timeout 120. Role ship: shape single, after [build], effects pr, order on repo app with harness codex and timeout 30. Body sections Problem, Acceptance, Role: build with its Acceptance (the five empty-state items) and Role: ship with its Acceptance. Use my repo, reference commit and reply address. Check with `hev swarm up -f gauntlet-swarm.md --dry-run` and show me the compiled orchestrator and orders.
-Docs: https://hevkit.com/docs/orchestrator-examples#the-same-loop-as-a-swarm (all pages: https://hevkit.com/llms.txt)
-```
-
-</AgentPrompt>
-
-</CodeTabs>
-
-<CodeTabs>
-
-```sh
-hev swarm up -f gauntlet-swarm.md --dry-run   # prints the compiled orchestrator and orders
-hev swarm up -f gauntlet-swarm.md
-hev swarm ps gauntlet-search                  # units, state, head, restarts
-hev swarm logs gauntlet-search build/v1 -f
-hev swarm down gauntlet-search                # stops the orchestrator, then every run; keeps branches
-```
-
-<AgentPrompt>
-
-```text
-Run the swarm gauntlet-search. Run `hev swarm up -f gauntlet-swarm.md --dry-run` and show me the compiled orchestrator and orders; after I confirm, run `hev swarm up -f gauntlet-swarm.md`. Check it with `hev swarm ps gauntlet-search` (units, state, head, restarts) and the build logs with `hev swarm logs gauntlet-search build/v1`. Run `hev swarm down gauntlet-search` only when I ask; it stops every run and keeps the branches.
-Docs: https://hevkit.com/docs/orchestrator-examples#the-same-loop-as-a-swarm (all pages: https://hevkit.com/llms.txt)
-```
-
-</AgentPrompt>
-
-</CodeTabs>
-
-`up` compiles this into an orchestrator scoped to the swarm's own runs, with
-`say`, `notify`, `rework`, `retry`, `dispatch`, `stop` and `validate`
-authority, a 3 day lifetime and the budget above. Every unit runs on the host
-where you run `up`; the validator still runs on the `[validation]` host. The
-reconcile tick restarts a crashed or stalled builder in place, at most twice
-(`restart.limit`).
-
-`first-green` counts a builder only when its verdict passes. If both builders
-end without a passing verdict, the next round is told the race has ended with
-no pick. Under `first-green` a round cannot pick a variant itself. It can
-rework one from its verdict, within `runs_per_day: 12`, or ask you. A
-lifetime cap on attempts, `max_runs`, is planned for a later phase. Until then
-the stop is `runs_per_day` and `max_lifetime`.

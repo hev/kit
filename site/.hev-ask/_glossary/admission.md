@@ -1,6 +1,6 @@
 ---
 term: "admission"
-aliases: ["repo allowlist","allowed repos","not admitted","whitelist repos","admitted repos","repo refused","addfrom"]
+aliases: ["allowlist","not admitted","repo allowlist"]
 ---
 
-The receiving host's own list of repositories it will run work against, matched on the clone's origin and not overridable by the sender.
+A host's own list of repos it will run work against; others are refused.

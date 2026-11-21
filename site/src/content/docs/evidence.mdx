@@ -1,0 +1,167 @@
+---
+title: "Evidence"
+description: "Keep the proof a run produced, screenshots, short recordings and text, as redacted, self-contained packages under ~/.hev/evidence."
+group: "Use"
+command: "hev evidence"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+import Edition from "../../components/docs/Edition.astro";
+
+Evidence is kit's sixth data surface, beside traces, the board, orders, peers
+and hooks. An **evidence package** holds the proof a run produced:
+screenshots, short screen recordings and text such as console logs, JSON
+receipts and diffs, with optional claims about what they show. Validators,
+browser-use and computer-use runs, and spikes are the usual writers. Capture
+is explicit: nothing is recorded unless a command adds it.
+
+On OSS, evidence is a folder of self-contained packages under
+`~/.hev/evidence/`. There is no daemon, no model and no web tab: you read
+packages with `hev evidence` or in the folder.
+
+## Write a package
+
+One step creates and seals a package:
+
+<CodeTabs>
+
+```sh
+hev evidence put --title "Checkout mobile viewport overflow validation" \
+  --order checkout-mobile-fix --source browser-use \
+  --tag validation --tag mobile \
+  --claim "Submit button stays within 390px viewport" --verdict pass \
+  shot.png repro.mp4 console.log
+```
+
+<AgentPrompt>
+
+```text
+When you finish validating this change, keep the proof with kit: run `hev evidence put` with a --title saying what you checked, --order set to this run's name, --source browser-use (or computer-use, validator, spike, manual), one --claim per acceptance item with --verdict pass, fail or inconclusive, and the screenshots, recordings and logs you captured as files. Never capture a screen showing a credential or client data. Print the package id it returns and put it in your report.
+Docs: https://hevkit.com/docs/evidence (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+`put` prints the package id. `-m TEXT` adds a text item, and `-` reads one
+item from stdin. `--claim` may be repeated; a `--verdict` or `--criterion`
+pairs with the `--claim` in the same position, and a single one applies to
+every claim.
+
+To build a package up during a live run, create it, add items and claims, and
+seal it:
+
+```sh
+id=$(hev evidence create --title "Admin billing UAT" --order billing-uat --source computer-use)
+hev evidence add "$id" before.png --caption "Initial invoice table" --url http://localhost:3000/billing
+hev evidence add "$id" flow.mp4 --caption "Filter and export flow"
+hev evidence add "$id" -m "POST /api/export 200 OK" --name export-status.txt
+hev evidence claim "$id" "CSV export downloads without 500" --verdict pass
+hev evidence seal "$id"
+```
+
+A package is `open` until it is sealed. A sealed package refuses every
+change, so add a new package instead.
+
+Flags on `put` and `create`: `--title` (required), `--summary`, `--source`
+(`validator`, `browser-use`, `computer-use`, `spike`, `manual`, `api`),
+`--order` (default `$HEV_ORDER`), `--session`, `--gate`, `--repo`, `--branch`,
+`--commit`, `--host`, `--author`, `--role` (`agent` or `human`) and `--tag`.
+`add` also takes `--caption`, `--url`, `--app`, `--step`, `--name` and
+`--meta KEY=VALUE`. Claims take `--verdict` (`pass`, `fail`, `inconclusive`,
+`info`), `--criterion` and, on `claim`, `--item ID`.
+
+## What is accepted
+
+Every file's type is decided by its bytes, never its name.
+
+| Modality | Accepted | Cap |
+| --- | --- | --- |
+| `image` | PNG, JPEG, GIF, WebP | 10 MiB |
+| `video` | MP4, MOV, WebM | 100 MiB and 60 seconds |
+| `text` | valid UTF-8: plain text, Markdown, JSON, diff, CSV or HTML | 5 MiB |
+
+- SVG is refused (it can carry scripts); export it as PNG. So are BMP, TIFF,
+  binary files and invalid UTF-8.
+- Images and video containers must be whole: a truncated or corrupt file is
+  refused. Video is parsed in Go, with no `ffmpeg`.
+- A package holds at most 64 items, 32 claims and 20 tags.
+- A refused file writes nothing. `put` checks every file before the package
+  appears.
+
+## Redaction
+
+Every text item and every string a person or agent writes into the manifest
+(title, summary, provenance, item names, captions, URLs, metadata and claims)
+passes through kit's secret scrubber before it reaches the disk or a hook
+event. A found secret becomes `[REDACTED:rule#fingerprint]`. Text items are
+marked `redacted: true`, and the stored `sha256` is of the redacted bytes.
+
+<Callout label="Pixels are not scrubbed">
+Screenshots and video frames cannot be redacted. Do not capture a screen that
+shows a credential or client data you may not keep.
+</Callout>
+
+## On disk
+
+The root is `$HEV_EVIDENCE_DIR`, else `[evidence] dir` in
+`~/.hev/config.toml`, else `~/.hev/evidence`:
+
+```text
+~/.hev/evidence/
+  ev_01jd2x8c7k4m5n6p7q8r9s0t1v/
+    manifest.json                # hev.evidence.package/v1
+    001-checkout-390px.png
+    002-checkout-submit.mp4
+    003-console.log              # redacted text
+```
+
+Directories are `0700` and files `0600`, and every write is atomic.
+`manifest.json` has the same fields as the Pro API's `EvidencePackage`, so a
+package moves to Pro unchanged. `hev s` shows how much each surface holds
+under `~/.hev`, evidence included.
+
+## Read, verify and search
+
+```sh
+hev evidence ls [--order NAME] [--source S] [--verdict pass|fail|...] [--tag T] [--since 7d] [--json]
+hev evidence show ID [--json]
+hev evidence get ID [--out DIR]
+hev evidence search QUERY [--also PHRASING]... [the ls filters] [--json]
+```
+
+- `get` verifies every item against the `sha256` and size in
+  `manifest.json` and prints the package folder; `--out DIR` copies it. A
+  changed, missing or damaged file fails the command and nothing is copied.
+- `search` is word search, not semantic search: a package matches when its
+  text holds every word of the query, or of one `--also` phrasing. Images and
+  video are found through their captions, names and claims.
+- `--json` on every command prints the wire shape the Pro API uses.
+
+## Hooks
+
+Writing evidence raises three observe-only [hook events](/docs/hooks#evidence)
+on the writing host: `evidence-created`, `evidence-updated` and
+`evidence-sealed`. Their payload is package and item metadata and redacted
+claims, never item bytes or text. The [Slack feed](/docs/notifications#slack-feed)
+can post acceptance recordings to its channel.
+
+<Edition only="pro">
+
+**Evidence in Pro.** Pro adds a hosted `/v1/evidence` API with the same
+package shape, visual and semantic search, and a viewer in the Pro UI. It is
+rolling out on the 0.7 train: today `hev evidence` always writes the local
+folder, and searching by an image or a video (`--image`, `--video`) fails
+with a message saying it needs Pro.
+
+</Edition>
+
+<LinkGrid links={[
+	{ href: "/docs/review", label: "Review", description: "Read a run's change with its notes beside the lines." },
+	{ href: "/docs/hooks", label: "Hooks", description: "React to evidence-* events with your own handlers." },
+	{ href: "/docs/dispatch", label: "Dispatch", description: "Runs and validators, the usual evidence writers." },
+]} />

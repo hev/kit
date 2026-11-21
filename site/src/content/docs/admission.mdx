@@ -2,6 +2,7 @@
 title: "Admission"
 description: "Each host decides for itself which repos it will run work against."
 group: "Operate"
+command: "hev admission"
 ---
 
 import Callout from "../../components/docs/Callout.astro";
@@ -63,7 +64,7 @@ file does not exist, there is no policy and every repo is admitted.
 
 Capacity also comes from this default config. Top-level `cap` wins over the
 host's own legacy entry, then defaults to 2. A sender may lower the ceiling
-for its request but cannot raise it. See [Hosts](/docs/hosts#capacity-and-the-queue).
+for its request but cannot raise it. See [Clustering](/docs/clustering#capacity-and-the-queue).
 
 ## What is matched
 
@@ -86,7 +87,7 @@ A host with a list refuses a clone whose origin it cannot read.
 
 ## Let members add repos
 
-[Members](/docs/share-a-host#roles) have no shell, so they can't edit the
+[Members](/docs/clustering#roles) have no shell, so they can't edit the
 host's config. To let them add repos themselves, list the places repos may come
 from, then grant the right person by person.
 
@@ -259,6 +260,12 @@ The host checks the list:
 
 Changing the list takes effect on the next check. Runs already going are not
 stopped.
+
+A queued run that fails admission raises a `done` [hook](/docs/hooks) event,
+so a notification handler can tell you. The 0.7 train adds an
+`admission-check` hook, where your own handler can deny work with a reason on
+top of this list, and an `admission-denied` event for every refusal. See
+[meta-harness hooks](/docs/hooks#admission).
 
 ## What a refusal looks like
 

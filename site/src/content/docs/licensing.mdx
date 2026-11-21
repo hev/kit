@@ -1,0 +1,115 @@
+---
+title: "Licensing"
+description: "How Kit Pro checks its license offline: one signed PASETO key per host, the licensed, grace and floor states, and why Kit Pro and Layer Pro have separate keys."
+group: "Operate"
+command: "hev license"
+---
+
+import Callout from "../../components/docs/Callout.astro";
+import CodeTabs from "../../components/docs/CodeTabs.astro";
+import AgentPrompt from "../../components/docs/AgentPrompt.astro";
+import LinkGrid from "../../components/docs/LinkGrid.astro";
+
+<Callout label="Early access / 0.7 rollout">
+Kit Pro licensing and `hev license` are landing on the 0.7 train. Starter
+Kit (OSS) needs no license and never will.
+</Callout>
+
+Kit Pro features on a host, such as [Pro dispatch workspaces](/docs/dispatch#workspaces),
+are unlocked by a **Kit Pro license key** on that host. kit checks the key
+offline: no call home, no license server, nothing to reach when a host is on
+a plane or behind a firewall.
+
+## The key
+
+A license key is a signed PASETO `v4.public` token. kit verifies the Ed25519
+signature over its claims and footer against the public key it ships with,
+and accepts only a key that:
+
+- names the signing key `kid = "hk-2026a"`, Kit Pro's production ceremony
+  key, and
+- carries the signed claim `product = "kit"`.
+
+Anything else, including a valid key for another hev product, is treated as
+no license.
+
+## Configure a host
+
+<CodeTabs>
+
+```toml
+# ~/.hev/config.toml
+[license]
+key_ref = "secret://kit-license"    # or op://... or azkv://...
+# key = "v4.public...."             # a literal key; protect the file if you use it
+```
+
+<AgentPrompt>
+
+```text
+Install my Kit Pro license on this host. Add a [license] table to ~/.hev/config.toml with key_ref set to the secret reference I give you (secret://, op:// or azkv://); never write the key itself into the file or print it. Keep the rest of the file. Then run `hev license --json` and tell me the state (licensed, grace or floor), the expiry and whether it is a trial.
+Docs: https://hevkit.com/docs/licensing (all pages: https://hevkit.com/llms.txt)
+```
+
+</AgentPrompt>
+
+</CodeTabs>
+
+kit reads the first of these that is set:
+
+1. `HEV_LICENSE`, the key itself in the environment;
+2. `HEV_LICENSE_REF`, a [secret reference](/docs/secrets) to it;
+3. `[license] key` in `~/.hev/config.toml`;
+4. `[license] key_ref` in `~/.hev/config.toml`.
+
+Prefer a reference. kit never falls back to a Layer license variable.
+
+## States
+
+A host's license is always in one of three states:
+
+| State | When | What works |
+| --- | --- | --- |
+| `licensed` | A verified key, up to its expiration instant. | Everything in Kit Pro. |
+| `grace` | Up to 14 days after a paid license expires. Trials skip it. | Kit Pro still works, with renewal warnings. |
+| `floor` | After grace, straight after a trial ends, or with no key, an invalid key or a key for another product. | Starter Kit (OSS). |
+
+Degradation is soft, then firm. Grace is the soft step: nothing stops, kit
+warns. Floor is the firm step, and it is narrow: kit refuses only **new**
+operations that need Pro, such as provisioning a Pro workspace. Existing
+data, existing workspaces and running workloads are never touched by license
+processing, and everything Starter Kit does keeps working.
+
+## Inspect
+
+```sh
+hev license          # refresh and show this host's Kit license
+hev license --json
+hev s                # one-line license state in the host status
+```
+
+The capture daemon refreshes the license state in the background, so a host
+receiving a dispatch decides whether it can offer Pro features from its own
+local state, without reading a vault on the hot path.
+
+## Kit Pro and Layer Pro are separate keys
+
+hev layer Pro has its own license, under its own signing key (`hl-2026a`) and
+its own `LAYER_LICENSE` variable. The two are deliberately independent:
+
+- **Separate products, separate schedules.** Kit Pro and Layer Pro are bought,
+  renewed and released on their own timelines. A Layer license does not
+  unlock Kit Pro, and a Kit license does not unlock Layer Pro.
+- **No cross-product tokens.** Each verifier pins its own signing key and
+  product claim, so a key minted for one product can never be replayed
+  against the other.
+- **Separate configuration.** Kit reads `HEV_LICENSE`, `HEV_LICENSE_REF` and
+  `[license]`; Layer reads `LAYER_LICENSE`. A host running both sets both.
+
+`hev pro` shows the separate hev layer gateway edition.
+
+<LinkGrid links={[
+	{ href: "/docs/upgrade", label: "Upgrade", description: "Starter Kit, Club Kit and Pro Kit side by side." },
+	{ href: "/docs/dispatch#workspaces", label: "Dispatch workspaces", description: "Plain git worktrees in OSS; build caches and compaction in Pro." },
+	{ href: "/docs/secrets", label: "Secrets", description: "secret://, op:// and azkv:// references." },
+]} />

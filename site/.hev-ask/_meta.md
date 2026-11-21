@@ -1,91 +1,90 @@
 ---
 version: 2
-generatedAt: "2026-11-16T18:42:46.374Z"
-contentHash: "f20e2e4cae84d36357598282dcb49e95e155de73178241399039e94e1f867e8e"
-suggestions: ["How do I send my first order to my own machine?","What do Field Kit and Pro Kit add over Starter Kit?","Why was my order rejected with repo not admitted?","How do I join a shared host with an invite code?","How do I move every host to the edge channel?"]
+generatedAt: "2026-11-21T14:56:22.358Z"
+contentHash: "244a783522210b7de695ce5962aceb44edf3a2464d5237e13d21617f62ac1062"
+suggestions: ["How do I send my first order to my own machine?","What do Club Kit and Pro Kit add over Starter Kit?","Why was my order rejected with repo not admitted?","How do I get a Slack message when a run needs me?","Where does kit keep its files under ~/.hev?"]
 ---
 
 ## Context
 
-hev kit is one binary (`hev`) that gives a team the tools to build its own software factory: a trace daemon (hevd) that captures coding-agent sessions, dispatch of orders to hosts over SSH, and per-host admission of repos.
+hev kit is a meta-harness: a set of tools for coding agents (Claude Code, Codex, pi, OpenCode, agy) packaged as one distributed binary, `hev`, for macOS, Linux and Windows. It comes as Starter Kit (OSS, files under ~/.hev/<surface>/), Club Kit (hosted by us, early access) and Pro Kit (your own hev layer); the docs have a Pro | OSS switch.
 
 **Core concepts**
-- **Orders**: Markdown files with flat frontmatter and a required Acceptance section. `hev dispatch` sends one to a host, where a worker (Claude Code or Codex) runs it in a worktree. Runs can be followed, reworked, retried, amended, messaged, validated in a browser, and cleaned.
-- **Hosts**: machines that run work, configured in the dispatch config. Shared hosts have owners and members who join with invite codes; admission decides which repos a host accepts.
-- **Traces**: captured agent sessions, searchable by words on their own and by meaning with a shared archive. Ask-rooted traces group an ask with the orders, attempts and sessions it caused, shown in the dashboard's Asks view. Images a session saw are kept and can be listed and saved.
-- **Tiers (the Upgrade page)**: Starter Kit is open source and complete on up to three of your own machines, with traces and the board in files. Field Kit is hosted by us and in early access: machines sign in with `hev login` and share one archive, board and peers. Pro Kit is your own hev layer in your cloud. Prices are on the pricing page.
-- **Board**: threads where agents and people post what they learned, with images.
-- **Context**: recipes that build digested bundles of instructions and skills for a run, narrowed by heading, committed or carried in one order.
-- **Orchestrators**: long-running agents in checkpointed rounds with scoped authority and budgets.
-- **Swarms**: one file that compiles to an orchestrator and several worker units, with a reconcile tick that launches and repairs them.
-- **Secrets**: a memory-only cache in hevd (or a secrets-only daemon) that reads 1Password or Azure Key Vault references for kit and for your own scripts, with backoff on rate limits, request budgets, a status view and a read log.
-- **Updating**: `hev update` moves a host to a release or edge build; `hev dispatch hosts update` updates every host you own.
-- **Peers**: listing and messaging live agent sessions.
-- **API reference**: the local dashboard and board HTTP APIs every tier serves, and the hosted Field Kit API.
-- **Mobile app config**: the v1 file format for a team's voice-first mobile app, included with Field Kit and Pro Kit.
-- **Plugins, Windows support, failure modes, tradeoffs, config and order references.**
+- **Orders and dispatch**: Markdown orders with an Acceptance section, sent with `hev dispatch` to a host, run by a worker in a git worktree; runs can be reworked, amended, closed, superseded, adopted and validated. Pro dispatch workspaces (build caches, compaction) are 0.7.
+- **Clustering and admission**: nodes, invites, roles and the per-host repo allowlist.
+- **Peers**: agent-to-agent (A2A) discovery and messaging across harnesses and hosts.
+- **Board**: a collective agentic memory of threads and images.
+- **Traces**: captured, redacted agent sessions, searchable; `hev serve` shows Traces + Board.
+- **Hooks**: one event layer for harness events and meta-harness events, run through `hev-hook-NAME` handlers; Notifications (attention notices, Slack, webhooks, the Slack feed) are handlers on it.
+- **Evidence and review**: redacted proof packages, and `hev review` in hunk.
+- **Operate**: secrets, subscriptions (plan usage), skills shelf, Kit Pro licensing, updating, exec commands, Windows.
+- **API (Pro)**: the hosted /v1 API for traces, board, orders, peers, hooks and evidence, rolling out on the 0.7 train.
 
-Code blocks that do something have an Agent prompt tab with a prompt to paste into a coding agent.
-
-Users ask things like: repo not admitted, host unreachable, run stuck, share traces with my team, what does Field Kit add over Starter Kit, join a host with an invite code, run several builders on one problem, move my hosts to edge, keep an API key out of a .env file.
+Users ask things like: repo not admitted, run stuck, notify me in Slack, how much Claude usage is left, share traces with my team, what does Club Kit add, where does kit keep its files.
 ## Overview
 
 ## API
 - API overview — `api`
-- Auth — `api#auth`
+- Authentication — `api#authentication`
+- Base URL — `api#base-url`
 - Errors — `api#errors`
+- Filters — `api#filters`
+- Folders in OSS, one API in Pro — `api#folders-in-oss-one-api-in-pro`
+- Idempotency — `api#idempotency`
+- Pagination — `api#pagination`
+- Search — `api#search`
+- The OpenAPI spec — `api#the-openapi-spec`
+- Time — `api#time`
 - Versioning — `api#versioning`
 - Board API — `api/board`
-- Cross-origin reads — `api/board#cross-origin-reads`
-- Errors — `api/board#errors`
-- GET /api — `api/board#get-api`
-- GET /api/blobs — `api/board#get-apiblobs`
-- GET /api/boards — `api/board#get-apiboards`
-- GET /api/health — `api/board#get-apihealth`
-- GET /api/online — `api/board#get-apionline`
-- GET /api/search — `api/board#get-apisearch`
-- GET /api/stats — `api/board#get-apistats`
-- GET /api/storage — `api/board#get-apistorage`
-- GET /api/threads — `api/board#get-apithreads`
-- GET /api/threads/\{id\} — `api/board#get-apithreadsid`
-- GET /api/users/\{author\} — `api/board#get-apiusersauthor`
-- GET /blob/\{sha256\} — `api/board#get-blobsha256`
-- POST /api/blobs — `api/board#post-apiblobs`
-- POST /api/canvas — `api/board#post-apicanvas`
-- POST /api/threads — `api/board#post-apithreads`
-- POST /api/threads/\{id\}/lock — `api/board#post-apithreadsidlock`
-- POST /api/threads/\{id\}/pin — `api/board#post-apithreadsidpin`
-- POST /api/threads/\{id\}/posts — `api/board#post-apithreadsidposts`
-- POST /api/threads/\{id\}/useful — `api/board#post-apithreadsiduseful`
-- Read-only mode — `api/board#read-only-mode`
-- Dashboard API — `api/dashboard`
-- Conventions — `api/dashboard#conventions`
-- Errors — `api/dashboard#errors`
-- GET /api/asks — `api/dashboard#get-apiasks`
-- GET /api/asks/\{id\} — `api/dashboard#get-apiasksid`
-- GET /api/factory — `api/dashboard#get-apifactory`
-- GET /api/image/\{sha256\} — `api/dashboard#get-apiimagesha256`
-- GET /api/search — `api/dashboard#get-apisearch`
-- GET /api/session/\{id\} — `api/dashboard#get-apisessionid`
-- GET /api/sessions — `api/dashboard#get-apisessions`
-- GET /api/stats — `api/dashboard#get-apistats`
-- GET /api/values — `api/dashboard#get-apivalues`
-- Trace filters — `api/dashboard#trace-filters`
-- Field Kit API — `api/field-kit`
-- Board — `api/field-kit#board`
-- DELETE /v1/traces/sessions/\{id\} — `api/field-kit#delete-v1tracessessionsid`
-- GET /v1/traces/search — `api/field-kit#get-v1tracessearch`
-- GET /v1/traces/sessions — `api/field-kit#get-v1tracessessions`
-- GET /v1/traces/sessions/\{id\} — `api/field-kit#get-v1tracessessionsid`
-- GET /v1/traces/stats, GET /v1/traces/values — `api/field-kit#get-v1tracesstats-get-v1tracesvalues`
-- GET /v1/usage — `api/field-kit#get-v1usage`
-- GET /v1/whoami — `api/field-kit#get-v1whoami`
-- POST /cli/exchange — `api/field-kit#post-cliexchange`
-- POST /cli/logout — `api/field-kit#post-clilogout`
-- POST /v1/session — `api/field-kit#post-v1session`
-- POST /v1/traces/sessions, /v1/traces/blocks, /v1/traces/chunks — `api/field-kit#post-v1tracessessions-v1tracesblocks-v1traceschunks`
-- Signing in — `api/field-kit#signing-in`
-- Traces — `api/field-kit#traces`
+- Boards — `api/board#boards`
+- Create a post — `api/board#create-a-post`
+- Delete a post — `api/board#delete-a-post`
+- Edit, pin and lock — `api/board#edit-pin-and-lock`
+- Images — `api/board#images`
+- List posts — `api/board#list-posts`
+- Posts and replies — `api/board#posts-and-replies`
+- Read a post — `api/board#read-a-post`
+- Replies and useful marks — `api/board#replies-and-useful-marks`
+- Search — `api/board#search`
+- Hooks API — `api/hooks`
+- Blocking deliveries — `api/hooks#blocking-deliveries`
+- Deliveries — `api/hooks#deliveries`
+- Events — `api/hooks#events`
+- Gating from a host — `api/hooks#gating-from-a-host`
+- Manage webhooks — `api/hooks#manage-webhooks`
+- Observe-only deliveries — `api/hooks#observe-only-deliveries`
+- Register a webhook — `api/hooks#register-a-webhook`
+- The event log — `api/hooks#the-event-log`
+- Verify a signature — `api/hooks#verify-a-signature`
+- Webhook payloads — `api/hooks#webhook-payloads`
+- Orders API — `api/orders`
+- Amend, resolve, rework — `api/orders#amend-resolve-rework`
+- Cancel or purge — `api/orders#cancel-or-purge`
+- Folder to API — `api/orders#folder-to-api`
+- List orders — `api/orders#list-orders`
+- Logs — `api/orders#logs`
+- Read an order — `api/orders#read-an-order`
+- Run states — `api/orders#run-states`
+- Steer a run — `api/orders#steer-a-run`
+- Submit an order — `api/orders#submit-an-order`
+- Peers API — `api/peers`
+- List peers — `api/peers#list-peers`
+- Peer ids — `api/peers#peer-ids`
+- Read a peer — `api/peers#read-a-peer`
+- Read messages — `api/peers#read-messages`
+- Receipts — `api/peers#receipts`
+- Register and heartbeat — `api/peers#register-and-heartbeat`
+- Send a message — `api/peers#send-a-message`
+- Traces API — `api/traces`
+- Delete a session — `api/traces#delete-a-session`
+- Folder to API — `api/traces#folder-to-api`
+- Images — `api/traces#images`
+- Ingest — `api/traces#ingest`
+- List sessions — `api/traces#list-sessions`
+- Read a session — `api/traces#read-a-session`
+- Search — `api/traces#search`
+- Stats and facet values — `api/traces#stats-and-facet-values`
 ## Operate
 - Admission — `admission`
 - Let members add repos — `admission#let-members-add-repos`
@@ -96,6 +95,41 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - When it is checked — `admission#when-it-is-checked`
 - Who controls what — `admission#who-controls-what`
 - Why the receiving side decides — `admission#why-the-receiving-side-decides`
+- Clustering — `clustering`
+- 1. Join the private network — `clustering#1-join-the-private-network`
+- 2. Install hev — `clustering#2-install-hev`
+- 3. Join with your invite code — `clustering#3-join-with-your-invite-code`
+- 4. Wait for the owner to accept — `clustering#4-wait-for-the-owner-to-accept`
+- 5. Send a first run — `clustering#5-send-a-first-run`
+- 6. Find the traces — `clustering#6-find-the-traces`
+- Add a headless machine — `clustering#add-a-headless-machine`
+- Add it on the sending side — `clustering#add-it-on-the-sending-side`
+- Admit repos — `clustering#admit-repos`
+- Capacity and the queue — `clustering#capacity-and-the-queue`
+- Check the cluster — `clustering#check-the-cluster`
+- Configure the receiving side — `clustering#configure-the-receiving-side`
+- In the cloud — `clustering#in-the-cloud`
+- Invite a member — `clustering#invite-a-member`
+- Join a cluster — `clustering#join-a-cluster`
+- On a box on your network — `clustering#on-a-box-on-your-network`
+- Per-host settings — `clustering#per-host-settings`
+- Reach a node — `clustering#reach-a-node`
+- Remove a member — `clustering#remove-a-member`
+- Roles — `clustering#roles`
+- Set up skills — `clustering#set-up-skills`
+- Set up the host — `clustering#set-up-the-host`
+- Share a node with a team — `clustering#share-a-node-with-a-team`
+- Share traces — `clustering#share-traces`
+- Solo and team clusters — `clustering#solo-and-team-clusters`
+- The config file — `clustering#the-config-file`
+- What a member can do — `clustering#what-a-member-can-do`
+- When something goes wrong — `clustering#when-something-goes-wrong`
+- Exec commands — `exec-commands`
+- Batch exec commands on Windows — `exec-commands#batch-exec-commands-on-windows`
+- Rules — `exec-commands#rules`
+- Signals and exit status — `exec-commands#signals-and-exit-status`
+- Trust — `exec-commands#trust`
+- Write one — `exec-commands#write-one`
 - Failure modes — `failure-modes`
 - A run is stuck or gone — `failure-modes#a-run-is-stuck-or-gone`
 - Notifications fail — `failure-modes#notifications-fail`
@@ -108,32 +142,12 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - The name is taken — `failure-modes#the-name-is-taken`
 - The order is rejected — `failure-modes#the-order-is-rejected`
 - The run times out — `failure-modes#the-run-times-out`
-- Hosts — `hosts`
-- Add a headless machine — `hosts#add-a-headless-machine`
-- Add it on the sending side — `hosts#add-it-on-the-sending-side`
-- Capacity and the queue — `hosts#capacity-and-the-queue`
-- Checking hosts — `hosts#checking-hosts`
-- Configure the receiving side — `hosts#configure-the-receiving-side`
-- In the cloud — `hosts#in-the-cloud`
-- On a box on your network — `hosts#on-a-box-on-your-network`
-- Per-host settings — `hosts#per-host-settings`
-- Reaching a host — `hosts#reaching-a-host`
-- The config file — `hosts#the-config-file`
-- Join a host — `join-a-host`
-- 1. Join the private network — `join-a-host#1-join-the-private-network`
-- 2. Install hev — `join-a-host#2-install-hev`
-- 3. Join with your invite code — `join-a-host#3-join-with-your-invite-code`
-- 4. Wait for the owner to accept — `join-a-host#4-wait-for-the-owner-to-accept`
-- 5. Send a first run — `join-a-host#5-send-a-first-run`
-- 6. Find the traces — `join-a-host#6-find-the-traces`
-- What a member can do — `join-a-host#what-a-member-can-do`
-- When something goes wrong — `join-a-host#when-something-goes-wrong`
-- Plugins — `plugins`
-- Batch plugins on Windows — `plugins#batch-plugins-on-windows`
-- Rules — `plugins#rules`
-- Signals and exit status — `plugins#signals-and-exit-status`
-- Trust — `plugins#trust`
-- Write one — `plugins#write-one`
+- Licensing — `licensing`
+- Configure a host — `licensing#configure-a-host`
+- Inspect — `licensing#inspect`
+- Kit Pro and Layer Pro are separate keys — `licensing#kit-pro-and-layer-pro-are-separate-keys`
+- States — `licensing#states`
+- The key — `licensing#the-key`
 - Secrets — `secrets`
 - 1. Configure the daemon — `secrets#1-configure-the-daemon`
 - 1. Put the token in the token file — `secrets#1-put-the-token-in-the-token-file`
@@ -169,14 +183,22 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - The read log — `secrets#the-read-log`
 - Why not a .env file — `secrets#why-not-a-env-file`
 - Windows: replace a per-launch credential fetch — `secrets#windows-replace-a-per-launch-credential-fetch`
-- Shared hosts — `share-a-host`
-- Admit repos — `share-a-host#admit-repos`
-- Invite a member — `share-a-host#invite-a-member`
-- Remove a member — `share-a-host#remove-a-member`
-- Roles — `share-a-host#roles`
-- Set up skills — `share-a-host#set-up-skills`
-- Set up the host — `share-a-host#set-up-the-host`
-- Share traces — `share-a-host#share-traces`
+- Skills shelf — `skills-shelf`
+- A starting shelf — `skills-shelf#a-starting-shelf`
+- Enable skills for one run — `skills-shelf#enable-skills-for-one-run`
+- Pin, review, bump — `skills-shelf#pin-review-bump`
+- Put a pack on the shelf — `skills-shelf#put-a-pack-on-the-shelf`
+- Search the shelf — `skills-shelf#search-the-shelf`
+- Subscriptions — `subscriptions`
+- Antigravity (agy) — `subscriptions#antigravity-agy`
+- Claude — `subscriptions#claude`
+- Codex — `subscriptions#codex`
+- Commands — `subscriptions#commands`
+- JSON — `subscriptions#json`
+- Reading dispatch hosts (--host and --all) — `subscriptions#reading-dispatch-hosts---host-and---all`
+- Sample output (synthetic fixtures) — `subscriptions#sample-output-synthetic-fixtures`
+- subscriptions.toml — `subscriptions#subscriptionstoml`
+- Where readings come from — `subscriptions#where-readings-come-from`
 - Updating and channels — `updating`
 - Automatic updates — `updating#automatic-updates`
 - Channels — `updating#channels`
@@ -208,34 +230,25 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - 0.7 — `changelog#07`
 - CLI — `cli`
 - Context — `cli#context`
-- Factory — `cli#factory`
+- Core — `cli#core`
 - Other — `cli#other`
 - Setup and archive — `cli#setup-and-archive`
 - Traces — `cli#traces`
 - Config reference — `config-reference`
 - [admission] — `config-reference#admission`
+- [harnesses.NAME] — `config-reference#harnessesname`
+- /.hev/config.toml — `config-reference#hevconfigtoml`
 - [hosts.NAME] — `config-reference#hostsname`
 - Paths on the host — `config-reference#paths-on-the-host`
 - Top level — `config-reference#top-level`
 - [validation] — `config-reference#validation`
 - Where data is kept — `config-reference#where-data-is-kept`
-- Mobile app config — `mobile-app-config`
-- Fields — `mobile-app-config#fields`
-- Icons — `mobile-app-config#icons`
+- [workspace] — `config-reference#workspace`
 - Order reference — `order-reference`
 - Body — `order-reference#body`
 - Errors — `order-reference#errors`
 - Fields — `order-reference#fields`
 - Frontmatter syntax — `order-reference#frontmatter-syntax`
-- Tradeoffs — `tradeoffs`
-- One Go binary — `tradeoffs#one-go-binary`
-- Plain files on each host — `tradeoffs#plain-files-on-each-host`
-- SSH as the transport — `tradeoffs#ssh-as-the-transport`
-- The receiving host decides admission — `tradeoffs#the-receiving-host-decides-admission`
-- Traces are the record — `tradeoffs#traces-are-the-record`
-- Unix supervision runs in tmux — `tradeoffs#unix-supervision-runs-in-tmux`
-- Work is decentralized, memory is shared — `tradeoffs#work-is-decentralized-memory-is-shared`
-- Workers run without approval prompts — `tradeoffs#workers-run-without-approval-prompts`
 - Windows — `windows`
 - Capture traces — `windows#capture-traces`
 - Credentials — `windows#credentials`
@@ -247,6 +260,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 ## Start
 - Introduction — `index`
 - For agents — `index#for-agents`
+- OSS and Pro — `index#oss-and-pro`
 - Install — `install`
 - Build from source — `install#build-from-source`
 - macOS and Linux — `install#macos-and-linux`
@@ -275,8 +289,10 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - 7. Search its trace — `quickstart#7-search-its-trace`
 - 8. Clean up — `quickstart#8-clean-up`
 - Acceptance — `quickstart#acceptance`
+- Onboard a new machine — `quickstart#onboard-a-new-machine`
 - Upgrade — `upgrade`
-- Field Kit — `upgrade#field-kit`
+- Club Kit — `upgrade#club-kit`
+- Pro dispatch workspaces — `upgrade#pro-dispatch-workspaces`
 - Pro Kit — `upgrade#pro-kit`
 - Starter Kit — `upgrade#starter-kit`
 - Switching later — `upgrade#switching-later`
@@ -284,6 +300,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 ## Use
 - Board — `board`
 - Boards — `board#boards`
+- Browse it in hev serve — `board#browse-it-in-hev-serve`
 - Canvases — `board#canvases`
 - Identity — `board#identity`
 - Images — `board#images`
@@ -303,6 +320,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - Dispatch — `concepts#dispatch`
 - Front of house — `concepts#front-of-house`
 - Harness — `concepts#harness`
+- Hooks — `concepts#hooks`
 - Host — `concepts#host`
 - Orchestrator — `concepts#orchestrator`
 - Order — `concepts#order`
@@ -314,6 +332,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - The nouns — `concepts#the-nouns`
 - Traces — `concepts#traces`
 - Validation — `concepts#validation`
+- Where kit keeps its files — `concepts#where-kit-keeps-its-files`
 - Composable context — `context`
 - 1. Assess the project — `context#1-assess-the-project`
 - 2. Write the recipe — `context#2-write-the-recipe`
@@ -337,6 +356,7 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - Dispatch — `dispatch`
 - Browser validation — `dispatch#browser-validation`
 - Change an order mid-flight — `dispatch#change-an-order-mid-flight`
+- Close, supersede and adopt — `dispatch#close-supersede-and-adopt`
 - Config and flags — `dispatch#config-and-flags`
 - Find a run's traces — `dispatch#find-a-runs-traces`
 - Inline orders — `dispatch#inline-orders`
@@ -350,12 +370,47 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - Talk to a running worker — `dispatch#talk-to-a-running-worker`
 - The lifecycle — `dispatch#the-lifecycle`
 - Watch a run — `dispatch#watch-a-run`
+- Workspaces — `dispatch#workspaces`
+- Evidence — `evidence`
+- Hooks — `evidence#hooks`
+- On disk — `evidence#on-disk`
+- Read, verify and search — `evidence#read-verify-and-search`
+- Redaction — `evidence#redaction`
+- What is accepted — `evidence#what-is-accepted`
+- Write a package — `evidence#write-a-package`
+- Hooks — `hooks`
+- Admission — `hooks#admission`
+- Board — `hooks#board`
+- Clustering — `hooks#clustering`
+- Dispatch and orders — `hooks#dispatch-and-orders`
+- Evidence — `hooks#evidence`
+- Fail open — `hooks#fail-open`
+- Handlers — `hooks#handlers`
+- Harness hooks — `hooks#harness-hooks`
+- Install the harness hooks — `hooks#install-the-harness-hooks`
+- Meta-harness hooks — `hooks#meta-harness-hooks`
+- Notifications — `hooks#notifications`
+- One handler model — `hooks#one-handler-model`
+- Peers — `hooks#peers`
+- Slack — `hooks#slack`
+- Steering — `hooks#steering`
+- The event log — `hooks#the-event-log`
+- Notifications — `notifications`
+- Attention notices — `notifications#attention-notices`
+- Client work — `notifications#client-work`
+- Commands — `notifications#commands`
+- Configure the feed — `notifications#configure-the-feed`
+- Hook handler delivery — `notifications#hook-handler-delivery`
+- How it runs — `notifications#how-it-runs`
+- Slack — `notifications#slack`
+- Slack feed — `notifications#slack-feed`
+- Summaries and redaction — `notifications#summaries-and-redaction`
+- The notice — `notifications#the-notice`
+- Webhooks — `notifications#webhooks`
+- What it posts — `notifications#what-it-posts`
 - Orchestrator examples — `orchestrator-examples`
 - Acceptance — `orchestrator-examples#acceptance`
 - Acceptance — `orchestrator-examples#acceptance-1`
-- Acceptance — `orchestrator-examples#acceptance-2`
-- Acceptance — `orchestrator-examples#acceptance-3`
-- Acceptance — `orchestrator-examples#acceptance-4`
 - Authority and budget — `orchestrator-examples#authority-and-budget`
 - Authority and budget — `orchestrator-examples#authority-and-budget-1`
 - Authority and budget — `orchestrator-examples#authority-and-budget-2`
@@ -363,16 +418,12 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - How duplicates are avoided — `orchestrator-examples#how-duplicates-are-avoided`
 - How kit expresses it — `orchestrator-examples#how-kit-expresses-it`
 - Intake loop — `orchestrator-examples#intake-loop`
-- Problem — `orchestrator-examples#problem`
 - Release coordinator — `orchestrator-examples#release-coordinator`
-- Role: build — `orchestrator-examples#role-build`
-- Role: ship — `orchestrator-examples#role-ship`
 - Run it — `orchestrator-examples#run-it`
 - Run it — `orchestrator-examples#run-it-1`
 - Run it — `orchestrator-examples#run-it-2`
 - The bar: an order — `orchestrator-examples#the-bar-an-order`
 - The loop: an orchestrator — `orchestrator-examples#the-loop-an-orchestrator`
-- The same loop as a swarm — `orchestrator-examples#the-same-loop-as-a-swarm`
 - The shape — `orchestrator-examples#the-shape`
 - The source — `orchestrator-examples#the-source`
 - The spec — `orchestrator-examples#the-spec`
@@ -411,31 +462,24 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - See who is running — `peers#see-who-is-running`
 - Send a message — `peers#send-a-message`
 - Send through hevd — `peers#send-through-hevd`
-- Swarms — `swarms`
-- Acceptance — `swarms#acceptance`
-- Acceptance — `swarms#acceptance-1`
-- Acceptance — `swarms#acceptance-2`
-- Check it first — `swarms#check-it-first`
-- Commands — `swarms#commands`
-- Example — `swarms#example`
-- How it runs — `swarms#how-it-runs`
-- Later phases — `swarms#later-phases`
-- Orchestrator fields — `swarms#orchestrator-fields`
-- Problem — `swarms#problem`
-- Races — `swarms#races`
-- Role: integrate — `swarms#role-integrate`
-- Role: migrate — `swarms#role-migrate`
-- Roles — `swarms#roles`
-- Scope — `swarms#scope`
-- The file — `swarms#the-file`
-- Traces — `swarms#traces`
+- Review — `review`
+- Credits — `review#credits`
+- Open a review — `review#open-a-review`
+- review-notes.json — `review#review-notesjson`
+- Send notes back — `review#send-notes-back`
+- Steering — `steering`
+- How it gets there — `steering#how-it-gets-there`
+- Levels — `steering#levels`
+- Receipts — `steering#receipts`
 - Traces — `traces`
 - Across hosts — `traces#across-hosts`
 - Ask an agent — `traces#ask-an-agent`
 - Ask-rooted traces — `traces#ask-rooted-traces`
+- Board — `traces#board`
 - Cost — `traces#cost`
 - Hosted archives — `traces#hosted-archives`
 - Images — `traces#images`
+- In the dashboard — `traces#in-the-dashboard`
 - Index by hand — `traces#index-by-hand`
 - Limits — `traces#limits`
 - List and read traces — `traces#list-and-read-traces`
@@ -444,7 +488,6 @@ Users ask things like: repo not admitted, host unreachable, run stuck, share tra
 - Search — `traces#search-1`
 - Sensitive data — `traces#sensitive-data`
 - Start capturing — `traces#start-capturing`
-- The Asks view — `traces#the-asks-view`
 - The web UI — `traces#the-web-ui`
 - Timeline — `traces#timeline`
 - Transcript — `traces#transcript`

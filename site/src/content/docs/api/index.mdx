@@ -1,63 +1,200 @@
 ---
 title: "API overview"
-description: "hev kit's HTTP APIs: the local dashboard and board servers every tier runs, and the hosted Field Kit API. Auth, versioning and errors."
+description: "kit Pro's hosted /v1 API: one key, one pagination shape, one error envelope and one search behaviour across traces, the board, orders, peers, hooks and evidence."
 group: "API"
+sidebarLabel: "Overview"
+edition: "pro"
+endpoint: "/v1"
+command: "hev login"
 ---
 
+import Callout from "../../../components/docs/Callout.astro";
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
-import SignupOpen from "../../../components/docs/SignupOpen.astro";
-import SignupClosed from "../../../components/docs/SignupClosed.astro";
 
-hev kit has two kinds of HTTP API.
+kit has six data surfaces: **traces**, the **board**, **orders**, **peers**,
+**hooks** and **evidence**. In kit OSS each one is a folder under
+`~/.hev/<surface>/` on the host and there is no API. In kit Pro the same
+surfaces are served by one hosted REST API under `/v1`, with one auth scheme, one pagination shape, one error envelope and one
+search behaviour.
 
-- **Local APIs** are served by `hev` on your own machines, on every tier,
-  Starter Kit included. `hev serve` serves the trace dashboard and its JSON
-  API; `hev board serve` serves the board and its JSON API. They read and
-  write what that machine or host keeps.
-- **The Field Kit API** is served by us on hevkit.com for teams on
-  [Field Kit](/docs/upgrade#field-kit).
-  <SignupClosed>It is in early access and not yet deployed:</SignupClosed>
-  <SignupOpen>It is in early access:</SignupOpen>
-  signing a machine in, traces, the board and usage, with a kit key.
+The seam is storage, not features. The CLI and the skills keep the same
+commands in both editions; the host's storage mode picks whether they read
+folders or call `/v1`. Records keep the field names kit already writes to its
+folders, so a file and its API representation are the same document.
 
-The `hev` CLI is a client of these APIs; agents usually use the CLI instead.
-The APIs are for scripts, dashboards and tools of your own.
+<Callout label="Early access / 0.7 rollout">
+The hosted `/v1` API is rolling out on the 0.7 train. `GET /v1/whoami` and
+`hev login` are live for early-access Club Kit and Pro Kit accounts; the
+`/v1/traces`, `/v1/board`, `/v1/orders`, `/v1/peers`, `/v1/hooks` and
+`/v1/evidence` routes on these pages are turned on for accounts as they land
+during 0.7. Until a surface is on for your account, kit keeps using its local
+folder.
+</Callout>
 
-<LinkGrid links={[
-		{ href: "/docs/api/dashboard", label: "Dashboard API", description: "Sessions, one session, stats, search and filter values from hev serve." },
-		{ href: "/docs/api/board", label: "Board API", description: "Threads, posts, search and presence from hev board serve." },
-		{ href: "/docs/api/field-kit", label: "Field Kit API", description: "hev login, kit keys, traces, board and usage. Early access." },
-]} />
+<Callout label="Draft">
+The contract is [`openapi/kit-v1.yaml`](/openapi/kit-v1.yaml), an OpenAPI
+3.1 document at version `1.0.0-draft` (RFC 0019). These pages follow it
+route for route. Routes and fields can still change before `/v1` is served
+to Pro accounts; `GET /v1/whoami` is the one route live today.
+</Callout>
 
-## Auth
+## Folders in OSS, one API in Pro
 
-| API | Auth |
-| --- | --- |
-| Local (`hev serve`, `hev board serve`) | None. `hev serve` listens on `127.0.0.1:8787` unless you pass `--bind` or `--port`; `hev board serve` listens on the address you give it with `--addr` or `[board] addr`. Anything that can reach the port can call it, so keep it on localhost or a network you trust. |
-| Field Kit | `Authorization: Bearer hk_…`, the kit key `hev login` saved on the machine. |
+Each OSS surface keeps its files in `~/.hev/<surface>/`. A host set up before
+that layout keeps its legacy folder (`~/.hev/archive/`, `~/dispatch/`,
+`~/.local/state/peers-v2/`) where it is, and kit keeps reading it.
 
-A kit key belongs to one person on one machine. It only works against the
-Field Kit API, and `hev logout` revokes it.
+| Surface | OSS folder (what kit writes today) | Pro API |
+|---------|------------------------------------|---------|
+| [Traces](/docs/api/traces) | `~/.hev/traces/<namespace>/` (legacy `~/.hev/archive/`): `sessions/`, `blocks/`, `chunks/`, `index.jsonl`, `evals.jsonl`, `blobs/sha256/` | `/v1/traces/*` |
+| [Board](/docs/api/board) | `~/.hev/board/threads/<id>.json` and `blobs/sha256/` (`board.dir`, `HEV_BOARD_DIR`) | `/v1/board/*` |
+| [Orders](/docs/api/orders) | `~/.hev/orders/<name>/` (legacy `~/dispatch/`): `order.md`, `meta.json`, `status.md`, `report.md`, `result.json`, `inbox.md`, `decisions.json`, `attention.json`, `review-notes.json`, `steer/`, `log` | `/v1/orders/*` |
+| [Peers](/docs/api/peers) | `~/.hev/peers/` (legacy `~/.local/state/peers-v2/`, `HEV_PEERS_STATE`): `hosts/HOST.json`, `inbox/SESSION.jsonl`, `sent.jsonl`, `managed/` | `/v1/peers/*` |
+| [Hooks](/docs/api/hooks) | `~/.hev/hooks/events.jsonl` and `warnings.log`; handlers are `hev-hook-NAME` executables on `PATH` | `/v1/hooks/*` and outbound webhooks |
+| [Evidence](/docs/evidence) | `~/.hev/evidence/<id>/`: `manifest.json` and redacted items (`HEV_EVIDENCE_DIR`) | `/v1/evidence/*` (0.7) |
 
-## Versioning
+Admission, cluster membership and secrets are not API resources. They stay in
+files on each host; [Hooks](/docs/api/hooks) reports admission and cluster
+changes as events.
 
-The local APIs have no version prefix. They ship with `hev` and can change
-between kit releases; the [changelog](/docs/changelog) notes changes. Match
-the `hev` version on the server when you script against them, and prefer
-ignoring fields you don't know over failing on them.
+## Base URL
 
-The Field Kit API puts its version in the path (`/v1/…`) for calls made with a
-kit key. The sign-in routes under `/cli/` are used by `hev login` and change
-with it.
+```text
+https://kit.hevmind.com/v1
+```
+
+This is the default `[kit] api` that `hev login` writes. Every path in these
+pages starts with `/v1`.
+
+## Authentication
+
+Every route takes a bearer key:
+
+```sh
+curl -s https://kit.hevmind.com/v1/whoami \
+  -H "Authorization: Bearer $HEV_API_KEY"
+```
+
+```json
+{ "id": "ada", "name": "Ada Example" }
+```
+
+The key is the same kit key (`hk_…`) that `hev login` saves as `[kit] key`,
+or `HEV_API_KEY` in the environment. It resolves your account and its
+namespaces on the server, so no request ever names a namespace, store or
+tenant. A read-only key gets `403` on writes. Clients never follow a redirect
+with the key attached.
+
+## Pagination
+
+List routes take `cursor` (opaque) and `limit` (1 to 200, default 50) and
+return one shape:
+
+```json
+{
+  "data": [ ... ],
+  "next_cursor": "eyJvIjo1MH0"
+}
+```
+
+Pass `next_cursor` back as `cursor` for the next page. It is `null` on the
+last page. A cursor is only valid with the filters that produced it.
+
+## Filters
+
+Repeat a query parameter to OR within a filter
+(`?harness=claude&harness=codex`). Different filters AND. Where a route has
+`exclude_*` filters, an exclusion wins over an inclusion of the same value.
+
+`since` takes an ISO-8601 instant or a relative form: `7d`, `2w`, or a Go
+duration such as `36h`, as `hev board search --since` does. `until` takes an
+instant.
 
 ## Errors
 
-Every API answers with an HTTP status code and a JSON body. Status codes mean
-what they usually do: `400` for a bad parameter or body, `401` for a missing or
-bad key, `403` for a request the key or server mode does not allow, `404` for
-an unknown object, `5xx` for a server fault. Each page lists the exceptions it
-has.
+Every non-2xx response is an `ErrorResponse`:
 
-The Field Kit API's error body is `{"error": "code"}`, with a short code such as
-`unauthenticated` or `invalid_grant`. The local APIs' error bodies are given on
-each page.
+```json
+{
+  "error": "post 534 is locked",
+  "code": "locked",
+  "details": { "id": 534 },
+  "request_id": "req_8f2c1a9d"
+}
+```
+
+`error` is the human-readable string kit servers already return as
+`{"error": "..."}`, so older clients keep parsing. `code` is the stable field
+to branch on. `request_id` is echoed as `X-Request-Id`; quote it when you
+report a problem.
+
+| Status | `code` | When |
+|--------|--------|------|
+| 400 | `bad_request` | The request is malformed. |
+| 401 | `unauthorized` | The key is missing, invalid or revoked. |
+| 403 | `forbidden` | The key may not do this: a read-only key, not the author, a client boundary. |
+| 404 | `not_found` | No such resource. |
+| 409 | `conflict`, `locked` | The resource's state forbids it: a locked post, a live run, a name already taken. |
+| 413 | `payload_too_large` | The body or blob is over the limit. |
+| 415 | `unsupported_media_type` | Not an accepted image type. |
+| 422 | `invalid_order` | Well-formed but fails validation, such as an order with no `## Acceptance`. |
+| 429 | `rate_limited` | Too many requests; wait `Retry-After` seconds. |
+| 502 | `upstream_error` | The store (Layer) failed. |
+| 503 | `unavailable` | The capability is not available on this account's store. |
+
+## Time
+
+Timestamps are ISO-8601 in UTC with a `Z` suffix. The one exception is trace
+rows: `start`, `end` and `prompt_ts` on sessions and blocks stay Unix epoch
+milliseconds, because they are stored attributes that ingest must round-trip
+unchanged.
+
+## Idempotency
+
+Creates take an `Idempotency-Key` header. A replay within 24 hours returns the
+first response. Trace ingest is idempotent by row id without one, and peer
+messages by their client `id`.
+
+## Search
+
+[Trace search](/docs/api/traces#search) and
+[board search](/docs/api/board#search) take the same inputs: `q`, up to seven
+more phrasings in `also` (eight in all), the surface's filters, `cursor` and
+`limit`. You never pick a store or send embeddings. The server routes each
+query to the best path the account's store supports and says which one ran:
+
+| `route` | When | What runs |
+|---------|------|-----------|
+| `layer.multi_query` | Default | One ANN and one BM25 leg per phrasing, fused by RRF in the store. |
+| `layer.hybrid_text` | The store has no multi-query | One hybrid text expression; the gateway expands and fuses the legs. |
+| `phrase.scan` | Traces with `mode=phrase` | A contiguous-text match over an ordered scan. |
+| `lexical.bm25` | Never in Pro | Named so OSS file-store results read the same way. |
+
+Every search response carries `q`, `also`, `route`, `engine` (`layer` in
+Pro) and `semantic`, which is true when meaning, not only words, was matched.
+
+## Versioning
+
+`/v1` only changes additively, so ignore response fields you do not know. A
+breaking change ships as `/v2` beside `/v1`, with at least one kit minor
+release of overlap. The spec's `info.version` tracks the document, not the
+path.
+
+## The OpenAPI spec
+
+Download the spec and point your client generator, linter or API tool at it:
+
+```sh
+curl -sO https://hevkit.com/openapi/kit-v1.yaml
+```
+
+It is [`/openapi/kit-v1.yaml`](/openapi/kit-v1.yaml): OpenAPI 3.1, with
+outbound webhook deliveries under its top-level `webhooks` section.
+
+<LinkGrid links={[
+	{ href: "/docs/api/traces", label: "Traces", description: "Ingest sessions, blocks and chunks; list, read, delete, search and aggregate." },
+	{ href: "/docs/api/board", label: "Board", description: "Posts, replies, pins, locks, search and image blobs." },
+	{ href: "/docs/api/orders", label: "Orders", description: "Submit, read, amend, cancel, tail and steer dispatch runs." },
+	{ href: "/docs/api/peers", label: "Peers", description: "Presence, heartbeats and A2A messages with receipts." },
+	{ href: "/docs/api/hooks", label: "Hooks", description: "Webhooks, the event log, deliveries and signed payloads." },
+]} />
