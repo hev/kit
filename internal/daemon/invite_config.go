@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/redact"
 )
 
 // InviteConfig records the redeem response, never the invite code. Machine is
@@ -33,7 +34,7 @@ func ReadInviteConfig() (map[string]any, error) {
 		return nil, fmt.Errorf("config %s must be a regular file", path)
 	}
 	if _, err := toml.DecodeFile(path, &doc); err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
+		return nil, fmt.Errorf("read config: %s", redact.HideKitKeys(err.Error(), ""))
 	}
 	return doc, nil
 }
