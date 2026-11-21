@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -18,7 +19,10 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/hevpaths"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/workspace"
 )
 
 // HarnessConfig is one optional [harnesses.NAME] table in dispatch.toml.
@@ -202,12 +206,89 @@ func withModelProvider(args []string, provider string) []string {
 // redacts from the harness's output. With no table, env and args come back
 // unchanged.
 func harnessLaunch(ctx context.Context, configPath, harness, caller string, env, args []string) ([]string, []string, []string, error) {
+	return workspaceHarnessLaunch("", ctx, configPath, harness, caller, env, args)
+}
+
+func workspaceHarnessLaunch(name string, ctx context.Context, configPath, harness, caller string, env, args []string) ([]string, []string, []string, error) {
 	h, err := harnessSettings(configPath, harness)
 	if err != nil {
 		return env, args, nil, err
 	}
+	if name != "" {
+		w, err := workspace.Named(name)
+		if err != nil {
+			return env, args, nil, err
+		}
+		if name != workspace.Default || w.Login == "own" || w.Subscriptions.EnvRefs != nil {
+			h.EnvRefs = w.Subscriptions.EnvRefs
+			for key := range h.EnvRefs {
+				for _, reserved := range []string{
+					"HEV_WORKSPACE", workspace.HostHomeEnv, "HEV_CONFIG", "HEV_DISPATCH_CONFIG",
+					"HEV_ORDERS_DIR", "HEV_PEERS_STATE", secrets.EndpointEnv,
+					"CLAUDE_CONFIG_DIR", "CODEX_HOME", "HEV_AGY_DATA_DIR", "GEMINI_CLI_HOME",
+					"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+					"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+				} {
+					if strings.EqualFold(key, reserved) {
+						return env, args, nil, fmt.Errorf("workspace subscription environment name %q is reserved", key)
+					}
+				}
+			}
+			if err := checkHarnesses(map[string]HarnessConfig{harness: h}); err != nil {
+				return env, args, nil, err
+			}
+		}
+		if w.IsolatedStorage() {
+			blocked := append(layerenv.Names(), "FACTORY_BOARD_URL", "FACTORY_BOARD_LAYER_API_KEY", "FACTORY_BOARD_NAMESPACE")
+			env = workspaceEnvWithout(env, blocked)
+		}
+		profile := w.Profile(harness)
+		if profile != "" {
+			var blocked []string
+			switch harness {
+			case "claude":
+				blocked = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+			case "codex":
+				blocked = []string{"OPENAI_API_KEY", "CODEX_API_KEY"}
+			case "agy":
+				blocked = []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"}
+			}
+			env = workspaceEnvWithout(env, blocked)
+			if err := os.MkdirAll(profile, 0700); err != nil {
+				return env, args, nil, fmt.Errorf("could not create workspace %q harness profile", name)
+			}
+			switch harness {
+			case "claude":
+				env = append(env, "CLAUDE_CONFIG_DIR="+profile)
+			case "codex":
+				env = append(env, "CODEX_HOME="+profile)
+			case "agy":
+				// Antigravity reads OAuth, settings and sessions under its home.
+				// Keep kit's control files reachable with explicit host paths.
+				env = append(env,
+					"HOME="+profile, "USERPROFILE="+profile,
+					"APPDATA="+filepath.Join(profile, "AppData", "Roaming"),
+					"LOCALAPPDATA="+filepath.Join(profile, "AppData", "Local"),
+					"XDG_CONFIG_HOME="+filepath.Join(profile, ".config"),
+					"XDG_DATA_HOME="+filepath.Join(profile, ".local", "share"),
+					"XDG_CACHE_HOME="+filepath.Join(profile, ".cache"),
+					"HEV_AGY_DATA_DIR="+w.AgyTranscriptDir(),
+					workspace.HostHomeEnv+"="+workspace.HostHome(),
+					"HEV_CONFIG="+workspace.ConfigPath(),
+					"HEV_DISPATCH_CONFIG="+ConfigPath(configPath),
+					"HEV_ORDERS_DIR="+Root(),
+					"HEV_PEERS_STATE="+hevpaths.Dir(hevpaths.Peers),
+					secrets.EndpointEnv+"="+secrets.Endpoint(),
+				)
+			}
+		}
+		env = append(env, "HEV_WORKSPACE="+name)
+	}
 	extra, values, err := harnessSecretEnv(ctx, harness, h, caller)
 	if err != nil {
+		if name != "" && name != workspace.Default {
+			return env, args, nil, fmt.Errorf("could not resolve workspace %q harness subscriptions", name)
+		}
 		return env, args, nil, err
 	}
 	env = append(env, extra...)
@@ -391,4 +472,19 @@ func harnessOutput(c *exec.Cmd, out io.Writer, values []string) func() error {
 		}
 		return err
 	}
+}
+
+func workspaceEnvWithout(env, blocked []string) []string {
+	out := make([]string, 0, len(env))
+entries:
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		for _, key := range blocked {
+			if strings.EqualFold(name, key) {
+				continue entries
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
 }

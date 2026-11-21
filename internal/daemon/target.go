@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"fmt"
+	"github.com/hev/kit/internal/workspace"
+	"path/filepath"
 	"strings"
 
 	"github.com/hev/kit/internal/archive"
@@ -193,4 +195,32 @@ Nothing was moved or deleted.
   `+"`hev up`"+` moves this config to files: it drops store = %q and
   api_key = %q from [layer] in %s.`,
 		filearchive.Root(cfg.ArchiveDir), project, project, RetiredStore, layerenv.PlaceholderKey, cfg.ConfigPath)
+}
+
+// OpenWorkspaceTarget opens a scoped trace target without consulting buckets
+// or shared credentials. Namespace overrides cannot escape that target.
+func OpenWorkspaceTarget(w workspace.Selection, namespace string) (Target, error) {
+	traces, _ := w.Namespaces()
+	if namespace != "" && namespace != traces {
+		return Target{}, fmt.Errorf("workspace boundary: namespace %q is outside workspace %q", namespace, w.Name)
+	}
+	cfg := &Config{ArchiveDir: filepath.Join(w.Root(), "archive"), CaptureImages: true}
+	images, err := ImageCapture(cfg, traces)
+	if err != nil {
+		return Target{}, err
+	}
+	key, err := layerenv.WorkspaceKey(w)
+	if err != nil {
+		return Target{}, err
+	}
+	if key == "" {
+		files, err := filearchive.OpenLazy(cfg.ArchiveDir, traces)
+		return Target{Mode: storagemode.Filesystem, Files: files, Images: images}, err
+	}
+	endpoint := w.Layer.Endpoint
+	if endpoint == "" {
+		endpoint = layer.DefaultEndpoint
+	}
+	client := layer.New(endpoint, key, traces, "")
+	return Target{Mode: storagemode.Layer, Layer: client, Images: images, KeySource: "workspace"}, nil
 }

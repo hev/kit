@@ -27,6 +27,7 @@ import (
 // chunk ids are content-addressed that is a no-op upsert rather than a
 // duplicate archive. That property is why this file can stay this simple.
 type State struct {
+	path  string
 	Units map[string]string `json:"units"` // unit key -> signature
 }
 
@@ -48,8 +49,12 @@ func ResetState() error {
 }
 
 func LoadState() *State {
-	s := &State{Units: map[string]string{}}
-	b, err := os.ReadFile(statePath())
+	return LoadStateAt(statePath())
+}
+
+func LoadStateAt(path string) *State {
+	s := &State{Units: map[string]string{}, path: path}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return s
 	}
@@ -60,7 +65,10 @@ func LoadState() *State {
 }
 
 func (s *State) Save() error {
-	p := statePath()
+	p := s.path
+	if p == "" {
+		p = statePath()
+	}
 	if err := platformops.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}

@@ -26,6 +26,10 @@ type SpanWriter interface {
 // traces. Ask text and order titles pass through the redaction scrubber.
 // Rows whose content has not changed since the last publish are skipped.
 func RunTraceSpans(root string, cl SpanWriter, st *State, dryRun bool) (*Report, error) {
+	return RunWorkspaceTraceSpans(root, "", cl, st, dryRun)
+}
+
+func RunWorkspaceTraceSpans(root, workspace string, cl SpanWriter, st *State, dryRun bool) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
@@ -36,7 +40,7 @@ func RunTraceSpans(root string, cl SpanWriter, st *State, dryRun bool) (*Report,
 		rep.Redactions.Add(counts)
 		return out
 	}
-	rows := dispatch.TraceSpanRows(dispatch.ReadRunRecords(root), layer.Hostname(), scrub)
+	rows := dispatch.TraceSpanRows(dispatch.WorkspaceRunRecords(root, workspace), layer.Hostname(), scrub)
 	var changed []trace.SpanRow
 	sigs := map[string]string{}
 	for _, row := range rows {
