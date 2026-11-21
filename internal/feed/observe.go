@@ -120,7 +120,7 @@ func (o Observer) ObserveHook(raw []byte) {
 		}
 		payload, _ := json.Marshal(map[string]any{
 			"kind": "reply", "board": reply.Data.Board,
-			"thread_id": reply.Data.ThreadID, "url": reply.Data.Origin,
+			"thread_id": reply.Data.ThreadID, "url": reply.Data.Origin + "/t/" + strconv.FormatInt(reply.Data.ThreadID, 10),
 		})
 		o.ObserveLifecycle(KindBoardPost, payload)
 		return
@@ -365,7 +365,7 @@ func (o Observer) ObserveLifecycle(event string, payload []byte) {
 		if b.Kind == "reply" && b.ThreadID > 0 {
 			id = strconv.FormatInt(b.ThreadID, 10)
 		}
-		rec.Thread = Thread{Kind: ThreadBoard, Key: "board:" + BoardOrigin(b.URL) + "/" + id, Name: b.Board + " #" + id, Host: host}
+		rec.Thread = Thread{Kind: ThreadBoard, Key: "board:" + BoardMount(b.URL, id) + "/" + id, Name: b.Board + " #" + id, Host: host}
 		rec.Client = cfg.Client || cfg.IsClientPath(b.Cwd)
 	case KindPeerMessage:
 		var p struct{ From, To, Cwd string }
@@ -396,13 +396,14 @@ func stripContent(raw json.RawMessage) json.RawMessage {
 	return b
 }
 
-// BoardOrigin retains only the HTTP(S) origin used to group board threads.
-func BoardOrigin(raw string) string {
+// BoardMount keeps the mount prefix used in stored parent keys. Only the
+// final thread route is removed, so mounts can themselves contain "/t/".
+func BoardMount(raw, threadID string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return ""
 	}
-	return u.Scheme + "://" + u.Host
+	return u.Scheme + "://" + u.Host + strings.TrimSuffix(u.EscapedPath(), "/t/"+threadID)
 }
 
 // ObserveEvidence spools an acceptance-evidence recording directory. run,

@@ -170,7 +170,7 @@ func packAttempt(dir, branch string, h History) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
+func receiveAmend(q Request) (r Response, retErr error) {
 	r.ImportRefused = true
 	o, err := Parse(q.Order)
 	if err != nil {
@@ -183,25 +183,67 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err != nil {
 		return r, err
 	}
-	defer unlock()
-	live, err = liveNames()
-	if err != nil {
-		return r, err
-	}
-	if err = addReservations(live); err != nil {
-		return r, err
-	}
-	cfg, err := checkAmendAdmission(q, q.Meta, live, false)
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	live, err := admissionLive()
 	if err != nil {
 		return r, err
 	}
 	dir := filepath.Join(Root(), q.Name)
-	if _, err = os.Stat(dir); !os.IsNotExist(err) {
+	if live[q.Name] || exists(queuePath(q.Name)) || exists(dir) {
 		return r, fmt.Errorf("target order name already exists")
 	}
+	cfg, err := checkAmendAdmission(q, q.Meta, live)
+	if err != nil {
+		return r, err
+	}
 	repo := resolveRepo(o.Repo, cfg.Workspace)
-	if _, err = command(repo, "git", "show-ref", "--verify", "refs/heads/"+q.Meta.Branch); err == nil {
-		return r, fmt.Errorf("target branch already exists")
+	checkBranch := func() error {
+		if _, err := command(repo, "git", "show-ref", "--verify", "refs/heads/"+q.Meta.Branch); err == nil {
+			return fmt.Errorf("target branch already exists")
+		}
+		return nil
+	}
+	if err = checkBranch(); err != nil {
+		return r, err
+	}
+	if err = os.Mkdir(dir, 0700); err != nil {
+		return r, fmt.Errorf("reserve target order: %w", err)
+	}
+	keepDir := false
+	defer func() {
+		if !keepDir {
+			if err := os.RemoveAll(dir); err != nil {
+				r.ImportRefused = false
+				if retErr == nil {
+					retErr = fmt.Errorf("release target order reservation: %w", err)
+				}
+			}
+		}
+	}()
+	if err = reserve(dir); err != nil {
+		return r, err
+	}
+	defer os.Remove(filepath.Join(dir, "admission.json"))
+	if err = admitWithRootUnlocked(&unlock, repo, q.Meta, "amend"); err != nil {
+		return r, err
+	}
+	live, err = admissionLive()
+	if err != nil {
+		return r, err
+	}
+	cfg, err = checkAmendAdmission(q, q.Meta, live)
+	if err != nil {
+		return r, err
+	}
+	if resolveRepo(o.Repo, cfg.Workspace) != repo {
+		return r, fmt.Errorf("target repository changed during admission; retry")
+	}
+	if err = checkBranch(); err != nil {
+		return r, err
 	}
 	if q.Action == "amend-check" {
 		r.Message = "amend admitted"
@@ -215,25 +257,18 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err = unpackAttempt(stage, q.Transfer); err != nil {
 		return r, err
 	}
-	branchCreated, dirCreated, launched := false, false, false
+	branchCreated := false
 	defer func() {
-		if retErr == nil || launched {
+		if retErr == nil || keepDir || !branchCreated {
 			return
 		}
-		if dirCreated {
-			if _, e := command(repo, "git", "worktree", "remove", "--force", filepath.Join(dir, "wt")); e != nil {
-				// No worktree may have been registered yet.
-				_ = os.RemoveAll(dir)
-				_, _ = command(repo, "git", "worktree", "prune")
-			}
-			if e := os.RemoveAll(dir); e != nil {
-				r.ImportRefused = false
-			}
+		if _, e := command(repo, "git", "worktree", "remove", "--force", filepath.Join(dir, "wt")); e != nil {
+			// No worktree may have been registered yet.
+			_ = os.RemoveAll(dir)
+			_, _ = command(repo, "git", "worktree", "prune")
 		}
-		if branchCreated {
-			if _, e := command(repo, "git", "branch", "-D", q.Meta.Branch); e != nil {
-				r.ImportRefused = false
-			}
+		if _, e := command(repo, "git", "branch", "-D", q.Meta.Branch); e != nil {
+			r.ImportRefused = false
 		}
 	}()
 	bundle := filepath.Join(stage, "branch.bundle")
@@ -241,10 +276,6 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 		return r, err
 	}
 	branchCreated = true
-	if err = os.Mkdir(dir, 0700); err != nil {
-		return r, err
-	}
-	dirCreated = true
 	next := q.Meta
 	next.ResolvedRepo = repo
 	next.Compacted, next.HeadSHA, next.WorkspaceBase = false, "", ""
@@ -313,7 +344,7 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err = resetValidation(dir); err != nil {
 		return r, err
 	}
-	launched = true
+	keepDir = true
 	r.ImportRefused = false
 	if err = amendLaunch(dir, q.Name); err != nil {
 		recordUnconfirmed(dir, next, err)

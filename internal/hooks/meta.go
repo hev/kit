@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"maps"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -85,7 +87,8 @@ func newMetaEvent(event string, data map[string]any, reason string) Event {
 		switch value := value.(type) {
 		case string:
 			if event == feed.KindBoardReply && key == "board_origin" {
-				ev.Data[key] = feed.BoardOrigin(value)
+				threadID, _ := data["thread_id"].(int64)
+				ev.Data[key] = feed.BoardMount(value, strconv.FormatInt(threadID, 10))
 			} else {
 				ev.Data[key] = scrubMeta(value)
 			}
@@ -136,11 +139,8 @@ func scrubMeta(value string) string {
 	if value == "" {
 		return ""
 	}
-	for _, word := range strings.Fields(value) {
-		_, value, _ := strings.Cut(word, "=")
-		if pathLike(word) || pathLike(value) {
-			return "[redacted]"
-		}
+	if metaPath.MatchString(value) || strings.Contains(value, `\`) {
+		return "[redacted]"
 	}
 	var salt [32]byte
 	if _, err := rand.Read(salt[:]); err != nil {
@@ -154,8 +154,6 @@ func scrubMeta(value string) string {
 	return safe
 }
 
-func pathLike(word string) bool {
-	word = strings.TrimLeft(word, `"'`+"([{")
-	return strings.HasPrefix(word, "/") || strings.HasPrefix(word, "~") ||
-		strings.Contains(word, `\`) || strings.Contains(word, "://")
-}
+// Match absolute or home-relative paths at the start of a value or
+// after whitespace and punctuation, including diagnostic prefixes.
+var metaPath = regexp.MustCompile(`(^|[\s\p{P}\p{S}])(/|~)`)

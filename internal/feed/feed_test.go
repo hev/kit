@@ -3,6 +3,7 @@ package feed_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,15 +189,19 @@ func TestBoardReplyReplayUsesLiveBoardThread(t *testing.T) {
 	dir := t.TempDir()
 	cfg := feed.Config{Enabled: true, Events: []string{feed.KindBoardPost}, Boards: []string{"feedback"}}
 	obs := feed.Observer{Config: &cfg, Dir: dir, Host: "test-host", Kick: func(string) {}}
-	obs.ObserveLifecycle(feed.KindBoardPost, []byte(`{"board":"feedback","kind":"post","id":"42","url":"https://board.example/t/42"}`))
-	obs.ObserveLifecycle(feed.KindBoardPost, []byte(`{"board":"feedback","kind":"reply","thread_id":42,"id":"second","url":"https://board.example/t/42#p2"}`))
-	obs.ObserveHook([]byte(`{"schema":"hev.hook.event/v1","event":"board-reply","data":{"board":"feedback","thread_id":42,"board_origin":"https://board.example"}}`))
-	obs.ObserveHook([]byte(`{"schema":"hev.hook.event/v1","event":"board-reply","data":{"board":"hidden","thread_id":42,"board_origin":"https://board.example"}}`))
-	pending := feed.Pending(dir)
-	if len(pending) != 3 {
-		t.Fatalf("pending = %v", pending)
+	for _, mount := range []string{"", "/engineering", "/clients/t/42"} {
+		url := "https://user:password@board.example" + mount + "/t/42?token=secret#fragment"
+		for _, message := range []string{
+			`{"board":"feedback","kind":"post","id":"42","url":%q}`,
+			`{"board":"feedback","kind":"reply","thread_id":42,"id":"second","url":%q}`,
+		} {
+			obs.ObserveLifecycle(feed.KindBoardPost, []byte(fmt.Sprintf(message, url)))
+		}
+		obs.ObserveHook([]byte(fmt.Sprintf(`{"event":"board-reply","data":{"board":"feedback","thread_id":42,"board_origin":%q}}`, "https://board.example"+mount)))
 	}
-	for _, path := range pending {
+	obs.ObserveHook([]byte(`{"event":"board-reply","data":{"board":"hidden","thread_id":42,"board_origin":"https://board.example"}}`))
+	counts := map[string]int{}
+	for _, path := range feed.Pending(dir) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -205,11 +210,14 @@ func TestBoardReplyReplayUsesLiveBoardThread(t *testing.T) {
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			t.Fatal(err)
 		}
-		if rec.Thread.Key != "board:https://board.example/42" || rec.Kind != feed.KindBoardPost {
+		if rec.Kind != feed.KindBoardPost {
 			t.Fatalf("unexpected board record: %s", raw)
 		}
+		counts[rec.Thread.Key]++
 	}
-	if origin := feed.BoardOrigin("https://user:password@board.example/private?token=secret#fragment"); origin != "https://board.example" {
-		t.Fatalf("unsafe board replay origin: %q", origin)
+	if len(counts) != 3 || counts["board:https://board.example/42"] != 3 ||
+		counts["board:https://board.example/engineering/42"] != 3 ||
+		counts["board:https://board.example/clients/t/42/42"] != 3 {
+		t.Fatalf("unexpected board keys: %v", counts)
 	}
 }

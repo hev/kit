@@ -616,7 +616,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		return amend(q)
 	}
 	if q.Action == "amend-check" || q.Action == "amend-import" {
-		return receiveAmend(q, live)
+		return receiveAmend(q)
 	}
 	if q.Resolve != "" && q.Action != "say" && q.Action != "rework" {
 		return r, fmt.Errorf("resolve requires an ended run; cannot resolve %s on a running order", q.Resolve)
@@ -718,7 +718,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		locked := true
 		defer func() {
-			if locked {
+			if locked && unlock != nil {
 				if q.Action == "start" && classRejectionReleases(handleErr) {
 					releaseClassSlotLocked(slot)
 					released = true
@@ -964,7 +964,41 @@ func Handle(q Request) (r Response, handleErr error) {
 			} else if _, e = os.Stat(admissionRepo); e != nil {
 				return r, fmt.Errorf("worktree was cleaned")
 			}
-			if e = admitTargetRepo(admissionRepo, m, originalAction); e != nil {
+			revalidate := snapshotAttempt(dir)
+			if e = reserve(dir); e != nil {
+				return r, e
+			}
+			defer os.Remove(filepath.Join(dir, "admission.json"))
+			if e = admitWithRootUnlocked(&unlock, admissionRepo, m, originalAction); e != nil {
+				return r, e
+			}
+			if e = revalidate(); e != nil {
+				return r, e
+			}
+			live, e = admissionLive()
+			if e != nil {
+				return r, e
+			}
+			delete(live, q.Name)
+			if q.excludeFinished != "" {
+				delete(live, q.excludeFinished)
+			}
+			policy, e = targetPolicy()
+			if e != nil {
+				return r, e
+			}
+			cap = policy.Cap
+			if q.Cap > 0 && q.Cap < cap {
+				cap = q.Cap
+			}
+			if e = CheckCap(len(live), cap); e != nil {
+				return r, e
+			}
+			if e = admitClass(policy.Classes, m.Class, q.Name, live); e != nil {
+				return r, e
+			}
+			pro, e = workspacePro(policy.WorkspacePolicy)
+			if e != nil {
 				return r, e
 			}
 			if m.Compacted {
@@ -1033,10 +1067,6 @@ func Handle(q Request) (r Response, handleErr error) {
 			if m.Every == "" {
 				newAttempt(&m)
 			}
-			if e = reserve(dir); e != nil {
-				return r, e
-			}
-			defer os.Remove(filepath.Join(dir, "admission.json"))
 			if e = awaitUpdateSwitch(); e != nil {
 				return r, e
 			}

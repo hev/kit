@@ -126,15 +126,7 @@ func TestDispatchClassCapRetryAndRework(t *testing.T) {
 		}
 	}
 	// An amend restart is a launch too.
-	var m Meta
-	if e := readJSON(filepath.Join(Root(), "alpha-one", "meta.json"), &m); e != nil {
-		t.Fatal(e)
-	}
-	live, e := liveNames()
-	if e != nil {
-		t.Fatal(e)
-	}
-	if _, e := checkAmendAdmission(Request{Name: "alpha-one"}, m, live, true); !classFull(e) {
+	if _, e := Handle(Request{Action: "amend", Name: "alpha-one", Order: classOrder("alpha-one", "code") + "\nRevised.\n"}); !classFull(e) {
 		t.Fatalf("amend restart exceeded classes.code: %v", e)
 	}
 	end("cli-one")

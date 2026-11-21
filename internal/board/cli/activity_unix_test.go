@@ -25,15 +25,24 @@ func TestBoardPostActivityHook(t *testing.T) {
 			t.Setenv("HEV_CONFIG", filepath.Join(dir, "config.toml"))
 			capture := filepath.Join(dir, "capture")
 			t.Setenv("HOOK_CAPTURE", capture)
+			reply := mode == "reply" || mode == "reply-client"
+			mount := ""
+			if reply {
+				mount = "/engineering"
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				request := strings.TrimPrefix(r.URL.RequestURI(), mount)
+				if mount != "" && request == r.URL.RequestURI() {
+					t.Errorf("request missed the board mount: %s", r.URL)
+				}
 				switch {
 				case mode == "rejected":
 					http.Error(w, `{"error":"rejected"}`, http.StatusForbidden)
-				case r.Method == "GET" && r.URL.RequestURI() == "/api/threads/42?peek=1":
+				case r.Method == "GET" && request == "/api/threads/42?peek=1":
 					_, _ = w.Write([]byte(`{"thread":{"id":42,"board":"watercooler","title":"Recorded title","tags":["test"]}}`))
 				case r.Method == "POST" && r.URL.Path == "/api/threads/42/pin":
 					_, _ = w.Write([]byte(`{"ok":true}`))
-				case r.Method == "POST" && r.URL.Path == "/api/threads/42/posts":
+				case r.Method == "POST" && request == "/api/threads/42/posts":
 					_, _ = w.Write([]byte(`{"id":"p:42:2","n":2,"author":"recorded","body":"` + body + `"}`))
 				case r.Method == "POST" && r.URL.Path == "/api/threads":
 					_, _ = w.Write([]byte(`{"id":42,"board":"watercooler","title":"Recorded title","tags":["test"],"author":"recorded"}`))
@@ -43,7 +52,7 @@ func TestBoardPostActivityHook(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			t.Setenv("FACTORY_BOARD_URL", server.URL)
+			t.Setenv("FACTORY_BOARD_URL", server.URL+mount)
 			script := "#!/bin/sh\nprintf '%s %s %s\\n' \"$1\" \"$HEV_HOOK_EVENT\" \"$HEV_HOOK_HARNESS\" > \"$HOOK_CAPTURE\"\n/bin/cat >> \"$HOOK_CAPTURE\"\n"
 			// A realistic budget: a forked shell handler can take well over
 			// 150ms under a loaded full-suite run. Only the hang case needs
@@ -67,7 +76,6 @@ func TestBoardPostActivityHook(t *testing.T) {
 			}
 			args := []string{"post", "--board", "watercooler", "--title", "Test post", "-m", body}
 			entryURL, kind, id := server.URL+"/t/42", "post", "42"
-			reply := mode == "reply" || mode == "reply-client"
 			if reply {
 				args = []string{"reply", "42", "-m", body, "--json"}
 				entryURL, kind, id = entryURL+"#p2", "reply", "p:42:2"
@@ -114,7 +122,8 @@ func TestBoardPostActivityHook(t *testing.T) {
 				if header != want+" "+want+" kit" || event.Schema != hooks.Schema || event.ID != logged.ID {
 					t.Fatalf("unexpected handler event: %s", raw)
 				}
-				if reply && (event.Data["entry_id"] != id || event.Data["author"] != "recorded" ||
+				if reply && (event.Data["board_origin"] != server.URL+mount ||
+					logged.Data["board_origin"] != event.Data["board_origin"] || event.Data["entry_id"] != id || event.Data["author"] != "recorded" ||
 					event.Data["board"] != "watercooler" || event.Data["body_bytes"] != float64(len(body))) {
 					t.Fatalf("unexpected reply metadata: %s", raw)
 				}
