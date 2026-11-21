@@ -266,9 +266,8 @@ func runUserHandler(ctx context.Context, exe string, ev Event) (Response, error)
 	c.Stdout, c.Stderr = &out, &errb
 	// A grandchild holding the pipes must not outlive the deadline.
 	c.WaitDelay = 100 * time.Millisecond
-	ownGroup(c)
 	c.Env = append(os.Environ(), "HEV_HOOK_EVENT="+ev.Event, "HEV_HOOK_HARNESS="+ev.Harness)
-	if err := c.Run(); err != nil {
+	if err := runHandler(ctx, c); err != nil {
 		if ctx.Err() != nil {
 			return Response{}, fmt.Errorf("timed out")
 		}

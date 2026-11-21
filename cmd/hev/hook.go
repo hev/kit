@@ -106,13 +106,13 @@ func runHook(args []string, in io.Reader, out io.Writer) (code int) {
 	receipts := make(chan struct{})
 	delivering := make(chan struct{}, 1)
 	resp := hooks.Run(ctx, ev, hookHandlers(&ev, home, func(messages []steer.Message) {
-		delivering <- struct{}{}
-		go func() {
-			defer close(receipts)
-			for _, message := range messages {
-				steer.EmitContext(ctx, "steer-acked", message)
-			}
-		}()
+		if deliver := steer.RecordPickups(messages); deliver != nil {
+			delivering <- struct{}{}
+			go func() {
+				defer close(receipts)
+				deliver(ctx)
+			}()
+		}
 	}), cfg.Timeout, func(msg string) { _ = log.Warn(ev, msg) })
 	if b := hooks.Render(harness, event, resp); len(b) > 0 {
 		_, _ = out.Write(b)

@@ -358,3 +358,58 @@ func TestHookBlockedIOFailsOpen(t *testing.T) {
 	}
 	t.Logf("hung stdin: exit %s after the %s deadline", r.ran-budget, budget)
 }
+
+func TestHookRecordsAndDeliversEveryPickupWithSlowObserver(t *testing.T) {
+	home := hookEnv(t)
+	if err := os.MkdirAll(filepath.Dir(os.Getenv("HEV_CONFIG")), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("HEV_CONFIG"), []byte("[hooks]\ntimeout = \"2s\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := steer.Store{Dir: os.Getenv(steer.EnvDir), Target: os.Getenv(steer.EnvTarget)}
+	first, err := store.Enqueue(steer.Note, "first private message", "foh", steer.TurnBoundary, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Enqueue(steer.Note, "second private message", "foh", steer.TurnBoundary, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	t.Setenv("PICKUP_CAPTURE", filepath.Join(home, "observer.jsonl"))
+	t.Setenv("SLOW_PICKUP", first.ID)
+	script := `#!/bin/sh
+[ "$1" = steer-acked ] || exit 0
+payload=$(/bin/cat)
+printf '%s\n' "$payload" >> "$PICKUP_CAPTURE"
+case "$payload" in *"$SLOW_PICKUP"*) exec /bin/sleep 60;; esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "hev-hook-record-pickup"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		var out bytes.Buffer
+		runHook([]string{"prompt-submit", "--harness", "claude"}, strings.NewReader(`{"session_id":"s1","prompt":"fixture"}`), &out)
+	}
+	for _, path := range []string{filepath.Join(home, ".hev", "hooks", "events.jsonl"), os.Getenv("PICKUP_CAPTURE")} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pickups := map[string]int{}
+		for _, line := range bytes.Split(raw, []byte{'\n'}) {
+			var ev hooks.Event
+			if json.Unmarshal(line, &ev) == nil && ev.Event == "steer-acked" {
+				if ev.Data["target"] != "dispatch:demo" || ev.Data["level"] != steer.Note || ev.Data["delivery"] != steer.TurnBoundary {
+					t.Fatalf("wrong receipt fields: %s", line)
+				}
+				id, _ := ev.Data["steer_id"].(string)
+				pickups[id]++
+			}
+		}
+		if len(pickups) != 2 || pickups[first.ID] != 1 || pickups[second.ID] != 1 || bytes.Contains(raw, []byte("private message")) {
+			t.Fatalf("wrong pickup receipts: %s", raw)
+		}
+	}
+}

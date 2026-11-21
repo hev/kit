@@ -3,7 +3,7 @@ package feed
 import (
 	"bufio"
 	"encoding/json"
-	"github.com/hev/kit/internal/hevpaths"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/hevpaths"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/secrets"
 )
@@ -105,6 +106,25 @@ func EvidenceDir(command, cwd string) (string, bool) {
 // ObserveHook spools one normalized harness hook event (hev.hook.event/v1
 // JSON, its target resolved). It returns at once: no network, no model.
 func (o Observer) ObserveHook(raw []byte) {
+	var reply struct {
+		Event string
+		Data  struct {
+			Board    string
+			Origin   string `json:"board_origin"`
+			ThreadID int64  `json:"thread_id"`
+		}
+	}
+	if json.Unmarshal(raw, &reply) == nil && reply.Event == KindBoardReply {
+		if reply.Data.ThreadID <= 0 {
+			return
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"kind": "reply", "board": reply.Data.Board,
+			"thread_id": reply.Data.ThreadID, "url": reply.Data.Origin,
+		})
+		o.ObserveLifecycle(KindBoardPost, payload)
+		return
+	}
 	cfg, on := o.config()
 	if !on {
 		return
@@ -345,7 +365,7 @@ func (o Observer) ObserveLifecycle(event string, payload []byte) {
 		if b.Kind == "reply" && b.ThreadID > 0 {
 			id = strconv.FormatInt(b.ThreadID, 10)
 		}
-		rec.Thread = Thread{Kind: ThreadBoard, Key: "board:" + boardBase(b.URL) + "/" + id, Name: b.Board + " #" + id, Host: host}
+		rec.Thread = Thread{Kind: ThreadBoard, Key: "board:" + BoardOrigin(b.URL) + "/" + id, Name: b.Board + " #" + id, Host: host}
 		rec.Client = cfg.Client || cfg.IsClientPath(b.Cwd)
 	case KindPeerMessage:
 		var p struct{ From, To, Cwd string }
@@ -376,12 +396,13 @@ func stripContent(raw json.RawMessage) json.RawMessage {
 	return b
 }
 
-// boardBase is the board origin in a thread URL (BASE/t/ID#pN).
-func boardBase(u string) string {
-	if i := strings.Index(u, "/t/"); i >= 0 {
-		return u[:i]
+// BoardOrigin retains only the HTTP(S) origin used to group board threads.
+func BoardOrigin(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
 	}
-	return u
+	return u.Scheme + "://" + u.Host
 }
 
 // ObserveEvidence spools an acceptance-evidence recording directory. run,

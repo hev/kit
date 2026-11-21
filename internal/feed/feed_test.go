@@ -183,3 +183,33 @@ func TestFeedInertUnderTestWithoutDir(t *testing.T) {
 		t.Fatalf("observers spooled under test: %d records", n)
 	}
 }
+
+func TestBoardReplyReplayUsesLiveBoardThread(t *testing.T) {
+	dir := t.TempDir()
+	cfg := feed.Config{Enabled: true, Events: []string{feed.KindBoardPost}, Boards: []string{"feedback"}}
+	obs := feed.Observer{Config: &cfg, Dir: dir, Host: "test-host", Kick: func(string) {}}
+	obs.ObserveLifecycle(feed.KindBoardPost, []byte(`{"board":"feedback","kind":"post","id":"42","url":"https://board.example/t/42"}`))
+	obs.ObserveLifecycle(feed.KindBoardPost, []byte(`{"board":"feedback","kind":"reply","thread_id":42,"id":"second","url":"https://board.example/t/42#p2"}`))
+	obs.ObserveHook([]byte(`{"schema":"hev.hook.event/v1","event":"board-reply","data":{"board":"feedback","thread_id":42,"board_origin":"https://board.example"}}`))
+	obs.ObserveHook([]byte(`{"schema":"hev.hook.event/v1","event":"board-reply","data":{"board":"hidden","thread_id":42,"board_origin":"https://board.example"}}`))
+	pending := feed.Pending(dir)
+	if len(pending) != 3 {
+		t.Fatalf("pending = %v", pending)
+	}
+	for _, path := range pending {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rec feed.Record
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Thread.Key != "board:https://board.example/42" || rec.Kind != feed.KindBoardPost {
+			t.Fatalf("unexpected board record: %s", raw)
+		}
+	}
+	if origin := feed.BoardOrigin("https://user:password@board.example/private?token=secret#fragment"); origin != "https://board.example" {
+		t.Fatalf("unsafe board replay origin: %q", origin)
+	}
+}

@@ -50,7 +50,7 @@ func queueEntries() ([]queueEntry, error) {
 	return entries, nil
 }
 
-// enqueue is called with the root lock held. Validate before accepting custody.
+// enqueue validates policy outside the root lock, then reserves FIFO custody under it.
 func enqueue(q Request) (Response, error) {
 	o, err := Parse(q.Order)
 	if err != nil {
@@ -58,9 +58,6 @@ func enqueue(q Request) (Response, error) {
 	}
 	if o.Name != q.Name || q.Meta.Name != q.Name || q.Meta.Parent != "" {
 		return Response{}, fmt.Errorf("invalid queued order")
-	}
-	if exists(filepath.Join(Root(), q.Name)) || exists(queuePath(q.Name)) {
-		return Response{}, fmt.Errorf("%w: %s", errRunExists, q.Name)
 	}
 	cfg, err := targetPolicy()
 	if err != nil {
@@ -81,6 +78,22 @@ func enqueue(q Request) (Response, error) {
 	// where the full check runs again.
 	if _, err := resolveSkills(o.Skills); err != nil {
 		return Response{}, err
+	}
+	response, err := reserveQueueEntry(q, o)
+	if err == nil {
+		orderEvent("order-queued", m, "")
+	}
+	return response, err
+}
+
+func reserveQueueEntry(q Request, o Order) (Response, error) {
+	unlock, err := lockRoot()
+	if err != nil {
+		return Response{}, err
+	}
+	defer unlock()
+	if exists(filepath.Join(Root(), q.Name)) || exists(queuePath(q.Name)) {
+		return Response{}, fmt.Errorf("%w: %s", errRunExists, q.Name)
 	}
 	q.Meta.Order = o
 	q.Meta.Swarm = swarmIdentity(q.Orchestrator)

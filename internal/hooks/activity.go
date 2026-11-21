@@ -157,6 +157,7 @@ func observeActivity(ctx context.Context, event, text string, reply bool, payloa
 		meta(ctx, "board-reply", map[string]any{
 			"thread_id": post.ThreadID, "entry_id": post.ID, "board": post.Board,
 			"author": post.Author, "body_bytes": post.BodyBytes,
+			"board_origin": post.URL,
 		}, "", post.Body)
 		return
 	}

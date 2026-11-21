@@ -774,19 +774,16 @@ func Handle(q Request) (r Response, handleErr error) {
 				q.excludeFinished = exclude
 				q.Dequeue = true
 			} else if len(live) >= cap || len(entries) > 0 {
+				if exists(dir) || exists(queuePath(q.Name)) {
+					return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+				}
 				// A queued order holds no class slot. Its probe's reservation
 				// is released here, and dequeue admits the class like any start.
 				releaseClassSlotLocked(slot)
 				released = true
-				response, err := enqueue(q)
-				var queued queueEntry
-				emit := err == nil && readJSON(queuePath(q.Name), &queued) == nil
 				unlock()
 				locked = false
-				if emit {
-					orderEvent("order-queued", queued.Request.Meta, "")
-				}
-				return response, err
+				return enqueue(q)
 			}
 		}
 		if e = CheckCap(len(live), cap); e != nil {

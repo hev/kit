@@ -1,12 +1,14 @@
 package compat
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/hev/kit/internal/hevpaths"
 )
@@ -20,21 +22,26 @@ type LocalPeer struct {
 
 // LocalPeers samples the same local participants as peers ls. PID and pane
 // identity distinguish a replacement agent with the same address.
-func LocalPeers() (peers map[string]LocalPeer, err error) {
+func LocalPeers(ctx context.Context) (peers map[string]LocalPeer, err error) {
 	if runtime.GOOS == "windows" {
 		return nil, ErrNoTmux
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return nil, ErrNoTmux
 	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	home, _ := os.UserHomeDir()
-	p := &P{home: home, stateDir: hevpaths.Dir(hevpaths.Peers), out: io.Discard, err: io.Discard}
+	p := &P{inventory: ctx, home: home, stateDir: hevpaths.Dir(hevpaths.Peers), out: io.Discard, err: io.Discard}
 	defer func() {
 		if recover() != nil {
 			peers, err = nil, errors.New("local peer inventory unavailable")
 		}
 	}()
 	rows := p.panes(false)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	const maxPeers = 4096
 	if len(rows) > maxPeers {
 		return nil, errors.New("local peer inventory exceeds limit")

@@ -85,9 +85,8 @@ func runLifecycleHandler(ctx context.Context, exe, event string, payload []byte)
 	var errb bytes.Buffer
 	c.Stderr = &errb
 	c.WaitDelay = 100 * time.Millisecond
-	ownGroup(c)
 	c.Env = append(os.Environ(), "HEV_HOOK_EVENT="+event, "HEV_HOOK_HARNESS=kit")
-	if err := c.Run(); err != nil {
+	if err := runHandler(ctx, c); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("timed out")
 		}

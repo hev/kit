@@ -13,7 +13,7 @@ func observePeerPresence(ctx context.Context) {
 	defer tick.Stop()
 	var previous map[string]compat.LocalPeer
 	for {
-		current, err := compat.LocalPeers()
+		current, err := compat.LocalPeers(ctx)
 		if err == nil {
 			peerTransitions(previous, current, func(event string, peer compat.LocalPeer) {
 				hooks.Meta(ctx, event, map[string]any{"peer": peer.Address, "agent": peer.Agent}, "")
@@ -29,6 +29,10 @@ func observePeerPresence(ctx context.Context) {
 }
 
 func peerTransitions(previous, current map[string]compat.LocalPeer, emit func(string, compat.LocalPeer)) {
+	// The first successful sample establishes a baseline after daemon startup.
+	if previous == nil {
+		return
+	}
 	for id, peer := range previous {
 		if _, present := current[id]; !present {
 			emit("peer-offline", peer)

@@ -8,9 +8,9 @@ import (
 	"syscall"
 )
 
-// ownGroup runs a user handler in its own process group, and cancellation
+// runHandler runs a user handler in its own process group, and cancellation
 // kills the whole group: a handler's children must not outlive the hook.
-func ownGroup(c *exec.Cmd) {
+func runHandler(_ context.Context, c *exec.Cmd) error {
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Cancel = func() error {
 		if c.Process == nil {
@@ -18,6 +18,7 @@ func ownGroup(c *exec.Cmd) {
 		}
 		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
 	}
+	return c.Run()
 }
 
 func handlerCommand(ctx context.Context, exe, event string) (*exec.Cmd, error) {

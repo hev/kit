@@ -55,7 +55,7 @@ These events use the same envelope and handler discovery, with
 | `admission-check`, `admission-denied` | `name`, `repo`, `action`; denial adds `reason` to the envelope |
 | `cluster-join`, `cluster-invite`, `cluster-remove` | `name`, `kind` |
 | `peer-online`, `peer-offline` | `peer`, `agent` |
-| `board-reply`, `board-pin` | `thread_id`; replies also include `entry_id`, `board`, `author`, `body_bytes` |
+| `board-reply`, `board-pin` | `thread_id`; replies also include `entry_id`, `board`, `author`, `body_bytes`, and `board_origin` |
 
 The repository allowlist applies first. When it allows work, an
 `admission-check` handler can deny it by returning `block` or `halt` with a
@@ -69,6 +69,12 @@ Existing `peer-message` and `board-post` handlers receive their
 [board post](../schemas/board_post_event.schema.json) envelopes.
 All three activity events may give handlers redacted message or body text.
 Client hosts omit that text, and it is always omitted from the event log.
+A board reply records the board's HTTP(S) origin for feed replay. URL
+credentials, paths, queries and fragments are omitted.
+
+A node's first successful peer inventory establishes a baseline.
+Subsequent successful samples report appearances and departures.
+A failed inventory leaves the previous sample in place.
 
 Writing an [evidence package](evidence.md) raises `evidence-created`,
 `evidence-updated` and `evidence-sealed` on the writing host, observe-only

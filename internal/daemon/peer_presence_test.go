@@ -13,6 +13,7 @@ func TestPeerPresenceTransitions(t *testing.T) {
 		name, before, after string
 		want                []string
 	}{
+		{"baseline", "unsampled", "%1:10", nil},
 		{"appeared", "", "%1:10", []string{"peer-online"}},
 		{"ended", "%1:10", "", []string{"peer-offline"}},
 		{"unchanged", "%1:10", "%1:10", nil},
@@ -20,7 +21,9 @@ func TestPeerPresenceTransitions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			old, current := map[string]compat.LocalPeer{}, map[string]compat.LocalPeer{}
-			if tc.before != "" {
+			if tc.before == "unsampled" {
+				old = nil
+			} else if tc.before != "" {
 				old[tc.before] = peer
 			}
 			if tc.after != "" {

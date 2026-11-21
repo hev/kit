@@ -307,6 +307,10 @@ func TestInterruptFallbackHaltsAndRedirects(t *testing.T) {
 // Review finding 4: an orchestrator round escalates a halt past its timeout
 // and closes halt receipts when the harness exits.
 func TestOrchestratorRoundHaltEscalatesAndCloses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "hooks.toml"))
+	t.Setenv("HEV_HOOKS", "")
 	defer func(d time.Duration) { roundHaltPoll = d }(roundHaltPoll)
 	roundHaltPoll = 5 * time.Millisecond
 	orch := t.TempDir()
@@ -341,6 +345,25 @@ func TestOrchestratorRoundHaltEscalatesAndCloses(t *testing.T) {
 	if st := store.LoadState(); !st.Halted || st.HaltID != m2.ID {
 		t.Fatalf("%+v", st)
 	}
+	raw, err := os.ReadFile(filepath.Join(home, ".hev", "hooks", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	escalations := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"event":"steer-escalated"`) {
+			escalations++
+			for _, field := range []string{`"steer_id":"` + m.ID + `"`, `"target":"orch:x"`, `"delivery":"tool-boundary"`, `"level":"halt"`} {
+				if !strings.Contains(line, field) {
+					t.Fatalf("missing %s in escalation: %s", field, line)
+				}
+			}
+		}
+	}
+	if escalations != 1 {
+		t.Fatalf("want one hard-stop event: %s", raw)
+	}
+
 }
 
 // An unwired orchestrator round gets the harness interrupt, not a

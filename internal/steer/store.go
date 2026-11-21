@@ -456,11 +456,20 @@ func (s Store) Update(id string, f func(*Message)) (Message, error) {
 
 // Emit reports a steering receipt without exporting its message or sender.
 func Emit(event string, m Message) {
-	EmitContext(context.Background(), event, m)
+	hooks.Meta(context.Background(), event, receiptFields(m), "")
 }
 
-func EmitContext(ctx context.Context, event string, m Message) {
-	hooks.Meta(ctx, event, map[string]any{
+// RecordPickups logs the receipts from a hook boundary and prepares delivery.
+func RecordPickups(messages []Message) func(context.Context) {
+	data := make([]map[string]any, 0, len(messages))
+	for _, m := range messages {
+		data = append(data, receiptFields(m))
+	}
+	return hooks.RecordMetaBatch("steer-acked", data)
+}
+
+func receiptFields(m Message) map[string]any {
+	return map[string]any{
 		"steer_id": m.ID, "target": m.Target, "level": m.Level, "delivery": m.Delivery,
-	}, "")
+	}
 }

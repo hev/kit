@@ -208,10 +208,13 @@ func newNodesCommand() *cobra.Command {
 		return nil
 	}}
 	root.AddCommand(ls, &cobra.Command{Use: "remove NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if err := nodes.Default().Remove(args[0]); err != nil {
+		removed, err := nodes.Default().RemoveMember(args[0])
+		if err != nil {
 			return err
 		}
-		clusterNodeEvent(cmd, "cluster-remove", args[0], "member")
+		if removed {
+			clusterNodeEvent(cmd, "cluster-remove", args[0], "member")
+		}
 		return nil
 	}})
 	return root

@@ -6,8 +6,10 @@ import (
 	"maps"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/hev/kit/internal/feed"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/secrets"
@@ -40,6 +42,39 @@ func meta(ctx context.Context, event string, data map[string]any, reason string,
 	if !cfg.Enabled {
 		return Response{Decision: Continue}
 	}
+	return deliverMeta(ctx, cfg, warning, newMetaEvent(event, data, reason), activityBody, false, UserHandlers(os.Getenv("PATH")))
+}
+
+// RecordMetaBatch records a set of observer events before any delivery starts.
+// Its returned function delivers the batch under the caller's shared deadline.
+func RecordMetaBatch(event string, data []map[string]any) func(context.Context) {
+	if Disabled(os.Getenv("HEV_HOOKS")) {
+		return nil
+	}
+	cfg, warning := LoadConfig(secrets.ConfigPath())
+	if !cfg.Enabled {
+		return nil
+	}
+	log := DefaultLog()
+	events := make([]Event, 0, len(data))
+	for _, fields := range data {
+		ev := newMetaEvent(event, fields, "")
+		if err := log.Event(ev, Response{Decision: Continue}, 0); err != nil {
+			_ = log.Warn(ev, "could not record hook event")
+		}
+		events = append(events, ev)
+	}
+	return func(ctx context.Context) {
+		handlers := UserHandlers(os.Getenv("PATH"))
+		var deliveries sync.WaitGroup
+		for _, ev := range events {
+			deliveries.Go(func() { deliverMeta(ctx, cfg, warning, ev, nil, true, handlers) })
+		}
+		deliveries.Wait()
+	}
+}
+
+func newMetaEvent(event string, data map[string]any, reason string) Event {
 	start := time.Now().UTC()
 	ev := Event{
 		Schema: Schema, ID: strings.ToLower(ulid.Make().String()), Time: start,
@@ -49,11 +84,19 @@ func meta(ctx context.Context, event string, data map[string]any, reason string,
 	for key, value := range data {
 		switch value := value.(type) {
 		case string:
-			ev.Data[key] = scrubMeta(value)
+			if event == feed.KindBoardReply && key == "board_origin" {
+				ev.Data[key] = feed.BoardOrigin(value)
+			} else {
+				ev.Data[key] = scrubMeta(value)
+			}
 		case bool, int, int64:
 			ev.Data[key] = value
 		}
 	}
+	return ev
+}
+
+func deliverMeta(ctx context.Context, cfg Config, warning string, ev Event, activityBody *string, recorded bool, handlers []Handler) Response {
 	log := DefaultLog()
 	warn := func(message string) {
 		// Handler stderr, parser errors and config diagnostics can include
@@ -70,18 +113,19 @@ func meta(ctx context.Context, event string, data map[string]any, reason string,
 	if warning != "" {
 		warn(warning)
 	}
-	handlers := UserHandlers(os.Getenv("PATH"))
 	delivery := ev
 	if activityBody != nil {
 		delivery.Data = maps.Clone(ev.Data)
 		delivery.Data["body"] = *activityBody
 	}
 	r := Run(ctx, delivery, handlers, cfg.Timeout, warn)
-	if event != "admission-check" {
+	if ev.Event != "admission-check" {
 		r = Response{Decision: Continue}
 	}
-	if err := log.Event(ev, r, time.Since(start)); err != nil {
-		warn(err.Error())
+	if !recorded {
+		if err := log.Event(ev, r, time.Since(ev.Time)); err != nil {
+			warn(err.Error())
+		}
 	}
 	r.Reason = scrubMeta(r.Reason)
 	return r
@@ -93,12 +137,8 @@ func scrubMeta(value string) string {
 		return ""
 	}
 	for _, word := range strings.Fields(value) {
-		if _, suffix, ok := strings.Cut(word, "="); ok {
-			word = suffix
-		}
-		word = strings.TrimLeft(word, `"'`+"([{")
-		if strings.HasPrefix(word, "/") || strings.HasPrefix(word, "~") ||
-			strings.Contains(word, `\`) || strings.Contains(word, "://") {
+		_, value, _ := strings.Cut(word, "=")
+		if pathLike(word) || pathLike(value) {
 			return "[redacted]"
 		}
 	}
@@ -112,4 +152,10 @@ func scrubMeta(value string) string {
 	}
 	safe, _ := scrubber.Text(value)
 	return safe
+}
+
+func pathLike(word string) bool {
+	word = strings.TrimLeft(word, `"'`+"([{")
+	return strings.HasPrefix(word, "/") || strings.HasPrefix(word, "~") ||
+		strings.Contains(word, `\`) || strings.Contains(word, "://")
 }
