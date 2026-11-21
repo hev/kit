@@ -107,8 +107,10 @@ send your own notes back with `hev review send`; see [review](docs/review.md).
 An order can name a context recipe (`context: PATH`); dispatch builds an
 explicit, reproducible context bundle at launch, gives it to the worker, and
 records its digest on the run. `hev context` assesses, builds, compares and
-reviews bundles on their own. See [dispatch](docs/dispatch.md) and
-[composable context](docs/context.md).
+reviews bundles on their own. Host-pinned `metric` scorers grade candidate
+commits synchronously with `hev score` (`pin`, `verify`, `run --commit`). See
+[dispatch](docs/dispatch.md), [composable context](docs/context.md), and
+[scorers](docs/scorers.md).
 
 ## Admission
 
