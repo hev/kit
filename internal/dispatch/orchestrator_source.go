@@ -60,12 +60,12 @@ func (s *OrchestratorSource) UnmarshalYAML(n *yaml.Node) error {
 func (s OrchestratorSource) Validate() error {
 	if s.Plugin == "" {
 		if len(s.Rules) > 0 || s.Team != "" || len(s.Args) > 0 || len(s.Env) > 0 {
-			return fmt.Errorf("source plugin required")
+			return fmt.Errorf("source.plugin required")
 		}
 		return nil
 	}
 	if !ValidName(s.Plugin) {
-		return fmt.Errorf("invalid source plugin")
+		return fmt.Errorf("invalid source.plugin")
 	}
 	if e := validatePluginEnv("source.env", s.Env); e != nil {
 		return e

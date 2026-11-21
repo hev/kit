@@ -392,9 +392,9 @@ public: `hev cluster join` uses it to open an SSH session that can only run
 `nodes enroll` (no shell, PTY or forwarding). Anyone who can reach the
 host's sshd can therefore start an enrollment while an invitation is open,
 which is why everything rests on the code. The line is removed as soon as no
-invitation is open (request recorded, locked, withdrawn), and on the next
-`hev cluster` command after the last one expires; enrollment refuses expired
-invitations in any case. It works wherever SSH already reaches the host,
+invitation is open (request recorded, locked, withdrawn), and after the last one
+expires when you run `hev cluster pending` or `hev cluster ls --ssh`.
+Enrollment refuses expired invitations. It works wherever SSH already reaches the host,
 including Windows OpenSSH, with no listener, firewall rule or daemon.
 
 The code has a 2-symbol public slot (which invitation) and an 8-symbol
