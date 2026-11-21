@@ -35,9 +35,9 @@ func SupersededReason(by string) string { return "superseded by " + by }
 
 // closeRun records the closed disposition on an ended run (the close
 // action). It never launches a worker and never removes the run's log,
-// reports or worktree: it rewrites result.json with the closed fields added
+// reports: it rewrites result.json with the closed fields added
 // and, when the run is waiting on a decision, settles that decision in
-// decisions.json. The caller has checked dir holds a run.
+// decisions.json. Pro may then compact the worktree. The caller has checked dir holds a run.
 func closeRun(dir string, q Request) (Response, error) {
 	r := Response{}
 	reason := strings.TrimSpace(q.Note)
@@ -130,6 +130,14 @@ func closeRun(dir string, q Request) (Response, error) {
 	r.Message = "closed " + q.Name
 	if reason != "" {
 		r.Message += ": " + reason
+	}
+	var m Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil {
+		if _, pro, _ := workspacePolicy(); pro {
+			if err := compactWorkspace(dir, m); err != nil {
+				r.Message += "\nworktree kept: " + err.Error()
+			}
+		}
 	}
 	r.Files = map[string]string{}
 	if b, err := os.ReadFile(resultPath); err == nil {
