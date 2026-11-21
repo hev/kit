@@ -125,7 +125,13 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string
 	if !sameUser(conn) {
 		return
 	}
-	conn.SetDeadline(time.Now().Add(45 * time.Second))
+	deadline := time.Now().Add(45 * time.Second)
+	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+		deadline = end
+	}
+	_ = conn.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	var q request
 	if json.NewDecoder(io.LimitReader(conn, 65536)).Decode(&q) != nil {
 		return
@@ -314,7 +320,13 @@ func query(ctx context.Context, q request) (response, error) {
 		return response{}, &UnavailableError{Reason: UnavailableNoEndpoint}
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(45 * time.Second))
+	deadline := time.Now().Add(45 * time.Second)
+	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
+		deadline = end
+	}
+	_ = conn.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	if !serverUser(conn) {
 		return response{}, errors.New("secrets endpoint is not owned by current user")
 	}
