@@ -298,11 +298,27 @@ func TestBoardV1LayerRouting(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Error(err)
 				}
-				if tc.want == "layer.multi_query" && body["queries"] == nil {
-					t.Errorf("expected multi-query body: %v", body)
+				checkProjection := func(query map[string]any) {
+					if _, included := query["include_attributes"]; included ||
+						fmt.Sprint(query["exclude_attributes"]) != "[vector]" {
+						t.Errorf("Board must read optional attributes without projecting absent names: %v", query)
+					}
 				}
-				if tc.want == "layer.hybrid_text" && !strings.Contains(fmt.Sprint(body["rank_by"]), " Auto ") {
-					t.Errorf("expected gateway-routed rank with an embedding: %v", body)
+				switch tc.want {
+				case "layer.multi_query":
+					queries, ok := body["queries"].([]any)
+					if !ok || len(queries) == 0 {
+						t.Errorf("expected multi-query body: %v", body)
+						break
+					}
+					for _, query := range queries {
+						checkProjection(query.(map[string]any))
+					}
+				case "layer.hybrid_text":
+					if !strings.Contains(fmt.Sprint(body["rank_by"]), " Auto ") {
+						t.Errorf("expected gateway-routed rank with an embedding: %v", body)
+					}
+					checkProjection(body)
 				}
 				fmt.Fprint(w, `{"rows":[]}`)
 			}))

@@ -71,7 +71,7 @@ func (s *layerStore) EditThread(ctx context.Context, id int64, author string, ad
 	}
 	// Layer embeds text on upsert. Preserve the entire existing row,
 	// including activity timestamps, votes and attachments.
-	rows, err := s.query(ctx, []any{"id", "Eq", row["id"]}, nil, 1, s.threadAttrs())
+	rows, err := s.query(ctx, []any{"id", "Eq", row["id"]}, nil, 1, nil)
 	if err != nil {
 		return err
 	}

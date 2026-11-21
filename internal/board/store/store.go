@@ -196,17 +196,6 @@ func (s *layerStore) known(slug string) bool {
 	return isBoard(slug)
 }
 
-func (s *layerStore) threadAttrs() []string {
-	return s.withAuthorName(threadAttrs)
-}
-
-func (s *layerStore) withAuthorName(attrs []string) []string {
-	if s.app || s.authorNames {
-		return append(append([]string{}, attrs...), "author_name")
-	}
-	return attrs
-}
-
 const tsLayout = "2006-01-02T15:04:05.000000Z"
 
 func now() string { return time.Now().UTC().Format(tsLayout) }
@@ -217,11 +206,6 @@ func parseTS(s string) time.Time {
 }
 
 const all = 10000
-
-var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "role", "instance", "host", "session",
-	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "images", "image_count"}
-
-var postAttrs = []string{"thread_id", "kind", "n", "author", "role", "instance", "host", "session", "created", "text", "images"}
 
 func str(r layer.Row, k string) string {
 	s, _ := r[k].(string)
@@ -335,7 +319,13 @@ func and(clauses ...any) any {
 }
 
 func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int, attrs []string) ([]layer.Row, error) {
-	body := map[string]any{"top_k": topK, "include_attributes": attrs}
+	body := map[string]any{"top_k": topK}
+	if attrs == nil {
+		// Full board records can have optional fields absent from the namespace schema.
+		body["exclude_attributes"] = []string{"vector"}
+	} else {
+		body["include_attributes"] = attrs
+	}
 	if filter != nil {
 		body["filters"] = filter
 	}
@@ -347,7 +337,7 @@ func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int
 }
 
 func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
-	return s.query(ctx, and([]any{"kind", "Eq", "thread"}, filter), []any{"updated", "desc"}, all, s.threadAttrs())
+	return s.query(ctx, and([]any{"kind", "Eq", "thread"}, filter), []any{"updated", "desc"}, all, nil)
 }
 
 func (s *layerStore) Boards(ctx context.Context) ([]Board, error) {
@@ -486,7 +476,7 @@ func (s *layerStore) scanThreads(ctx context.Context, filter any, visit func([]l
 	var previousID int64
 	for {
 		rows, err := s.query(ctx, and([]any{"kind", "Eq", "thread"}, filter, after),
-			[][]string{{"updated", "desc"}, {"thread_id", "desc"}}, boardBatch, s.threadAttrs())
+			[][]string{{"updated", "desc"}, {"thread_id", "desc"}}, boardBatch, nil)
 		if err != nil || len(rows) == 0 {
 			return err
 		}
@@ -543,7 +533,7 @@ func (s *layerStore) threadsByAuthor(ctx context.Context, rows []layer.Row, auth
 }
 
 func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
-	rows, err := s.query(ctx, []any{"id", "Eq", fmt.Sprintf("t:%d", id)}, nil, 1, s.threadAttrs())
+	rows, err := s.query(ctx, []any{"id", "Eq", fmt.Sprintf("t:%d", id)}, nil, 1, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -555,13 +545,12 @@ func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 }
 
 func (s *layerStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
-	attrs := s.withAuthorName(append(append([]string{}, postAttrs...), "body"))
 	thread := []any{"thread_id", "Eq", threadID}
 	out := []Post{}
 	var lastN int64
 	var after any
 	for {
-		rows, err := s.query(ctx, and(thread, after), []any{"n", "asc"}, all, attrs)
+		rows, err := s.query(ctx, and(thread, after), []any{"n", "asc"}, all, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -749,7 +738,7 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		if err := s.cl.WithContext(ctx).Upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
-		got, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, s.withAuthorName(postAttrs))
+		got, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -866,7 +855,6 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		}
 		rows, err := s.cl.WithContext(ctx).Search(search.Query{
 			Phrasings: phrasings, TopK: boardBatch, Filter: filter,
-			Attrs: s.withAuthorName(append(append([]string{}, postAttrs...), "body")),
 		})
 		if err != nil {
 			return nil, err
