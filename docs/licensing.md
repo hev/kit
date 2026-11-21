@@ -28,4 +28,5 @@ Run `hev license` to refresh and inspect Kit's license, `hev pro` for the
 Kit edition and separate Layer gateway information, or `hev s` for a short
 host status. The first two support `--json`. The daemon refreshes local
 status in the background so receivers can make an entitlement decision
-without reading from a vault.
+without reading from a vault. The receiving host uses this status for
+[Pro dispatch workspaces](pro-workspaces.md).
