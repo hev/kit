@@ -1,6 +1,6 @@
 ---
 term: "secret reference"
-aliases: ["ref","op reference","azkv reference","secret URI"]
+aliases: ["secret://","secret://NAME"]
 ---
 
-A pointer to a secret in a vault, safe to put in scripts and commits because it is not the value itself.
+Store-agnostic name for a secret that resolves through the host's chosen secret manager.

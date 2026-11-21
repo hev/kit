@@ -1,6 +1,6 @@
 ---
 term: "cooldown"
-aliases: ["rate limit","throttled","exit 75","quota exhausted","429"]
+aliases: ["rate limit","429","throttled"]
 ---
 
-Host-wide, per-store pause recorded on disk after a rate limit, during which no kit process sends another request.
+Host-wide pause on provider requests after the first rate-limit answer, until its reset time.

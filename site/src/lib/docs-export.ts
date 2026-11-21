@@ -3,6 +3,7 @@
 // (one page's Markdown). The MDX components are flattened to Markdown so an
 // agent reading the raw text sees the same content a reader sees.
 import { getAllDocs, getDocNavGroups, getDocHref, type DocEntry } from "./docs";
+import { APP_LIVE } from "./site";
 
 export const SITE = "https://hevkit.com";
 
@@ -47,12 +48,27 @@ export function toMarkdown(entry: DocEntry): string {
 	body = body.replace(/<Callout label="([^"]*)">\n?([\s\S]*?)\n?<\/Callout>/g, (_, label: string, text: string) =>
 		`> **${label}:** ${text.trim().split("\n").join("\n> ")}`,
 	);
+	// SignupOpen and SignupClosed: keep the one this build renders, drop the other.
+	const [kept, dropped] = APP_LIVE ? ["SignupOpen", "SignupClosed"] : ["SignupClosed", "SignupOpen"];
+	body = body.replace(new RegExp(`[ \\t]*<${dropped}>[\\s\\S]*?</${dropped}>\\n?`, "g"), "");
+	body = body.replace(new RegExp(`<${kept}>\\n?([\\s\\S]*?)\\n?</${kept}>`, "g"), "$1");
+	// Edition blocks: an agent sees both, each labelled.
+	body = body.replace(/<Edition only="(oss|pro)">\n?([\s\S]*?)\n?<\/Edition>/g, (_, only: string, text: string) =>
+		`> **${only === "pro" ? "Pro" : "OSS"}:** ${text.trim().split("\n").join("\n> ")}`,
+	);
 	body = body.replace(/<AgentPrompt>\s*\n/g, "Agent prompt:\n\n").replace(/\n?<\/AgentPrompt>/g, "");
 	body = body.replace(/<CodeTabs[^>]*>\s*\n/g, "").replace(/\n?<\/CodeTabs>/g, "");
 	body = body.replace(/<img [^>]*class="shot-dark"[^>]*\/>\n?/g, "");
 	body = body.replace(/<img [^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*\/>/g, (_, src: string, alt: string) => `![${alt}](${SITE}${src})`);
 	body = body.replace(/\]\(\/(?!\/)/g, `](${SITE}/`);
-	return `# ${entry.data.title}\n\n> ${entry.data.description}\n\nSource: ${pageUrl(entry.id)}\n\n${body.trim().replace(/\n{3,}/g, "\n\n")}\n`;
+	const showcase = [
+		entry.data.command && `Command: \`${entry.data.command}\``,
+		entry.data.skill && `Skill: \`${entry.data.skill}\``,
+		entry.data.endpoint && `API: \`${entry.data.endpoint}\``,
+		entry.data.edition === "pro" && "Edition: Pro only",
+	].filter(Boolean);
+	const meta = showcase.length ? `${showcase.join(" · ")}\n\n` : "";
+	return `# ${entry.data.title}\n\n> ${entry.data.description}\n\nSource: ${pageUrl(entry.id)}\n\n${meta}${body.trim().replace(/\n{3,}/g, "\n\n")}\n`;
 }
 
 function text(body: string): Response {
@@ -64,12 +80,15 @@ export async function llmsIndex(): Promise<Response> {
 	const parts = [
 		"# hev kit",
 		"",
-		"> hev kit gives a team the tools to build its own software factory: a trace daemon, dispatch to shared hosts, and admission for repos, in one binary.",
+		"> hev kit is a meta-harness: a set of tools for coding agents (traces, dispatch, peers, the board, hooks and clustering) packaged as one distributed binary for macOS, Linux and Windows.",
 		"",
 		`Each page links to its Markdown. The full text of every page is at ${SITE}/llms-full.txt.`,
 	];
 	for (const group of groups) {
-		parts.push("", `## ${group.label}`, "");
+		parts.push("", `## ${group.label}${group.edition === "pro" ? " (Pro only)" : ""}`, "");
+		if (group.edition === "pro" && group.label === "API") {
+			parts.push(`- [OpenAPI 3.1 spec](${SITE}/openapi/kit-v1.yaml): The canonical contract for the hosted /v1 API.`);
+		}
 		for (const entry of group.items) {
 			parts.push(`- [${entry.data.title}](${SITE}${markdownPath(entry.id)}): ${entry.data.description} Page: ${pageUrl(entry.id)}`);
 		}

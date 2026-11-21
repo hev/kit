@@ -3,14 +3,14 @@ id: "secrets#status"
 title: "Secrets"
 heading: "Status"
 group: "Operate"
-order: 269
+order: 389
 url: "/docs/secrets#status"
 anchor: "status"
-terms: ["status","command","optional","json","output","shows","store","credential","type","reachability","hits","misses","requests","cooldown","plus","daemon","uptime","rate","limited","counts","read","hour","count","1password","quota","rows","checked","most","every","five","minutes","checking","skipped","vault","endpoint","secrets","programs","never","value","identifier"]
-hash: "6ee94a231843b907d017aa3107bac0c78b1b2b561bcbfa47f352cae71de534c6"
+terms: ["status","secrets","command","json","output","reports","host","secret","manager","plus","store","credential","type","reachability","quota","budget","information","refresh","programs","shows","there","none","never","value","identifier","last","real","request","hits","misses","requests","cooldown","unconfigured","says","whether","daemon","since","cache","start","many"]
+hash: "49c04500d4557b3c6310d77fc90624a46a476c7580f04f1981db1bb528dd960a"
 mode: "agent-primary"
-facts: [{"kind":"code","literal":"hev secrets status","chunkId":"secrets#status"},{"kind":"code","literal":"--json","chunkId":"secrets#status"},{"kind":"code","literal":"--no-quota","chunkId":"secrets#status"}]
+facts: [{"kind":"code","literal":"hev secrets status","chunkId":"secrets#status"},{"kind":"code","literal":"--json","chunkId":"secrets#status"},{"kind":"code","literal":"secret://","chunkId":"secrets#status"},{"kind":"code","literal":"manager","chunkId":"secrets#status"},{"kind":"code","literal":"--refresh-quota","chunkId":"secrets#status"}]
 sources: [{"chunkId":"secrets#status","url":"/docs/secrets#status","anchor":"status"}]
 ---
 
-The status command, with optional JSON output, shows a row per store with credential type, reachability, hits, misses, requests and cooldown, plus daemon uptime, rate-limited counts, the read log's 24-hour count, and 1Password quota rows checked at most every five minutes. Quota checking can be skipped, and Key Vault has no quota endpoint.
+The secrets status command (with JSON output) reports the host's secret manager and where it is set, plus a row per store with credential type, reachability, and quota/budget information.

@@ -1,6 +1,6 @@
 ---
 term: "orchestrator"
-aliases: ["orchestrate","loop","goal loop","manager agent"]
+aliases: ["hev orchestrate","expedite","follow-through"]
 ---
 
-An optional agent that runs in rounds to keep a goal moving, within scoped authority and a bounded budget.
+Declarative agent that manages dispatch runs toward a goal in rounds, acting only through limited authority verbs.

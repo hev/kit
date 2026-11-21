@@ -3,14 +3,14 @@ id: "orchestrators#examples"
 title: "Orchestrators"
 heading: "Examples"
 group: "Use"
-order: 200
+order: 317
 url: "/docs/orchestrators#examples"
 anchor: "examples"
-terms: ["examples","points","three","complete","example","specs","intake","loop","turning","tracker","issues","orders","release","coordinator","gauntlet","rework","independent","validator","also","notes","swarm","file","compiles","orchestrator","runs","copy","turns","keeps","train","moving","until","draft","ready","publish","reworks","piece","work","passes","within","budget"]
-hash: "833216a4e739f8714155418e4d0c8bcd5bf5da792105e056eb9505e8d1eaa126"
+terms: ["examples","pointer","orchestrator","intake","loop","release","coordinator","gauntlet","three","complete","specs","copy","turns","tracker","issues","orders","keeps","train","moving","until","draft","ready","publish","reworks","piece","work","independent","validator","passes","within","budget"]
+hash: "01fcfd72b7f72eccbe8abc2ebb5c2dfd57e801fb48971393b97ac146f5b103a0"
 mode: "agent-primary"
-facts: [{"kind":"code","literal":"hev swarm up","chunkId":"orchestrators#examples"}]
+facts: []
 sources: [{"chunkId":"orchestrators#examples","url":"/docs/orchestrators#examples","anchor":"examples"}]
 ---
 
-Points to three complete example specs: an intake loop turning tracker issues into orders, a release coordinator, and a Gauntlet rework loop with an independent validator. Also notes that a swarm file compiles into an orchestrator and its runs.
+Pointer to orchestrator examples: an intake loop, a release coordinator and a Gauntlet loop.

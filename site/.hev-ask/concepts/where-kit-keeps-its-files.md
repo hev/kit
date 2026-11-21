@@ -1,0 +1,16 @@
+---
+id: "concepts#where-kit-keeps-its-files"
+title: "Concepts"
+heading: "Where kit keeps its files"
+group: "Use"
+order: 155
+url: "/docs/concepts#where-kit-keeps-its-files"
+anchor: "where-kit-keeps-its-files"
+terms: ["keeps","files","surface","lives","folder","under","home","named","hosted","route","legacy","folders","kept","present","environment","overrides","disk","usage","traces","board","orders","peers","hooks","evidence","other","onboard","archive","dispatch","local","state","config","toml","creates","ends","much","holds","override","hevarchivedir","none","hevboarddir"]
+hash: "5ac3ec484d429c87411518f9881ef26a2c28797681ca1d012d87a3796155aaa9"
+mode: "agent-primary"
+facts: [{"kind":"code","literal":"$ hev s\n...\nDisk usage (~/.hev): 1.2 GiB\n  traces    1.1 GiB\n  board     4.2 MiB\n  orders    0 B\n  peers     0 B\n  hooks     12.0 MiB\n  evidence  88.3 MiB\n  other     1.5 MiB","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/\u003csurface\u003e/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"/v1","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"hev up","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"hev onboard","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"hev s","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/traces/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/archive/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"HEV_ARCHIVE_DIR","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"[archive] dir","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/board/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"HEV_BOARD_DIR","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"[board] dir","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/orders/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/dispatch/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"HEV_ORDERS_DIR","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/peers/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.local/state/peers-v2/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"HEV_PEERS_STATE","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/hooks/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/evidence/","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"HEV_EVIDENCE_DIR","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"[evidence] dir","chunkId":"concepts#where-kit-keeps-its-files"},{"kind":"code","literal":"~/.hev/config.toml","chunkId":"concepts#where-kit-keeps-its-files"}]
+sources: [{"chunkId":"concepts#where-kit-keeps-its-files","url":"/docs/concepts#where-kit-keeps-its-files","anchor":"where-kit-keeps-its-files"}]
+---
+
+Each surface lives in a folder under the kit home named for its hosted v1 route, with legacy folders kept when present and environment overrides.

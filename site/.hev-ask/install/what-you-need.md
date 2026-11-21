@@ -3,14 +3,14 @@ id: "install#what-you-need"
 title: "Install"
 heading: "What you need"
 group: "Start"
-order: 137
+order: 256
 url: "/docs/install#what-you-need"
 anchor: "what-you-need"
-terms: ["need","table","needs","capturing","traces","only","while","sending","work","access","target","other","requirements","depend","machine","role","else","depends","does","laptop","sends","shared","host","very","little","want","capture","search","nothing","files","adding","layer","shares","archive","across","machines","send","another","dispatched","clone"]
-hash: "222a51c8988addfed0ffbe575f9aa1a0255db29afe9718c80eb9dec8c4b76d92"
+terms: ["need","machine","needs","depends","role","trace","capture","only","sending","work","access","running","dispatched","repo","clones","logged","codex","claude","code","plus","tmux","windows","uses","scheduled","task","optional","links","else","does","laptop","sends","shared","host","very","little","want","search","traces","nothing","files"]
+hash: "53b9c7dcbc9f2dd9208157139d5e31645adae54373fc86dcdf19e6b93be0fe50"
 mode: "agent-primary"
 facts: [{"kind":"code","literal":"hev","chunkId":"install#what-you-need"},{"kind":"code","literal":"gh","chunkId":"install#what-you-need"}]
 sources: [{"chunkId":"install#what-you-need","url":"/docs/install#what-you-need","anchor":"what-you-need"}]
 ---
 
-A table of what each use needs: capturing traces needs only hev, while sending work needs hev and SSH access to the target, and other requirements depend on the machine's role.
+What a machine needs depends on its role: trace capture needs only hev; sending work needs hev and SSH access; running dispatched work needs Git, repo clones, and a logged-in Codex or Claude Code plus tmux (Windows uses a scheduled task); gh CLI is optional for PR links.

@@ -3,14 +3,14 @@ id: "dispatch#send-an-order"
 title: "Dispatch"
 heading: "Send an order"
 group: "Use"
-order: 99
+order: 197
 url: "/docs/dispatch#send-an-order"
 anchor: "send-an-order"
-terms: ["send","order","file","dispatch","command","optionally","naming","host","config","refused","line","error","shown","confirms","started","buildbox","origin","name","base","inbox","status","report","replace","path","want","another","machine","toml","confirm","show","docs","https","hevkit","pages","llms","picks","overrides","must","admission","checks"]
-hash: "7a3606ee25bfc63d9ebca821613709d5f9d82f450a6126871f9d9d3b6b678faf"
+terms: ["send","order","sending","host","picks","machine","overrides","must","name","dispatch","config","admission","checks","repo","reserves","slot","creates","worktree","branch","before","launching","worker","buildbox","origin","base","orders","inbox","status","report","file","replace","path","want","another","toml","confirm","started","show","refused","line"]
+hash: "9877f596a5663ae36a93135f5d7313d6220139e484518ce06eff9eec387e416a"
 mode: "agent-primary"
-facts: [{"kind":"code","literal":"hev dispatch ORDER.md\nhev dispatch ORDER.md --host buildbox","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"host","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"--host","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"cap","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"origin","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"d/\u003cname\u003e","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"origin/\u003cbase\u003e","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"~/dispatch/\u003cname\u003e/wt","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"d-\u003cname\u003e","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../order.md","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../inbox.md","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../status.md","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../report.md","chunkId":"dispatch#send-an-order"}]
+facts: [{"kind":"code","literal":"hev dispatch ORDER.md\nhev dispatch ORDER.md --host buildbox","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"host","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"--host","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"cap","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"origin","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"d/\u003cname\u003e","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"origin/\u003cbase\u003e","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"~/.hev/orders/\u003cname\u003e/wt","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"d-\u003cname\u003e","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../order.md","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../inbox.md","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../status.md","chunkId":"dispatch#send-an-order"},{"kind":"code","literal":"../report.md","chunkId":"dispatch#send-an-order"}]
 sources: [{"chunkId":"dispatch#send-an-order","url":"/docs/dispatch#send-an-order","anchor":"send-an-order"}]
 ---
 
-Send an order file with the dispatch command, optionally naming a host from the config. If refused, the one-line error is shown, and ls confirms the run started.
+Sending an order: the order's host picks the machine and --host overrides it; one must name a host in your dispatch config. On admission the host checks the repo, reserves a slot, and creates the worktree and branch before launching the worker.

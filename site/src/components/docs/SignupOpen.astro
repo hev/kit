@@ -1,0 +1,7 @@
+---
+// Docs text shown only when the build knows where hosted sign-up is
+// (PUBLIC_KIT_APP_ORIGIN). SignupClosed is its opposite. lib/docs-export.ts
+// keeps the same one of the pair in the Markdown exports.
+import { APP_LIVE } from "../../lib/site";
+---
+{APP_LIVE && <slot />}

@@ -1,6 +1,6 @@
 ---
 term: "acceptance"
-aliases: ["acceptance criteria","## Acceptance"]
+aliases: ["acceptance criteria","Acceptance section"]
 ---
 
-The required order section listing observable facts a worker must prove.
+The contract in an order that the worker must meet and validators and reviewers check item by item.

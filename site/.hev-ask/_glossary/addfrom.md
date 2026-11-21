@@ -1,6 +1,6 @@
 ---
 term: "addfrom"
-aliases: ["add repos","allow members to add repos"]
+aliases: ["allowed organizations","origin prefixes"]
 ---
 
-Owner-set organization prefixes that granted members may add repos from.
+Admission setting listing origin prefixes from which members may add repos.

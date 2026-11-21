@@ -1,6 +1,6 @@
 ---
 term: "Azure Key Vault"
-aliases: ["akv","azkv","key vault","azure vault","azkv://"]
+aliases: ["azkv","key vault","AKV"]
 ---
 
-Azure secret store read with a non-interactive credential such as a managed identity, workload identity or service principal.
+Microsoft's secret store, an alternative to 1Password addressed with azkv:// references.
