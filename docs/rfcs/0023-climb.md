@@ -547,11 +547,15 @@ start, steer or stop work, or push to a remote.
 
 - **Refused:**
   - `HEV_DISPATCH_CONFIG`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`,
-    `HEV_CONFIG` and every `HEVLAYER_*`/`LAYER_*` write key in the
-    worker's environment. Today `resolveLaunch` forwards all of them
+    `HEV_CONFIG`, every `HEVLAYER_*`/`LAYER_*` write key and every
+    sandbox-provider key such as `BOAT_API_KEY` in the worker's
+    environment. Today `resolveLaunch` forwards all of them
     (`internal/dispatch/lifecycle.go:44`).
   - A `HOME` that contains `~/.config/hev`, `~/.config/gh`, `~/.ssh` or
     git credential helpers.
+  - Creating sandboxes or other paid hosts. Only the host's sandbox broker
+    holds a provider key, and it serves only the climb's scorer (see the
+    fleet stress test).
   - Dispatch RPC from inside a climb run. The run's marker makes admission
     refuse `start`, `say`, `rework` and `stop` whose caller is a climb unit.
   - `git push` and `hev dispatch|orchestrate|swarm|climb` commands, through
@@ -778,7 +782,138 @@ query IDs and pass/fail results go to workers.
 The climb file is the one in section 1. A natural parent mix is one Claude
 and one Codex model, a width of 6, top-3 parents, and a week's deadline.
 
-## A second goal: an arena
+## A second worked goal: fleet-scale stress test
+
+The second goal turns the climb on kit itself: **how many hosts can kit
+coordinate before something breaks, and what breaks first?** A scorer
+spins up N Boat.dev sandboxes, each running hevd and peers, drives a fixed
+coordination workload across them, and reports the largest N at which
+every check still holds. Candidates are kit commits that raise that number:
+changes to peers, the hevd cluster, dispatch admission or pacing.
+
+**Prior art.** The Boat spike, hev/kit#127 (closed unmerged as a spike),
+added Boat HTTP hosts to dispatch: one labelled VM per order, a snapshot
+builder with tmux, hevd and the harnesses, and cleanup that keeps records
+after VM deletion. Its paid-account acceptance on 2026-11-09 ran ten
+distinct orders concurrently. All ten completed, and cross-order trace
+search found every one. So ten sandboxes is the proven floor. Nothing
+above ten has been tried. The spike also found two limits this goal should
+expect to meet again: independent dispatchers need separate host labels to
+serialize the cap, and an earlier Boat run stopped on a provider plan limit
+(`docs/learnings/cluster-trace-review-2026-11.md`).
+
+**Where it can break.** The scorer measures four places, each with a
+pinned check. The first one to fail names the break:
+
+| Break point | Workload | Check that fails |
+|---|---|---|
+| Peers gossip | Every member sends a fixed fan of `peers send` messages and reads its log | A message is lost or duplicated, or p99 delivery exceeds the pinned bound |
+| Cluster membership | Members join, leave and restart on a fixed schedule ([RFC 0016](0016-cluster.md), [cluster](../cluster.md)) | Membership has not converged on every member within the bound after a change, or a member is falsely marked dead |
+| Dispatch admission | Every member queues and starts orders against shared caps ([RFC 0012 queue](0012-dispatch-queue.md)) | An order is lost, launched twice, or admitted past a cap |
+| Plan quota | Replicated plan-usage facts and pacing holds across the fleet (section 6) | A hold fires late, does not reach every member, or misses a reset |
+
+The workload uses a scripted stand-in harness that makes no model calls,
+so a scoring run spends sandbox time, not plan quota. Plan quota is tested
+by injecting synthetic usage facts. An optional, separately pinned step
+with real harnesses measures where real quota stops the fleet, but that
+step is a measurement for the operator, never the objective.
+
+The scorer reports the ramp in `detail`:
+
+```json
+{"value": 24, "n": 3, "detail": {"steps": [8, 16, 24, 32], "broke_at": 32, "first_break": "cluster-membership", "converge_p99_s": 41.2, "sandbox_seconds": 5120}}
+```
+
+**Held-out.** The held-out scorer runs the same ramp with a hidden fault
+schedule (a partition, a member killed mid-order, clock skew) and a
+different message mix. A candidate that raises N only by tuning for the
+visible schedule shows up as divergence (requirement 7).
+
+**Gaming to watch for.** The cheap ways to "not break" are to refuse work
+or to stop measuring. Admission that refuses every order never admits twice,
+and peers that drop acknowledgements never report a slow delivery. So the
+workload counts refusals above a pinned rate as a failure, the checks run
+from the host's copy of the workload rather than from the candidate's own
+status output, and the workload, its schedules and the check bounds are
+protected paths.
+
+### The sandbox broker and control requirement 1
+
+Requirement 1 holds without exception here, because a Boat key can create
+paid machines. The **operator sets N** and a **host-side broker holds the
+key**. Climb workers can never mint sandboxes or read the credential.
+
+- **The broker** is a hevd service on the climb's host. It reads the Boat
+  API key at use time from the operator's 1Password vault through
+  `hev secrets run` ([RFC 0009](0009-secrets.md)), keeps it in memory, and
+  never writes it to disk, a log, a sandbox or a lineage record. It listens
+  on a Unix socket owned by the supervisor's account. When the host sets
+  `[climb] worker_user` (requirement 1, honest limit), that socket is
+  unreachable from the worker's account.
+- **The scorer asks the broker for a fleet; it never sees the key.** The
+  scorer runs network-denied, as every scorer does (section 4). Its one
+  channel out is the broker socket. It asks for a ramp for one candidate
+  commit. The broker builds the candidate into the pinned snapshot, starts
+  the sandboxes, runs the host's pinned workload, returns the measurements
+  and destroys the fleet. Every sandbox is labelled with the climb,
+  generation and candidate, and carries a hard auto-stop TTL so a crash
+  leaves nothing running.
+- **N is the operator's.** The ceiling is `max_sandboxes` in the host's
+  `[climb.broker]` table, and the ramp steps are part of the scorer's
+  pinned data. Neither appears in the climb file, a brief or a worker's
+  tree. Raising either is a host config edit, which re-pins the scorer and
+  takes effect only for a new climb.
+
+**Refused:**
+
+- `BOAT_API_KEY`, any other sandbox-provider key, and any `op://`
+  reference in a worker's environment, `HOME` or brief. These join the
+  refused list in requirement 1.
+- A broker request from any process other than the climb's scorer. The
+  broker checks the caller against the scoring run it expects, and refuses
+  and records calls from a climb unit.
+- A ramp step above `max_sandboxes`. So is a missing `max_sandboxes`, a
+  value of zero, or an unbounded one (requirement 3).
+- A fleet that outlives its scoring run's `timeout` plus the TTL.
+- Passing the key, the 1Password session or the host's cluster key into a
+  sandbox. Each fleet gets a fresh cluster key and a sandbox-scoped hevd
+  token. Both are discarded with the fleet.
+- More broker spend than the climb's `budget.usd`. Every fleet's
+  sandbox-seconds are priced into the candidate's cost, and the broker
+  holds its own daily ceiling as a backstop.
+
+**Kept:**
+
+- Workers read and change the coordination code, and run the `dev` scorer:
+  a small ramp on local processes or containers, with no sandboxes and no
+  key.
+- The scorer gets measurements and sandbox-seconds for each candidate, and
+  the lineage records them.
+- The operator can still run `hev dispatch` to Boat hosts by hand as the
+  spike did. The broker only removes that path from inside a climb.
+
+The climb file differs from section 1 only where the goal does:
+
+```yaml
+kind: climb
+name: fleet-breakpoint
+goal: Raise the number of hosts kit coordinates (peers, cluster, admission, pacing) before a pinned check fails.
+repo: kit
+base: v0.7
+host: oven
+objective: {scorer: fleet-breakpoint, direction: max, repeats: 2}
+heldout: {scorer: fleet-breakpoint-faults, every: generation, divergence: 8}
+dev: {scorer: fleet-breakpoint-local}
+population: {width: 4, top_k: 2, min_delta: 4}
+budget: {agent_hours: 30, usd: 80, paid_api: false}   # usd covers broker sandbox time
+stop: {max_generations: 15, plateau: 4, deadline: 2026-12-04T18:00:00Z}
+workers: {hosts: [oven], mix: [{harness: claude}, {harness: codex}], timeout: 120}
+```
+
+Numbers are illustrative. `repeats: 2` is there because a fleet ramp is
+noisier than a recall score.
+
+## A third goal: an arena
 
 The open-ended goal is a bot for a small original game, written for the
 arena. The objective is the win rate against the current champion over a
@@ -845,7 +980,12 @@ Every candidate record carries the data to answer these. `hev climb lineage
    additions (`degrade_last: hold`). Paid-API refusal.
 5. **Multi-host workers, the judgment round, angles, board lessons and the
    A/B slot split** for research question 3.
-6. **The retrieval goal** once its fixture exists, then the arena.
+6. **The retrieval goal** once its fixture exists.
+7. **The fleet stress test:** the sandbox broker, the `[climb.broker]`
+   table and the Boat key refusals in requirement 1, tested from both sides.
+   A scorer's ramp within `max_sandboxes` is served. A climb unit's broker
+   call, a step above the ceiling, and a worker environment carrying a
+   provider key are each refused. Then the arena.
 
 ## Open questions
 
@@ -872,3 +1012,12 @@ Every candidate record carries the data to answer these. `hev climb lineage
 7. **Combining parents.** Selection here is mutation only. Should a later
    phase add a crossover step (merge two top-k branches) as an integration
    worker, as swarms do?
+8. **The broker's home.** Should the sandbox broker be a climb-only hevd
+   service, or the general way any host-side job reaches Boat, with
+   dispatch's Boat hosts from hev/kit#127 as its second client? A general
+   broker is one place to cap and audit paid machines, but it grows the
+   blast radius of a bug in it.
+9. **Fleet scoring cost.** A full ramp per candidate multiplies sandbox
+   time by width and repeats. Should the ramp start at the parent's
+   breaking point and stop at the first failure, at the cost of not
+   re-checking the lower steps?
