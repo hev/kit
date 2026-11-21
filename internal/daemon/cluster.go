@@ -14,21 +14,21 @@ import (
 
 // StartCluster starts the optional membership sidecar using the daemon cache.
 func StartCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) func() {
-	_, stop := startCluster(ctx, cache, logger)
+	_, _, stop := startCluster(ctx, cache, logger)
 	return stop
 }
 
-func startCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) (cron.Membership, func()) {
+func startCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger) (*cluster.Service, cron.Membership, func()) {
 	host, _ := os.Hostname()
 	m := cron.Membership{Self: host}
 	cfg, e := cluster.LoadConfig("")
 	if e != nil {
 		logger.Warn("cluster disabled; daemon continues", "err", e)
 		m.Enabled = true // Fail closed for jobs with placement on invalid cluster config.
-		return m, func() {}
+		return nil, m, func() {}
 	}
 	if cfg == nil {
-		return m, func() {}
+		return nil, m, func() {}
 	}
 	enabled, cap := false, 0
 	if _, e := os.Stat(dispatch.ConfigPath("")); e == nil {
@@ -79,7 +79,7 @@ func startCluster(ctx context.Context, cache *secrets.Cache, logger *slog.Logger
 		<-activityDone
 		s.Close()
 		m.Members, m.Reserve = nil, nil
-		return m, func() {}
+		return nil, m, func() {}
 	}
-	return m, func() { cancelPublish(); <-publishDone; <-activityDone; stop(); s.Close() }
+	return s, m, func() { cancelPublish(); <-publishDone; <-activityDone; stop(); s.Close() }
 }

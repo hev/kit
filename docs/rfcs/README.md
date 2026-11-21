@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0026](0026-metrics.md) | Native cluster metrics export in hevd | Implemented | Emit allowlisted SWIM, secrets-quota, orchestrator, and cron gauges natively over loopback/Tailscale DogStatsD and Prometheus `/metrics`, retiring external Python metrics scripts. |
 | [0024](0024-licensing.md) | Offline Kit Pro licenses | Implemented | Distinct Ed25519 verification and local entitlement for Kit Pro. |
 | [0023](0023-climb.md) | `hev climb` — multi-day hill climbing on a scored goal | Proposed | A meta-harness can spend agent-hours for days on its own hosts and plans; the missing piece is the loop: a pinned numeric objective (an RFC 0021 `metric` scorer), a population of branches, selection, paced budgets, and control rules so the fleet cannot dispatch, merge or grade itself. |
 | [0022](0022-evidence.md) | Evidence — multimodal proof packages, folders in OSS, EmbeddingGemma 2 retrieval and federated search in Pro | Draft | Validators, browser-use, computer-use and spikes need a first-class multimodal proof primitive (text, image, video): a plain folder of files in OSS, `/v1/evidence/*` + federated `/v1/search` + Pro UI viewer in Pro. |
