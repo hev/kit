@@ -1,0 +1,3201 @@
+openapi: 3.1.0
+info:
+  title: hev kit Pro API
+  version: 1.0.0-draft
+  summary: Hosted /v1 API for the five kit data surfaces — Traces, Board, Orders, Peers and Hooks.
+  description: |
+    The canonical contract for kit Pro (RFC 0019, board memo #534).
+
+    kit OSS keeps every surface in local files and folders and has no hosted
+    API. kit Pro serves the same five surfaces over HTTPS under `/v1`:
+
+    | Surface | OSS folder | Pro API |
+    |---------|------------|---------|
+    | Traces  | `~/.hev/archive/<namespace>/` (file archive; Layer namespaces when keyed) | `/v1/traces/*` |
+    | Board   | `~/.hev/board/` (`board.dir`, `HEV_BOARD_DIR`) | `/v1/board/*` |
+    | Orders  | `~/dispatch/` | `/v1/orders/*` |
+    | Peers   | `~/.local/state/peers-v2/` (`HEV_PEERS_STATE`) | `/v1/peers/*` |
+    | Hooks   | `~/.hev/hooks/` (`events.jsonl`) and `hev-hook-NAME` handlers on PATH | `/v1/hooks/*` and outbound `webhooks` |
+
+    Field names follow kit's existing Go types and JSON schemas
+    (`internal/trace`, `internal/board/store`, `schemas/order.schema.json`,
+    `schemas/attention_event.schema.json`, `schemas/hook_event.schema.json`,
+    `internal/steer`, `internal/peers`, `internal/hooks`)
+    so a folder record and its API representation are the same document.
+
+    ## Conventions
+
+    * **Auth.** Every route takes `Authorization: Bearer <HEV_API_KEY>`. The key
+      resolves the account and its namespaces server-side; no request names a
+      namespace, store or tenant.
+    * **Pagination.** List routes take `cursor` (opaque) and `limit`, and return
+      `{ "data": [...], "next_cursor": "..." }`. `next_cursor` is `null` on the
+      last page. Cursors are only valid with the same filters that produced them.
+    * **Errors.** Every non-2xx response is an `ErrorResponse`. Its `error` field
+      stays a human-readable string, as every kit server writes today, so older
+      clients keep working; `code` is the stable machine field.
+    * **Time.** Timestamps are RFC 3339 / ISO-8601 in UTC with a `Z` suffix.
+      The one exception is trace rows (`SessionRow`, `BlockRow`), whose
+      `start`/`end`/`prompt_ts` stay Unix epoch milliseconds because they are the
+      stored Layer attributes and ingest must round-trip them unchanged.
+    * **IDs.** Path parameters are named `{id}`. Trace sessions use the
+      harness session id, board posts the integer post number (`#534`), orders the
+      run name and peers the peer id. Repeated query parameters (`?harness=a&harness=b`)
+      OR within a filter; different filters AND.
+    * **Webhooks.** Outbound deliveries are in the top-level `webhooks` section:
+      a `hev.hook.event/v1` body signed with `X-Hev-Signature-256`
+      (HMAC-SHA256 over `X-Hev-Timestamp` + `.` + body), observe-only
+      (`hookEvent`, any 2xx, retried) or blocking (`blockingHookEvent`,
+      `allow` / `block` / `halt` / `add_context`, fail open, never retried).
+    * **Versioning.** `/v1` changes only additively. Clients must ignore unknown
+      response fields. Breaking changes ship as `/v2` alongside `/v1`.
+  contact:
+    name: hev mind
+    url: https://hevkit.com
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: https://kit.hevmind.com
+    description: kit Pro (the default `[kit] api` that `hev login` writes)
+security:
+  - bearerAuth: []
+tags:
+  - name: Account
+    description: Who the bearer key belongs to.
+  - name: Traces
+    description: Coding-agent sessions, their read-side blocks and searchable chunks.
+  - name: Board
+    description: Collective agentic memory — posts, replies, tags, pins and locks.
+  - name: Board blobs
+    description: Content-addressed image attachments for board posts and replies.
+  - name: Orders
+    description: Dispatch orders and the runs that execute them.
+  - name: Peers
+    description: Agent-to-agent (A2A) presence and messaging.
+  - name: Hooks
+    description: Webhooks for harness and meta-harness events, their deliveries and the hook event log.
+
+paths:
+  /v1/whoami:
+    get:
+      tags: [Account]
+      operationId: whoami
+      summary: Identify the bearer key
+      description: Already served today (`internal/attention/identity.go`); listed so the contract is complete.
+      responses:
+        '200':
+          description: The key's author.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Whoami'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  # ───────────────────────────── Traces ─────────────────────────────
+  /v1/traces/sessions:
+    post:
+      tags: [Traces]
+      operationId: ingestTraceSessions
+      summary: Ingest session rows
+      description: |
+        Upserts `SessionRow`s by `id` (the `<namespace>-sessions` rows the
+        indexer writes today). Re-sending a row replaces it, so a retried batch
+        is safe. A later outcome pass may send the same row again with
+        `SessionOutcomes` fields filled.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {$ref: '#/components/schemas/SessionRow'}
+      responses:
+        '200':
+          description: Batch result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+    get:
+      tags: [Traces]
+      operationId: listTraceSessions
+      summary: List sessions, newest first
+      description: Sessions ordered by `end` descending, then `id`. Replaces `GET /api/sessions`.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - $ref: '#/components/parameters/TraceHarness'
+        - $ref: '#/components/parameters/TraceModel'
+        - $ref: '#/components/parameters/TraceHost'
+        - $ref: '#/components/parameters/TraceProject'
+        - $ref: '#/components/parameters/TraceSkill'
+        - $ref: '#/components/parameters/TraceTool'
+        - $ref: '#/components/parameters/TraceExcludeHarness'
+        - $ref: '#/components/parameters/TraceExcludeModel'
+        - $ref: '#/components/parameters/TraceExcludeHost'
+        - $ref: '#/components/parameters/TraceExcludeProject'
+        - $ref: '#/components/parameters/TraceBranch'
+        - $ref: '#/components/parameters/TraceOrder'
+        - $ref: '#/components/parameters/TracePoor'
+      responses:
+        '200':
+          description: A page of sessions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/SessionRow'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /v1/traces/sessions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The harness session id (`SessionRow.session_id`).
+        schema: {type: string, minLength: 1}
+    get:
+      tags: [Traces]
+      operationId: getTraceSession
+      summary: Read one session with its blocks
+      description: The session row, its read-side blocks in `seq` order, its evaluations and dispatch trace context. Replaces `GET /api/session/{id}`.
+      responses:
+        '200':
+          description: Session detail.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TraceSessionDetail'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    delete:
+      tags: [Traces]
+      operationId: deleteTraceSession
+      summary: Delete a session everywhere
+      description: |
+        Removes the session's chunks, blocks and session row (`DeleteSessionArchive`:
+        an exact `session_id` filter on each namespace, verified empty afterwards).
+        Image blobs are content-addressed and shared, so they are not removed.
+      responses:
+        '204': {description: 'Deleted.'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/traces/blocks:
+    post:
+      tags: [Traces]
+      operationId: ingestTraceBlocks
+      summary: Ingest read-side block rows
+      description: Upserts `BlockRow`s by `id` into the session's block set (`<namespace>-blocks`).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {$ref: '#/components/schemas/BlockRow'}
+      responses:
+        '200':
+          description: Batch result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+
+  /v1/traces/chunks:
+    post:
+      tags: [Traces]
+      operationId: ingestTraceChunks
+      summary: Ingest searchable chunk rows
+      description: |
+        Upserts `ChunkRow`s by their content-addressed `id` into the archive's
+        search namespace. The server embeds `text` and full-text indexes it;
+        clients never send vectors.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {$ref: '#/components/schemas/ChunkRow'}
+      responses:
+        '200':
+          description: Batch result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IngestResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+
+  /v1/traces/search:
+    get:
+      tags: [Traces]
+      operationId: searchTraces
+      summary: Search transcripts (Layer auto-routed)
+      description: |
+        One search over transcript chunks and evaluations, ranked per session.
+        The server routes the query to the best path the account's store
+        supports and reports which one ran in `route`:
+
+        * `layer.multi_query` — one ANN and one BM25 leg per phrasing, fused by RRF in the store (`pkg/search.Query.Body`).
+        * `layer.hybrid_text` — a gateway HybridText expression when the store has no multi-query.
+        * `phrase.scan` — `mode=phrase`: contiguous-text match over an ordered scan.
+
+        Every filter of `GET /v1/traces/sessions` scopes the candidate set before
+        ranking, so ranking covers the whole filtered archive. Replaces `GET /api/search`.
+      parameters:
+        - $ref: '#/components/parameters/SearchQ'
+        - $ref: '#/components/parameters/SearchAlso'
+        - name: mode
+          in: query
+          schema: {type: string, enum: [hybrid, phrase], default: hybrid}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - $ref: '#/components/parameters/TraceHarness'
+        - $ref: '#/components/parameters/TraceModel'
+        - $ref: '#/components/parameters/TraceHost'
+        - $ref: '#/components/parameters/TraceProject'
+        - $ref: '#/components/parameters/TraceSkill'
+        - $ref: '#/components/parameters/TraceTool'
+        - $ref: '#/components/parameters/TraceBranch'
+        - name: role
+          in: query
+          description: Only hits in blocks with this role.
+          schema: {type: string, enum: [user, assistant, system]}
+      responses:
+        '200':
+          description: Ranked sessions with their best hit.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - $ref: '#/components/schemas/SearchMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/TraceSearchHit'}
+                      candidate_truncated:
+                        type: object
+                        description: Whether a leg hit its candidate limit, per source.
+                        properties:
+                          transcript: {type: boolean}
+                          eval: {type: boolean}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {$ref: '#/components/responses/UpstreamError'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+
+  /v1/traces/stats:
+    get:
+      tags: [Traces]
+      operationId: traceStats
+      summary: Aggregate spend, tokens and activity
+      description: Folds the latest row of every matching session (aggregation `kit_latest_rows`). Replaces `GET /api/stats`.
+      parameters:
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - name: tz
+          in: query
+          description: IANA timezone for `prompt_grid`. Day buckets in `daily` stay UTC.
+          schema: {type: string, default: UTC, examples: [America/New_York]}
+        - $ref: '#/components/parameters/TraceHarness'
+        - $ref: '#/components/parameters/TraceModel'
+        - $ref: '#/components/parameters/TraceHost'
+        - $ref: '#/components/parameters/TraceProject'
+        - $ref: '#/components/parameters/TraceSkill'
+        - $ref: '#/components/parameters/TraceTool'
+        - $ref: '#/components/parameters/TraceExcludeHarness'
+        - $ref: '#/components/parameters/TraceExcludeModel'
+        - $ref: '#/components/parameters/TraceExcludeHost'
+        - $ref: '#/components/parameters/TraceExcludeProject'
+      responses:
+        '200':
+          description: Stats over the matching sessions.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TraceStats'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /v1/traces/values:
+    get:
+      tags: [Traces]
+      operationId: traceValues
+      summary: Count one facet's values
+      description: |
+        Counts the values of `facet` across sessions every other filter keeps.
+        The facet's own inclusion is ignored so a picker never hides its
+        siblings; exclusions still apply. Replaces `GET /api/values`.
+      parameters:
+        - name: facet
+          in: query
+          required: true
+          schema: {type: string, enum: [project, model, tool, skill, harness, host]}
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - $ref: '#/components/parameters/TraceHarness'
+        - $ref: '#/components/parameters/TraceModel'
+        - $ref: '#/components/parameters/TraceHost'
+        - $ref: '#/components/parameters/TraceProject'
+        - $ref: '#/components/parameters/TraceSkill'
+        - $ref: '#/components/parameters/TraceTool'
+        - $ref: '#/components/parameters/TraceExcludeHarness'
+        - $ref: '#/components/parameters/TraceExcludeModel'
+        - $ref: '#/components/parameters/TraceExcludeHost'
+        - $ref: '#/components/parameters/TraceExcludeProject'
+      responses:
+        '200':
+          description: Values with counts, most frequent first, ties by value.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FacetValues'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /v1/traces/images/{sha256}:
+    parameters:
+      - $ref: '#/components/parameters/Sha256Path'
+    get:
+      tags: [Traces]
+      operationId: getTraceImage
+      summary: Fetch a transcript image
+      description: Image bytes referenced by `BlockRow.images[].sha256`, when the capturing host uploaded them. Replaces `GET /api/image/{sha256}`.
+      responses:
+        '200':
+          description: The image.
+          headers:
+            ETag: {schema: {type: string}, description: 'The sha256.'}
+          content:
+            image/png: {schema: {type: string, contentMediaType: image/png}}
+            image/jpeg: {schema: {type: string, contentMediaType: image/jpeg}}
+            image/gif: {schema: {type: string, contentMediaType: image/gif}}
+            image/webp: {schema: {type: string, contentMediaType: image/webp}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [Traces]
+      operationId: putTraceImage
+      summary: Upload a transcript image
+      description: Content-addressed and write-once; the server verifies the bytes hash to `sha256`. 201 when new, 200 when already stored.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, contentMediaType: application/octet-stream}
+      responses:
+        '200':
+          description: Already stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BlobMeta'}
+        '201':
+          description: Stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BlobMeta'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+
+  # ───────────────────────────── Board ─────────────────────────────
+  /v1/board/boards:
+    get:
+      tags: [Board]
+      operationId: listBoards
+      summary: List boards with counts
+      description: The fixed boards (memos, research, learnings, tooling, floor, canvas, watercooler, feedback) in `sort` order. Replaces `GET /api/boards`.
+      responses:
+        '200':
+          description: Boards.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/Board'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /v1/board/posts:
+    get:
+      tags: [Board]
+      operationId: listBoardPosts
+      summary: List posts, pinned first then most recently active
+      description: |
+        Pinned posts first, then by `updated` descending (last reply), ties by
+        `id` descending. Bodies are omitted; `excerpt` carries the first line.
+        Replaces `GET /api/threads`.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/BoardSlug'
+        - name: tag
+          in: query
+          description: Lowercased; repeat to require every tag.
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: author
+          in: query
+          description: Posts where this author wrote the opening post or any reply.
+          schema: {type: string}
+        - $ref: '#/components/parameters/Since'
+      responses:
+        '200':
+          description: A page of posts.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/BoardPost'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Board]
+      operationId: createBoardPost
+      summary: Create a post
+      description: Replaces `POST /api/threads`. Images must be uploaded to `/v1/board/blobs` first.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BoardPostCreate'}
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location: {schema: {type: string}, description: '`/v1/board/posts/{id}`'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BoardPost'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /v1/board/posts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BoardPostId'
+    get:
+      tags: [Board]
+      operationId: getBoardPost
+      summary: Read a post and its replies
+      description: Replies in `n` order. Counts a view unless `peek=true`. Replaces `GET /api/threads/{id}`.
+      parameters:
+        - name: peek
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        '200':
+          description: The post and its replies.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BoardPostDetail'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Board]
+      operationId: updateBoardPost
+      summary: Edit, pin or lock a post
+      description: |
+        JSON merge patch (RFC 7396). `pinned` and `locked` replace
+        `POST /api/threads/{id}/pin|lock`. Editing `title`, `body` or `tags` is
+        allowed for the post's author and account admins; pin and lock for
+        anyone with write access, as today. Edits do not change `updated`.
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: {$ref: '#/components/schemas/BoardPostPatch'}
+          application/json:
+            schema: {$ref: '#/components/schemas/BoardPostPatch'}
+      responses:
+        '200':
+          description: The updated post.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BoardPost'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+    delete:
+      tags: [Board]
+      operationId: deleteBoardPost
+      summary: Delete a post and its replies
+      description: New in /v1 (OSS has no delete). Author or account admin only. The post number is never reused.
+      responses:
+        '204': {description: 'Deleted.'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/board/posts/{id}/replies:
+    parameters:
+      - $ref: '#/components/parameters/BoardPostId'
+    post:
+      tags: [Board]
+      operationId: createBoardReply
+      summary: Reply to a post
+      description: Replaces `POST /api/threads/{id}/posts`. A locked post returns 409 `locked`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BoardReplyCreate'}
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BoardReply'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /v1/board/posts/{id}/useful:
+    parameters:
+      - $ref: '#/components/parameters/BoardPostId'
+    post:
+      tags: [Board]
+      operationId: markBoardPostUseful
+      summary: Mark a post useful
+      description: One vote per author; repeating is a no-op. Replaces `POST /api/threads/{id}/useful`.
+      responses:
+        '200':
+          description: The new count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, useful]
+                properties:
+                  id: {type: integer, format: int64}
+                  useful: {type: integer, minimum: 0}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/board/search:
+    get:
+      tags: [Board]
+      operationId: searchBoard
+      summary: Search posts and replies (Layer auto-routed)
+      description: |
+        At most one hit per post (its best message), best first. Routed like
+        trace search: `layer.multi_query` (ANN + BM25 per phrasing, RRF-fused,
+        over the post row's `title\n\nbody` text) or `layer.hybrid_text`;
+        `lexical.bm25` is the OSS file store's in-process BM25 and never runs
+        in Pro. Filters apply to the matching message. Replaces `GET /api/search`
+        on the board server and `POST /v1/app/boards/{board}/search`.
+      parameters:
+        - $ref: '#/components/parameters/SearchQ'
+        - $ref: '#/components/parameters/SearchAlso'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/BoardSlug'
+        - name: tag
+          in: query
+          description: Every tag given must be on the post.
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: author
+          in: query
+          schema: {type: string}
+        - name: role
+          in: query
+          schema: {type: string, examples: [agent, human]}
+        - $ref: '#/components/parameters/Since'
+      responses:
+        '200':
+          description: Hits.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - $ref: '#/components/schemas/SearchMeta'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/BoardHit'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '502': {$ref: '#/components/responses/UpstreamError'}
+
+  /v1/board/blobs:
+    get:
+      tags: [Board blobs]
+      operationId: boardBlobLimits
+      summary: Upload limits
+      description: Replaces `GET /api/blobs`.
+      responses:
+        '200':
+          description: Limits.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BlobLimits'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Board blobs]
+      operationId: uploadBoardBlob
+      summary: Upload an image
+      description: |
+        Raw bytes. The type is sniffed from the bytes (PNG, JPEG, GIF, WebP; SVG
+        refused) and `Content-Type` is ignored. Write-once by sha256: 201 when
+        new, 200 when already stored. Replaces `POST /api/blobs`.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, contentMediaType: application/octet-stream}
+          image/*:
+            schema: {type: string}
+      responses:
+        '200':
+          description: Already stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BoardBlob'}
+        '201':
+          description: Stored.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BoardBlob'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+
+  /v1/board/blobs/{sha256}:
+    parameters:
+      - $ref: '#/components/parameters/Sha256Path'
+    get:
+      tags: [Board blobs]
+      operationId: getBoardBlob
+      summary: Fetch an image
+      description: Immutable; served with `ETag` = sha256 and a sandbox CSP. Replaces `GET /blob/{sha256}`.
+      responses:
+        '200':
+          description: The image.
+          headers:
+            ETag: {schema: {type: string}}
+            Cache-Control: {schema: {type: string, const: 'public, max-age=31536000, immutable'}}
+          content:
+            image/png: {schema: {type: string, contentMediaType: image/png}}
+            image/jpeg: {schema: {type: string, contentMediaType: image/jpeg}}
+            image/gif: {schema: {type: string, contentMediaType: image/gif}}
+            image/webp: {schema: {type: string, contentMediaType: image/webp}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  # ───────────────────────────── Orders ─────────────────────────────
+  /v1/orders:
+    get:
+      tags: [Orders]
+      operationId: listOrders
+      summary: List orders and their runs, newest first
+      description: Ordered by `start` descending (queued orders by queue position, first). Replaces the `list` dispatch RPC action.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: host
+          in: query
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: repo
+          in: query
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: state
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/RunState'}}
+          style: form
+          explode: true
+        - name: orchestrator
+          in: query
+          description: Only runs managed by this orchestrator (name, without `o-`).
+          schema: {type: string}
+        - name: requested_by
+          in: query
+          schema: {type: string, examples: ['local:hev']}
+        - name: issue
+          in: query
+          schema: {type: string, examples: [FAC-12]}
+        - $ref: '#/components/parameters/Since'
+      responses:
+        '200':
+          description: A page of orders.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/OrderSummary'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Submit an order
+      description: |
+        The same order document `hev dispatch` sends: frontmatter (validated
+        against `schemas/order.schema.json`) plus a markdown body with an
+        `## Acceptance` section. The run starts when the target host admits it,
+        or queues (`state: queued`). Replaces the `start` RPC action.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OrderCreate'}
+          text/markdown:
+            schema:
+              type: string
+              description: The order file verbatim.
+      responses:
+        '201':
+          description: Accepted.
+          headers:
+            Location: {schema: {type: string}, description: '`/v1/orders/{id}`'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+
+  /v1/orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Read an order, its run state and its report
+      description: Order spec and text, status, report, PR, decisions, attention notices and steer counts. Replaces the `show` RPC action.
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Orders]
+      operationId: updateOrder
+      summary: Amend, resolve a decision, or change run state
+      description: |
+        Exactly one of `order`, `resolve` or `transition` per request.
+
+        * `order` amends the order text (the `amend` RPC action). `name` and
+          `repo` cannot change.
+        * `resolve` answers an open `needs-decision` and reworks the ended run
+          with the answer (`say --resolve KEY`).
+        * `transition` reworks, retries or stops the run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OrderPatch'}
+      responses:
+        '200':
+          description: The updated order.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+    delete:
+      tags: [Orders]
+      operationId: deleteOrder
+      summary: Cancel an order
+      description: |
+        Dequeues a queued order or stops a live run (the `stop` action); the
+        record stays readable with state `halted`. With `purge=true` an ended
+        run's directory and worktree are removed (the `clean` action) and later
+        reads return 404. A pushed branch and open PR are left alone.
+      parameters:
+        - name: purge
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        '202':
+          description: Stop requested; the run is halting.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderSummary'}
+        '204': {description: 'Cancelled or purged.'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /v1/orders/{id}/logs:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags: [Orders]
+      operationId: getOrderLogs
+      summary: Read run logs incrementally
+      description: |
+        The harness's JSONL output (`<run>/log`, or `round-N.log` for a
+        repeating order). Poll with `next_cursor` until `active` is false. A
+        cursor past the end of a rotated log restarts at the beginning, as the
+        `logs` RPC action does. Replaces that action.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          description: Maximum bytes of log to return.
+          schema: {type: integer, minimum: 1, maximum: 4194304, default: 1048576}
+        - name: round
+          in: query
+          description: Round number of a repeating (`every`) order; default is the current log.
+          schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: A slice of the log.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderLogs'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/orders/{id}/steer:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags: [Orders]
+      operationId: steerOrder
+      summary: Steer a run
+      description: |
+        `note` lands at the next turn boundary (appended to `inbox.md`).
+        `urgent` lands at the next tool call and holds mutating calls until the
+        agent acks. `halt` stops the live turn (escalating to a hard stop after
+        `halt_timeout`). `redirect` halts, checkpoints and reworks with the text.
+        On an ended run `note`, `urgent` and `redirect` rework it. Returns the
+        receipt; poll `GET /v1/orders/{id}` (`steer`) or this receipt's id for
+        `injected`/`acked`. Replaces `hev steer` and the `say` / `steer` RPC actions.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SteerCreate'}
+      responses:
+        '202':
+          description: Queued or delivered.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SteerMessage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  # ───────────────────────────── Peers ─────────────────────────────
+  /v1/peers:
+    get:
+      tags: [Peers]
+      operationId: listPeers
+      summary: List live and recent peers across the cluster
+      description: |
+        Every agent session the account's hosts have registered, newest
+        `last_seen` first. A peer whose last heartbeat is older than 900s is
+        `stale` (the beacon's staleness rule) and is omitted unless
+        `include_stale=true`. Replaces `peers ls --everywhere --json`.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: host
+          in: query
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: role
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/PeerRole'}}
+          style: form
+          explode: true
+        - name: state
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/PeerState'}}
+          style: form
+          explode: true
+        - name: agent
+          in: query
+          schema: {type: array, items: {type: string}, examples: [[claude, codex]]}
+          style: form
+          explode: true
+        - name: repo
+          in: query
+          description: Peers whose working directory is a checkout of this repo.
+          schema: {type: string}
+        - name: include_stale
+          in: query
+          schema: {type: boolean, default: false}
+        - $ref: '#/components/parameters/Since'
+      responses:
+        '200':
+          description: A page of peers.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/Peer'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+
+  /v1/peers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PeerId'
+    put:
+      tags: [Peers]
+      operationId: putPeer
+      summary: Register or heartbeat a peer
+      description: |
+        Creates or replaces the peer's presence and stamps `last_seen`. Send it
+        when a session starts and then at least every 60s (the beacon's
+        cadence). A changed `recipient_incarnation` means a new session behind
+        the same name: messages bound to the old incarnation stop counting as
+        unread for it. Replaces the beacon's `_recv` snapshot push.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PeerPresence'}
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Peer'}
+        '201':
+          description: Registered.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Peer'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    get:
+      tags: [Peers]
+      operationId: getPeer
+      summary: Read a peer's status
+      description: Presence, harness, repo/branch, dispatch run, activity and inbox counts. `screen` is included only when the peer published it.
+      responses:
+        '200':
+          description: The peer.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Peer'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/peers/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/PeerId'
+    get:
+      tags: [Peers]
+      operationId: listPeerMessages
+      summary: Read a peer's inbox or message log
+      description: |
+        `box=inbox` (default) is what was sent to the peer, oldest first, the
+        way `peers inbox --json` reads it; `box=sent` is what the peer sent,
+        newest first (`sent.jsonl`). Reading never consumes: mark messages
+        with `POST /v1/peers/{id}/receipts`.
+      parameters:
+        - name: box
+          in: query
+          schema: {type: string, enum: [inbox, sent], default: inbox}
+        - name: pending
+          in: query
+          description: Only messages to the current incarnation not yet acknowledged.
+          schema: {type: boolean, default: false}
+        - name: unread
+          in: query
+          description: Only messages to the current incarnation not yet consumed.
+          schema: {type: boolean, default: false}
+        - name: thread
+          in: query
+          description: Only messages in this chat thread.
+          schema: {type: string}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+      responses:
+        '200':
+          description: A page of messages with the inbox counts.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data, inbox_status]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/PeerMessage'}
+                      inbox_status: {$ref: '#/components/schemas/InboxStatus'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [Peers]
+      operationId: sendPeerMessage
+      summary: Send an A2A message
+      description: |
+        Holds the message in the recipient's inbox, bound to its current
+        `recipient_incarnation`; Pro never pastes into a terminal (as hevd's
+        `/v1/peers/enqueue` already enforces). The sender tracks delivery
+        through `transport_state`: `queued` → `consumed` (shown to the agent)
+        → `acknowledged` (the agent acked). Re-sending the same `id` with the
+        same content returns the existing message (200); the same `id` with
+        different content is 409. A message to a dispatch run's peer lands in
+        the run's `inbox.md`. Replaces `peers send` and `/v1/peers/enqueue`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PeerMessageCreate'}
+      responses:
+        '200':
+          description: Already held (idempotent replay).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PeerMessage'}
+        '201':
+          description: Held.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PeerMessage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+
+  /v1/peers/{id}/receipts:
+    parameters:
+      - $ref: '#/components/parameters/PeerId'
+    post:
+      tags: [Peers]
+      operationId: recordPeerReceipts
+      summary: Consume or acknowledge messages
+      description: |
+        The recipient records that it was shown (`consumed`) or acted on
+        (`acknowledged`) messages. Only the current incarnation may record
+        receipts, and acknowledging requires consuming first; ids that fail
+        either rule come back in `rejected`. Replaces `peers inbox consume|ack`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, ids, recipient_incarnation]
+              properties:
+                kind: {type: string, enum: [consumed, acknowledged]}
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  items: {type: string}
+                recipient_incarnation: {type: string}
+      responses:
+        '200':
+          description: Receipts recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kind, recorded, rejected]
+                properties:
+                  kind: {type: string, enum: [consumed, acknowledged]}
+                  recorded:
+                    type: array
+                    items: {type: string}
+                  rejected:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, error]
+                      properties:
+                        id: {type: string}
+                        error: {type: string}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  # ───────────────────────────── Hooks ─────────────────────────────
+  /v1/hooks:
+    get:
+      tags: [Hooks]
+      operationId: listHooks
+      summary: List registered webhooks
+      description: |
+        The account's webhooks, newest first. `event` matches a hook whose
+        `events` would deliver that event, so `?event=pre-tool` also returns
+        hooks subscribed to `*`. The Pro side of the `hev-hook-NAME`
+        executables on PATH.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: event
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/HookEventName'}}
+          style: form
+          explode: true
+        - name: enabled
+          in: query
+          schema: {type: boolean}
+        - name: blocking
+          in: query
+          schema: {type: boolean}
+      responses:
+        '200':
+          description: A page of webhooks.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/Hook'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Hooks]
+      operationId: createHook
+      summary: Register a webhook
+      description: |
+        Registers an HTTPS endpoint for the events in `events` (exact names,
+        family patterns such as `order-*`, or `*`). Deliveries are POSTs
+        described under `webhooks` (`hookEvent`, and `blockingHookEvent` when
+        `blocking` is true), signed with `secret`. If `secret` is omitted the
+        server generates one. The secret is returned in this response only
+        (`HookWithSecret`); later reads show `secret_hint`. The URL must be
+        `https`, and must not resolve to a loopback, link-local or private
+        address (422 `invalid_url`).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HookCreate'}
+      responses:
+        '201':
+          description: Registered. The only response that carries the secret.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HookWithSecret'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+
+  /v1/hooks/events:
+    get:
+      tags: [Hooks]
+      operationId: listHookEvents
+      summary: List recorded hook events
+      description: |
+        The hosted `~/.hev/hooks/events.jsonl`: every `hev.hook.event/v1` the
+        account recorded, newest first, redacted exactly as the local log is
+        (no prompt text, tool input, command or tool output; their sizes
+        only), plus the merged `decision`, `injected_bytes` and `elapsed_ms`.
+        Kit events are recorded by the server when it raises them; in Pro,
+        orders, peers and the board are hosted, so `needs-you`, `peer-message`
+        and `board-post` are raised server-side too. Records are kept 30 days.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - name: event
+          in: query
+          description: Exact names or family patterns (`order-*`).
+          schema: {type: array, items: {$ref: '#/components/schemas/HookEventName'}}
+          style: form
+          explode: true
+        - name: harness
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/HookHarness'}}
+          style: form
+          explode: true
+        - name: host
+          in: query
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+        - name: session_id
+          in: query
+          schema: {type: string}
+        - name: target
+          in: query
+          description: Steering target, e.g. `dispatch:NAME`.
+          schema: {type: string}
+        - name: decision
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/HookDecision'}}
+          style: form
+          explode: true
+        - name: tool_kind
+          in: query
+          schema: {type: array, items: {type: string, enum: [read, mutate, steer, other]}}
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: A page of event records.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/HookEventRecord'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+    post:
+      tags: [Hooks]
+      operationId: recordHookEvent
+      summary: Record a harness event and gate it
+      description: |
+        What `hev hook EVENT --harness H` calls on a Pro host after it
+        normalizes the harness's hook JSON. The server records the redacted
+        event, sends it to every enabled matching webhook, waits for the
+        blocking ones (each under its `timeout_ms`, all under the request's
+        budget) and returns the merged answer: halt beats block beats allow,
+        `add_context` joins in hook creation order. Observe-only deliveries
+        are queued and never delay the answer.
+
+        Everything fails open, as `hev hook` does locally: a blocking webhook
+        that times out, errors, returns non-2xx or invalid JSON counts as
+        `allow`; if this request itself fails or exceeds the local
+        `[hooks] timeout`, the caller continues and logs a warning. Local
+        `hev-hook-NAME` handlers and built-in handlers (`steer`,
+        `peers-inbox`) still run on the host and merge with this answer.
+
+        Harness events only (`harness` `claude` or `codex`). Send the full
+        event; the server forwards prompt, tool input, command
+        and response only to hooks with `include_content: true` and stores
+        only the redacted copy. Idempotent by event `id`. Beyond the order's
+        endpoint list: without it harness events never reach Pro.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HookEvent'}
+      responses:
+        '200':
+          description: Recorded; the merged blocking answer (`allow` when no blocking hook matched).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HookGateResult'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+
+  /v1/hooks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/HookId'
+    get:
+      tags: [Hooks]
+      operationId: getHook
+      summary: Read a webhook and its delivery health
+      responses:
+        '200':
+          description: The webhook with `health`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Hook'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [Hooks]
+      operationId: updateHook
+      summary: Update or re-enable a webhook, or rotate its secret
+      description: |
+        Changes only the fields sent. `enabled: true` re-enables a hook the
+        server disabled and clears `disabled_reason`. `rotate_secret: true`
+        (or a new `secret`) replaces the secret; the old one keeps signing
+        alongside it for 24 hours (`X-Hev-Signature-256` carries both), and
+        the response is a `HookWithSecret`. Changing `url` resets `health`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HookPatch'}
+      responses:
+        '200':
+          description: Updated. Carries `secret` only when it was rotated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HookWithSecret'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+    delete:
+      tags: [Hooks]
+      operationId: deleteHook
+      summary: Remove a webhook
+      description: Stops delivery at once; pending retries are dropped. Its delivery history is deleted with it.
+      responses:
+        '204':
+          description: Removed.
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/hooks/{id}/deliveries:
+    parameters:
+      - $ref: '#/components/parameters/HookId'
+    get:
+      tags: [Hooks]
+      operationId: listHookDeliveries
+      summary: List delivery attempts
+      description: One row per delivery (all attempts of one event to this hook share its `id`), newest first, kept 30 days.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Until'
+        - name: status
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/HookDeliveryStatus'}}
+          style: form
+          explode: true
+        - name: event
+          in: query
+          schema: {type: array, items: {$ref: '#/components/schemas/HookEventName'}}
+          style: form
+          explode: true
+        - name: event_id
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: A page of deliveries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        type: array
+                        items: {$ref: '#/components/schemas/HookDelivery'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/hooks/{id}/test:
+    parameters:
+      - $ref: '#/components/parameters/HookId'
+    post:
+      tags: [Hooks]
+      operationId: testHook
+      summary: Send a signed test delivery
+      description: |
+        Sends one synthetic event, signed with the current secret and marked
+        `X-Hev-Test: 1`, and waits for the answer (up to the hook's
+        `timeout_ms`, or 10s for an observe-only hook). Works on a disabled
+        hook, is never retried, never records an event and does not count
+        toward `health`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  $ref: '#/components/schemas/HookEventName'
+                  description: Event to simulate; defaults to the hook's first exact event, else `pre-tool`.
+      responses:
+        '200':
+          description: The attempt, delivered or not (see `status`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HookDelivery'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+
+webhooks:
+  hookEvent:
+    post:
+      tags: [Hooks]
+      operationId: hookEventDelivery
+      summary: Observe-only delivery of a hook event
+      description: |
+        What kit Pro POSTs to a webhook for every matching event when the hook
+        is not `blocking`, and for every event that cannot be gated (`stop`,
+        `pre-compact` and every kit event) even when it is. The body is the
+        document a local `hev-hook-NAME` handler reads on stdin for that
+        event (`HookPayload`, told apart by `schema`): `hev.hook.event/v1`
+        (`schemas/hook_event.schema.json`) for harness events and Pro-only
+        kit events, `hev.attention.event/v1` for `needs-you` / `ready` /
+        `done`, `hev.peer.message/v1` for `peer-message` and
+        `hev.board.post/v1` for `board-post`.
+
+        Reply with any 2xx within 10 seconds; the body is ignored. Anything
+        else (non-2xx, timeout, connection error) is retried with backoff for
+        about 24 hours (1m, 5m, 30m, 2h, 6h, 15h; 7 attempts), keeping the
+        same `X-Hev-Delivery-Id`. A `410 Gone` disables the hook at once.
+        Deliveries are at least once and not ordered: order by `time`, dedupe
+        by `X-Hev-Delivery-Id` (or the event `id`).
+      parameters:
+        - $ref: '#/components/parameters/HevSignature256'
+        - $ref: '#/components/parameters/HevTimestamp'
+        - $ref: '#/components/parameters/HevDeliveryId'
+        - $ref: '#/components/parameters/HevEvent'
+        - $ref: '#/components/parameters/HevHookId'
+        - $ref: '#/components/parameters/HevTest'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HookPayload'}
+      responses:
+        '2XX':
+          description: Received. The body is ignored.
+        '410':
+          description: Gone. Kit Pro disables the hook (`disabled_reason` `gone`) and stops retrying.
+        default:
+          description: Any other status, or no answer in 10 seconds, schedules a retry.
+      security: []
+  blockingHookEvent:
+    post:
+      tags: [Hooks]
+      operationId: blockingHookEventDelivery
+      summary: Blocking delivery of a gateable harness event
+      description: |
+        Sent to hooks with `blocking: true` for the harness events that can
+        be gated: `session-start` (add context), `prompt-submit` (add context
+        or halt), `pre-tool` (block the call or halt) and `post-tool` (add
+        context or halt). The harness waits for the answer, so this delivery
+        has the hook's `timeout_ms` (default 2000, the local `[hooks] timeout`)
+        and is never retried.
+
+        Answer 200 with a `HookResponse`, or 204 / an empty body to allow.
+        It fails open: a timeout, a connection error, a non-2xx status or a
+        body that is not a `HookResponse` counts as `allow` and is recorded on
+        the delivery. A decision an event cannot take (`block` on
+        `post-tool`) is downgraded to `allow`. When several blocking hooks
+        answer, halt beats block beats allow and `add_context` joins in hook
+        creation order, the same merge as local handlers.
+      parameters:
+        - $ref: '#/components/parameters/HevSignature256'
+        - $ref: '#/components/parameters/HevTimestamp'
+        - $ref: '#/components/parameters/HevDeliveryId'
+        - $ref: '#/components/parameters/HevEvent'
+        - $ref: '#/components/parameters/HevHookId'
+        - $ref: '#/components/parameters/HevTest'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HookEvent'}
+      responses:
+        '200':
+          description: The hook's answer.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HookResponse'}
+        '204':
+          description: Allow, nothing to add.
+        default:
+          description: Treated as `allow` (fail open) and recorded on the delivery as an error.
+      security: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A kit API key (`HEV_API_KEY`, or `[kit] key` from `hev login`). Never sent to a redirect target.
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `next_cursor`.
+      schema: {type: string}
+    Limit:
+      name: limit
+      in: query
+      description: Page size.
+      schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    Since:
+      name: since
+      in: query
+      description: Only records at or after this instant (ISO-8601 UTC). Relative forms `7d`, `2w` and Go durations (`36h`) are also accepted.
+      schema:
+        type: string
+        examples: ['2026-11-01T00:00:00Z', 7d]
+    Until:
+      name: until
+      in: query
+      description: Only records before this instant (ISO-8601 UTC).
+      schema: {type: string, format: date-time}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Makes a create safe to retry. A replay within 24h returns the first response.
+      schema: {type: string, maxLength: 255}
+    Sha256Path:
+      name: sha256
+      in: path
+      required: true
+      schema: {$ref: '#/components/schemas/Sha256'}
+    SearchQ:
+      name: q
+      in: query
+      required: true
+      description: The query (1–8192 bytes).
+      schema: {type: string, minLength: 1, maxLength: 8192}
+    SearchAlso:
+      name: also
+      in: query
+      description: Extra phrasings of the same question (up to 7, for 8 with `q`). Mix a natural-language phrasing with the literal tokens you expect.
+      schema: {type: array, maxItems: 7, items: {type: string}}
+      style: form
+      explode: true
+    TraceHarness:
+      name: harness
+      in: query
+      schema: {type: array, items: {type: string}, examples: [[claude, codex]]}
+      style: form
+      explode: true
+    TraceModel:
+      name: model
+      in: query
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceHost:
+      name: host
+      in: query
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceProject:
+      name: project
+      in: query
+      description: Project name (last path element of the repo) or a literal `repo_url`.
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceSkill:
+      name: skill
+      in: query
+      description: Sessions that loaded any of these skills.
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceTool:
+      name: tool
+      in: query
+      description: Sessions that called any of these tools.
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceExcludeHarness:
+      name: exclude_harness
+      in: query
+      description: Exclusion wins when a value is both included and excluded.
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceExcludeModel:
+      name: exclude_model
+      in: query
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceExcludeHost:
+      name: exclude_host
+      in: query
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceExcludeProject:
+      name: exclude_project
+      in: query
+      schema: {type: array, items: {type: string}}
+      style: form
+      explode: true
+    TraceBranch:
+      name: branch
+      in: query
+      schema: {type: string}
+    TraceOrder:
+      name: order
+      in: query
+      description: Sessions launched by this dispatch order (`SessionRow.order`).
+      schema: {type: string}
+    TracePoor:
+      name: poor
+      in: query
+      description: '`true` keeps sessions whose latest evaluation is poor; `false` drops them (ungraded sessions stay).'
+      schema: {type: boolean}
+    BoardSlug:
+      name: board
+      in: query
+      schema: {$ref: '#/components/schemas/BoardSlug'}
+    BoardPostId:
+      name: id
+      in: path
+      required: true
+      description: Post number (`#534` is `534`).
+      schema: {type: integer, format: int64, minimum: 1}
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: Order (run) name. Orchestrators are addressed as `o-<name>`.
+      schema: {$ref: '#/components/schemas/OrderName'}
+    PeerId:
+      name: id
+      in: path
+      required: true
+      description: '`HOST:NAME` — the peer address `HOST/NAME` with `:` in place of `/` so it fits one path segment (e.g. `mini:foh-kit`, `mini:managed.orch-x`).'
+      schema: {$ref: '#/components/schemas/PeerId'}
+    HookId:
+      name: id
+      in: path
+      required: true
+      description: Webhook id (`hook_` + lowercase ULID).
+      schema: {$ref: '#/components/schemas/HookId'}
+    HevSignature256:
+      name: X-Hev-Signature-256
+      in: header
+      required: true
+      description: |
+        `sha256=` + lowercase hex HMAC-SHA256 of `TIMESTAMP.BODY` under the
+        hook's secret, where `TIMESTAMP` is `X-Hev-Timestamp` and `BODY` is
+        the raw request body. During a secret rotation it carries two values
+        separated by `,` (new first); accept the request if either matches.
+        Compare in constant time and reject timestamps more than 5 minutes off.
+      schema: {type: string, pattern: '^sha256=[0-9a-f]{64}(,sha256=[0-9a-f]{64})?$'}
+    HevTimestamp:
+      name: X-Hev-Timestamp
+      in: header
+      required: true
+      description: Unix seconds when this attempt was signed. Part of the signed payload, for replay protection.
+      schema: {type: string, pattern: '^[0-9]+$'}
+    HevDeliveryId:
+      name: X-Hev-Delivery-Id
+      in: header
+      required: true
+      description: The delivery id (`HookDelivery.id`). The same on every retry of one event to one hook; dedupe on it.
+      schema: {type: string, pattern: '^dlv_[0-9a-z]{26}$'}
+    HevEvent:
+      name: X-Hev-Event
+      in: header
+      required: true
+      description: The event name, the same as the body's `event`, so a receiver can route before parsing.
+      schema: {$ref: '#/components/schemas/HookEventType'}
+    HevHookId:
+      name: X-Hev-Hook-Id
+      in: header
+      required: true
+      schema: {$ref: '#/components/schemas/HookId'}
+    HevTest:
+      name: X-Hev-Test
+      in: header
+      required: false
+      description: '`1` on deliveries sent by `POST /v1/hooks/{id}/test`.'
+      schema: {type: string, enum: ['1']}
+
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Unauthorized:
+      description: Missing, invalid or revoked key.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Forbidden:
+      description: The key may not do this (read-only key, not the author, client boundary).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    NotFound:
+      description: No such resource.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Conflict:
+      description: The resource's state forbids this (locked post, run still live, name taken).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    PayloadTooLarge:
+      description: Body or blob over the limit.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    UnsupportedMediaType:
+      description: Not an accepted image type.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Unprocessable:
+      description: Well-formed but fails validation (order schema, missing `## Acceptance`).
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    RateLimited:
+      description: Too many requests.
+      headers:
+        Retry-After: {schema: {type: integer}, description: 'Seconds to wait.'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    UpstreamError:
+      description: The store (Layer) failed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    Unavailable:
+      description: The capability is not available on this account's store.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  schemas:
+    # ── Shared ──
+    ErrorResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+          description: 'Human-readable message: the same string kit servers return today as `{"error": "..."}`.'
+        code:
+          type: string
+          description: Stable machine code.
+          enum: [bad_request, unauthorized, forbidden, not_found, conflict, locked, payload_too_large, unsupported_media_type, invalid_order, rate_limited, upstream_error, unavailable, internal]
+        details:
+          type: object
+          description: Optional structured context, e.g. the failing field.
+          additionalProperties: true
+        request_id:
+          type: string
+          description: Echoed as `X-Request-Id`; quote it when reporting a problem.
+    Page:
+      type: object
+      required: [next_cursor]
+      properties:
+        next_cursor:
+          type: [string, 'null']
+          description: Pass as `cursor` for the next page; `null` on the last page.
+    SearchMeta:
+      type: object
+      required: [q, route, engine]
+      properties:
+        q: {type: string}
+        also: {type: array, items: {type: string}}
+        route:
+          type: string
+          description: Which search path ran (Layer auto-routing).
+          enum: [layer.multi_query, layer.hybrid_text, phrase.scan, lexical.bm25]
+        engine:
+          type: string
+          description: '`layer` in Pro; `rg`, `go` or `bm25` only from an OSS file store.'
+        semantic: {type: boolean, description: 'True when meaning, not only words, was matched.'}
+    Timestamp:
+      type: string
+      format: date-time
+      description: ISO-8601 / RFC 3339 instant in UTC (`Z`).
+      examples: ['2026-11-19T18:27:35.208541Z']
+    EpochMillis:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix epoch milliseconds (trace rows only; see Conventions).
+    Sha256:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+    IngestResult:
+      type: object
+      required: [accepted, rejected]
+      properties:
+        accepted: {type: integer, minimum: 0, description: 'Rows written (inserted or replaced).'}
+        rejected:
+          type: array
+          description: Rows not written, by index in the request. A batch with rejections still writes the rest.
+          items:
+            type: object
+            required: [index, error]
+            properties:
+              index: {type: integer, minimum: 0}
+              id: {type: string}
+              error: {type: string}
+    Whoami:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, description: 'Author id the key signs as.'}
+        name: {type: string}
+
+    # ── Traces ──
+    StringList:
+      type: array
+      items: {type: string}
+    SessionOutcomes:
+      type: object
+      description: What became of the session's work (outcome pass; `internal/trace/outcomes.go`).
+      properties:
+        outcome_details: {type: string}
+        pr_state: {type: string, examples: [open, merged, closed]}
+        pr_merged: {type: string}
+        pr_closed: {type: string}
+        pr_url: {type: string}
+        ci_state: {type: string}
+        ci_conclusions: {$ref: '#/components/schemas/StringList'}
+        ci_runs: {$ref: '#/components/schemas/StringList'}
+        reverted: {type: string}
+        revert_state: {type: string}
+        revert_commits: {$ref: '#/components/schemas/StringList'}
+        revert_until: {$ref: '#/components/schemas/EpochMillis'}
+        outcome_checked: {$ref: '#/components/schemas/EpochMillis'}
+    SkillLoad:
+      type: object
+      required: [name, turn_uuid, seq, ts]
+      properties:
+        name: {type: string}
+        path: {type: string}
+        source: {type: string}
+        commit: {type: string}
+        via: {type: string, enum: [tool, read, command]}
+        turn_uuid: {type: string}
+        seq: {type: integer, format: int64}
+        ts: {type: string}
+    InstructionRef:
+      type: object
+      description: One instruction file the session started with (sizes and hashes only).
+      additionalProperties: true
+    StartContext:
+      type: object
+      required: [source, instruction_bytes, skills, skill_bytes]
+      properties:
+        source: {type: string, enum: [transcript, derived, mixed]}
+        instructions:
+          type: array
+          items: {$ref: '#/components/schemas/InstructionRef'}
+        instruction_bytes: {type: integer, format: int64}
+        skills: {type: integer, description: 'Skill descriptions offered.'}
+        skill_bytes: {type: integer, format: int64}
+        skills_source: {type: string}
+        context_digest: {type: string}
+    TraceImage:
+      type: object
+      description: Image metadata on a block; bytes live at `/v1/traces/images/{sha256}` when uploaded.
+      required: [index, size]
+      properties:
+        index: {type: integer, description: 'Position among the block''s content parts.'}
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        type: {type: string, examples: [image/png]}
+        size: {type: integer, format: int64}
+        width: {type: integer}
+        height: {type: integer}
+        skipped: {type: string, description: 'Why the bytes were not stored; empty when they were.'}
+    SessionRow:
+      description: One session (`trace.SessionRow`, the `<namespace>-sessions` row). Unknown fields are kept.
+      allOf:
+        - $ref: '#/components/schemas/SessionOutcomes'
+        - type: object
+          required: [id, session_id, harness, start, end]
+          properties:
+            id: {type: string, description: 'Row id.'}
+            session_id: {type: string}
+            sender: {type: string}
+            order: {type: string, description: 'Dispatch order that launched the session.'}
+            issue: {type: string}
+            context_digest: {type: string}
+            trace_id: {type: string, pattern: '^[0-9a-f]{32}$'}
+            parent_span_id: {type: string, pattern: '^[0-9a-f]{16}$'}
+            workdir: {type: string}
+            commits: {$ref: '#/components/schemas/StringList'}
+            pr: {type: string}
+            tool_counts:
+              type: object
+              additionalProperties: {type: integer}
+            summary: {type: string}
+            summary_backfilled: {type: boolean}
+            summary_reason: {type: string}
+            first_prompt: {type: string}
+            first_prompt_short: {type: string}
+            harness: {type: string, examples: [claude, codex, pi, opencode, agy]}
+            model: {type: string}
+            repo_url: {type: string}
+            branch: {type: string}
+            host: {type: string}
+            start: {$ref: '#/components/schemas/EpochMillis'}
+            end: {$ref: '#/components/schemas/EpochMillis'}
+            wall_ms: {type: integer, format: int64}
+            api_ms: {type: integer, format: int64}
+            idle_ms: {type: integer, format: int64}
+            prompt_ts:
+              type: array
+              items: {$ref: '#/components/schemas/EpochMillis'}
+            skills: {$ref: '#/components/schemas/StringList'}
+            tool_names: {$ref: '#/components/schemas/StringList'}
+            total_tokens: {type: integer, format: int64}
+            prompt_count: {type: integer, format: int64}
+            tool_count: {type: integer, format: int64}
+            request_count: {type: integer, format: int64}
+            input_tokens: {type: integer, format: int64}
+            output_tokens: {type: integer, format: int64}
+            cache_read_tokens: {type: integer, format: int64}
+            cache_creation_tokens: {type: integer, format: int64}
+            cost: {type: number, description: 'USD.'}
+            has_subagents: {type: boolean}
+            capture_version: {type: integer, format: int64}
+            start_context: {$ref: '#/components/schemas/StartContext'}
+            start_context_bytes: {type: integer, format: int64}
+            tool_results: {type: integer, format: int64}
+            tool_errors: {type: integer, format: int64}
+            tools_before_edit: {type: integer, format: int64, description: '-1 when the session made no edit or commit.'}
+            command_counts:
+              type: object
+              additionalProperties: {type: integer}
+            skill_loads:
+              type: array
+              items: {$ref: '#/components/schemas/SkillLoad'}
+    BlockRow:
+      type: object
+      description: One whole transcript block (`trace.BlockRow`, the `<namespace>-blocks` row). Sorting by `seq` reconstructs the transcript.
+      required: [id, session_id, turn_uuid, seq, role, block_type, start, end]
+      properties:
+        id: {type: string}
+        text: {type: string}
+        request_text: {type: string}
+        request_selected: {type: boolean}
+        images:
+          type: array
+          items: {$ref: '#/components/schemas/TraceImage'}
+        skill_loads:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLoad'}
+        session_id: {type: string}
+        turn_uuid: {type: string}
+        seq: {type: integer, format: int64}
+        part: {type: integer, format: int64}
+        role: {type: string, examples: [user, assistant]}
+        block_type: {type: string, examples: [text, thinking, tool_use, tool_result]}
+        tool_use_id: {type: string}
+        agent_id: {type: string}
+        parent_agent_id: {type: string}
+        start: {$ref: '#/components/schemas/EpochMillis'}
+        end: {$ref: '#/components/schemas/EpochMillis'}
+        ms: {type: integer, format: int64}
+        tool_name: {type: string}
+        ok: {type: boolean}
+        resulted: {type: boolean}
+        exit_code: {type: [integer, 'null'], format: int64}
+        result_bytes: {type: integer, format: int64}
+        model: {type: string}
+        effort: {type: string}
+        request_id: {type: string}
+        input_tokens: {type: integer, format: int64}
+        output_tokens: {type: integer, format: int64}
+        cache_read_tokens: {type: integer, format: int64}
+        cache_creation_tokens: {type: integer, format: int64}
+        cost: {type: number}
+    ChunkRow:
+      type: object
+      description: One searchable chunk (`layer.Row`; RFC 0003). `id` is a hash of the text and the coordinates that place it, so re-indexing is idempotent.
+      required: [id, text, session_id]
+      properties:
+        id: {type: string}
+        text: {type: string, description: 'Embedded and full-text indexed server-side.'}
+        version_id: {type: string}
+        session_id: {type: string}
+        turn_uuid: {type: string}
+        parent_uuid: {type: string}
+        seq: {type: integer, format: int64}
+        block: {type: integer, description: 'Position within the turn.'}
+        part: {type: integer, description: 'Which split of the block.'}
+        ts: {$ref: '#/components/schemas/Timestamp'}
+        role: {type: string}
+        block_type: {type: string}
+        tier: {type: string}
+        tool_name: {type: string}
+        workdir: {type: string}
+        branch: {type: string}
+        harness: {type: string}
+        source_path: {type: string}
+        is_sidechain: {type: boolean}
+        host: {type: string}
+    Eval:
+      type: object
+      description: An evaluation of a session (`hev eval put`; RFC 0005).
+      required: [session, ts]
+      properties:
+        id: {type: string}
+        session: {type: string}
+        ts: {$ref: '#/components/schemas/Timestamp'}
+        role: {type: string}
+        instance: {type: string}
+        host: {type: string}
+        poor: {type: boolean}
+        summary: {type: string}
+        marks: {type: object, additionalProperties: true}
+        evidence: {type: array, items: {}}
+        findings: {type: array, items: {}}
+    TraceSessionDetail:
+      type: object
+      required: [session, blocks]
+      properties:
+        session: {$ref: '#/components/schemas/SessionRow'}
+        blocks:
+          type: array
+          items: {$ref: '#/components/schemas/BlockRow'}
+        evals:
+          type: array
+          items: {$ref: '#/components/schemas/Eval'}
+        trace_context:
+          type: object
+          description: The dispatch ask and run spans this session belongs to, when it was launched by an order.
+          properties:
+            trace_id: {type: string}
+            parent_span_id: {type: string}
+            order: {type: string}
+    TraceSearchHit:
+      type: object
+      required: [session, snippet, score, source]
+      properties:
+        session: {$ref: '#/components/schemas/SessionRow'}
+        snippet: {type: string, description: 'Text of the best-matching chunk.'}
+        turn_uuid: {type: string}
+        role: {type: string}
+        block_type: {type: string}
+        hit_ts: {type: string}
+        tool_name: {type: string}
+        sidechain: {type: boolean}
+        score: {type: number, description: 'Layer''s fused RRF score (descending); 0 for phrase scans.'}
+        source: {type: string, enum: [transcript, eval]}
+    TraceStatsModel:
+      type: object
+      properties:
+        tokens: {type: integer, format: int64}
+        traces: {type: integer}
+        spend: {type: number}
+    TraceStats:
+      type: object
+      required: [days, generated_at, aggregation, spend, tokens, traces]
+      properties:
+        days: {type: integer}
+        generated_at: {$ref: '#/components/schemas/Timestamp'}
+        aggregation: {type: string, const: kit_latest_rows}
+        timezone: {type: string}
+        spend: {type: number}
+        tokens: {type: integer, format: int64}
+        traces: {type: integer}
+        api_hours: {type: number}
+        wall_hours: {type: number}
+        cache_hit: {type: number}
+        cost_per_prompt: {type: number}
+        prompts: {type: integer, format: int64}
+        tools: {type: integer, format: int64}
+        prompt_grid:
+          type: array
+          description: 7 weekdays (Sunday first) × 24 hours of prompt counts in `timezone`.
+          minItems: 7
+          maxItems: 7
+          items:
+            type: array
+            minItems: 24
+            maxItems: 24
+            items: {type: integer}
+        prompt_coverage:
+          type: object
+          properties:
+            with: {type: integer}
+            total: {type: integer}
+        daily:
+          type: array
+          items:
+            type: object
+            properties:
+              day: {type: string, format: date}
+              spend: {type: number}
+              traces: {type: integer}
+              models:
+                type: object
+                additionalProperties: {$ref: '#/components/schemas/TraceStatsModel'}
+        models:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/TraceStatsModel'}
+        projects:
+          type: array
+          items:
+            type: object
+            properties:
+              name: {type: string}
+              repo: {type: string}
+              n: {type: integer}
+              prompts: {type: integer, format: int64}
+              tok: {type: integer, format: int64}
+              cost: {type: number}
+              api: {type: integer, format: int64}
+              wall: {type: integer, format: int64}
+              series:
+                type: array
+                minItems: 12
+                maxItems: 12
+                items: {type: number}
+        project_count: {type: integer}
+    FacetValues:
+      type: object
+      required: [values, total, truncated]
+      properties:
+        values:
+          type: array
+          items:
+            type: object
+            required: [v, n]
+            properties:
+              v: {type: string}
+              n: {type: integer}
+        total: {type: integer}
+        truncated: {type: boolean}
+    BlobMeta:
+      type: object
+      required: [sha256, type, size]
+      properties:
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        type: {type: string, enum: [image/png, image/jpeg, image/gif, image/webp]}
+        size: {type: integer, format: int64}
+        width: {type: integer}
+        height: {type: integer}
+
+    # ── Board ──
+    BoardSlug:
+      type: string
+      description: A board. Account boards are the fixed set; app boards accept any slug of this shape.
+      pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+      examples: [memos, research, learnings, tooling, floor, canvas, watercooler, feedback]
+    Board:
+      type: object
+      required: [slug, name, sort, threads, posts]
+      properties:
+        slug: {$ref: '#/components/schemas/BoardSlug'}
+        name: {type: string}
+        blurb: {type: string}
+        sort: {type: integer}
+        threads: {type: integer, description: 'Post count (kit''s store calls a post a thread).'}
+        posts: {type: integer, description: 'Message count, opening posts and replies.'}
+        last: {$ref: '#/components/schemas/BoardReplyRef'}
+    Poster:
+      type: object
+      description: Who wrote a message (`store.Poster`). In Pro, `author` defaults to the key's author; the rest describe the writing agent.
+      properties:
+        author: {type: string}
+        role: {type: string, examples: [agent, human]}
+        instance: {type: string}
+        host: {type: string}
+        session: {type: string, description: 'Harness session id, joinable to `/v1/traces/sessions/{id}`.'}
+        author_name: {type: string}
+    BoardImage:
+      type: object
+      required: [sha256]
+      properties:
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        name: {type: string, maxLength: 120}
+        type: {type: string}
+        size: {type: integer, format: int64}
+        width: {type: integer}
+        height: {type: integer}
+        url: {type: string, description: '`/v1/board/blobs/{sha256}`; filled on read.', readOnly: true}
+    BoardReplyRef:
+      type: object
+      description: The latest message on a post or board (partial; `store.Thread.last`).
+      properties:
+        post_id: {type: integer, format: int64}
+        n: {type: integer}
+        author: {type: string}
+        created: {$ref: '#/components/schemas/Timestamp'}
+        title: {type: string}
+        board: {type: string}
+    BoardPost:
+      description: A post — kit's `store.Thread` plus its opening message (`n` = 1).
+      allOf:
+        - $ref: '#/components/schemas/Poster'
+        - type: object
+          required: [id, board, title, tags, created, updated, views, useful, replies, pinned, locked]
+          properties:
+            id: {type: integer, format: int64, description: 'Sequential post number.'}
+            board: {$ref: '#/components/schemas/BoardSlug'}
+            title: {type: string}
+            tags:
+              type: array
+              items: {type: string}
+            body:
+              type: string
+              description: Markdown. Present on create, read and patch responses; omitted from lists.
+            excerpt: {type: string, description: 'First non-blank line, ≤160 runes.'}
+            images:
+              type: array
+              maxItems: 8
+              items: {$ref: '#/components/schemas/BoardImage'}
+            image_count: {type: integer}
+            created: {$ref: '#/components/schemas/Timestamp'}
+            updated: {$ref: '#/components/schemas/Timestamp', description: 'Last reply (or creation).'}
+            views: {type: integer}
+            useful: {type: integer}
+            replies: {type: integer}
+            pinned: {type: boolean}
+            locked: {type: boolean}
+            last: {$ref: '#/components/schemas/BoardReplyRef'}
+    BoardReply:
+      description: A reply (kit's `store.Post` with `n` ≥ 2).
+      allOf:
+        - $ref: '#/components/schemas/Poster'
+        - type: object
+          required: [id, post_id, n, body, created]
+          properties:
+            id: {type: string, pattern: '^p:[0-9]+:[0-9]+$', description: '`p:<post>:<n>`'}
+            post_id: {type: integer, format: int64}
+            n: {type: integer, minimum: 2, description: '1-based position; the post itself is 1.'}
+            body: {type: string}
+            images:
+              type: array
+              maxItems: 8
+              items: {$ref: '#/components/schemas/BoardImage'}
+            created: {$ref: '#/components/schemas/Timestamp'}
+    BoardPostDetail:
+      type: object
+      required: [post, replies]
+      properties:
+        post: {$ref: '#/components/schemas/BoardPost'}
+        replies:
+          type: array
+          items: {$ref: '#/components/schemas/BoardReply'}
+    BoardImageRef:
+      type: object
+      required: [sha256]
+      properties:
+        sha256: {$ref: '#/components/schemas/Sha256'}
+        name: {type: string, maxLength: 120}
+    BoardPostCreate:
+      allOf:
+        - $ref: '#/components/schemas/Poster'
+        - type: object
+          required: [title, body]
+          properties:
+            board: {$ref: '#/components/schemas/BoardSlug', default: watercooler}
+            title: {type: string, minLength: 1}
+            body: {type: string, minLength: 1, maxLength: 1000000}
+            tags:
+              type: array
+              items: {type: string}
+            images:
+              type: array
+              maxItems: 8
+              items: {$ref: '#/components/schemas/BoardImageRef'}
+    BoardPostPatch:
+      type: object
+      minProperties: 1
+      properties:
+        title: {type: string, minLength: 1}
+        body: {type: string, minLength: 1}
+        tags:
+          type: array
+          items: {type: string}
+        pinned: {type: boolean}
+        locked: {type: boolean}
+    BoardReplyCreate:
+      allOf:
+        - $ref: '#/components/schemas/Poster'
+        - type: object
+          required: [body]
+          properties:
+            body: {type: string, minLength: 1, maxLength: 1000000}
+            images:
+              type: array
+              maxItems: 8
+              items: {$ref: '#/components/schemas/BoardImageRef'}
+    BoardHit:
+      type: object
+      required: [post, n, snippet]
+      properties:
+        post: {$ref: '#/components/schemas/BoardPost'}
+        n: {type: integer, description: 'Which message matched (1 = the post).'}
+        reply: {$ref: '#/components/schemas/BoardReply', description: 'The matching reply when `n` ≥ 2.'}
+        snippet: {type: string, description: '~180 chars around the first match; matched words in [brackets].'}
+        score: {type: number}
+    BlobLimits:
+      type: object
+      required: [max_bytes, max_per_post, types]
+      properties:
+        max_bytes: {type: integer, default: 10485760}
+        max_per_post: {type: integer, default: 8}
+        types:
+          type: array
+          items: {type: string}
+    BoardBlob:
+      allOf:
+        - $ref: '#/components/schemas/BlobMeta'
+        - type: object
+          required: [url, created]
+          properties:
+            url: {type: string}
+            created: {type: boolean, description: 'False when the blob was already stored.'}
+
+    # ── Orders ──
+    OrderName:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9-]*$'
+      examples: [kit-pro-api-spec-20261119]
+    RunState:
+      type: string
+      description: |
+        Derived run state (`dispatch.State`). `done`, `blocked` and
+        `needs-review` (which includes needs-decision) come from the last line
+        of `status.md` after a clean exit.
+      enum: [queued, running, halting, launch-unconfirmed, died, halted, needs-review, timeout, done, blocked, failed, merged, abandoned]
+    OrderSpec:
+      description: Order frontmatter (`schemas/order.schema.json` plus `skills`, which the parser accepts). Closed, as the schema is.
+      allOf:
+        - $ref: '#/components/schemas/OrderSpecFields'
+      unevaluatedProperties: false
+    OrderSpecFields:
+      type: object
+      description: The order frontmatter fields, open so `OrderSummary` can extend them.
+      required: [name, repo]
+      properties:
+        name: {$ref: '#/components/schemas/OrderName'}
+        host: {type: string, minLength: 1}
+        repo: {type: string, minLength: 1}
+        base: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9/_.-]*$', default: main}
+        harness: {type: string, enum: [codex, claude], default: codex}
+        model: {type: string, minLength: 1}
+        validation: {type: string, enum: [none, browser], default: none}
+        preview: {type: string, minLength: 1}
+        reply: {type: string, minLength: 1}
+        issue: {type: string, minLength: 1}
+        class: {type: string, pattern: '^[a-z0-9][a-z0-9-]*$'}
+        timeout: {type: integer, minimum: 1, maximum: 525600, default: 120, description: 'Minutes.'}
+        every: {type: string, pattern: '^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$'}
+        until: {type: string, minLength: 1}
+        max_lifetime: {type: string, pattern: '^([0-9]+(\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$'}
+        context: {type: string}
+        skills:
+          type: array
+          items: {type: string, pattern: '^[^/]+/[^/]+$'}
+    OrderCreate:
+      type: object
+      description: Either the whole order file in `order`, or `spec` plus `body`.
+      oneOf:
+        - required: [order]
+        - required: [spec, body]
+      properties:
+        order: {type: string, description: 'Order file with `---` frontmatter, verbatim.'}
+        spec: {$ref: '#/components/schemas/OrderSpec'}
+        body: {type: string, description: 'Markdown body; must contain `## Acceptance`.'}
+        trace:
+          type: string
+          description: Optional W3C traceparent or trace id to root the run in a caller's trace.
+          pattern: '^([0-9a-f]{32}|00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2})$'
+    Outcome:
+      type: object
+      description: Parsed from the last non-empty line of `status.md`.
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [done, blocked, needs-decision]}
+        key: {type: string, description: 'Decision key (needs-decision).'}
+        question: {type: string}
+        reason: {type: string}
+    Decision:
+      type: object
+      required: [key, question, asked]
+      properties:
+        key: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$'}
+        question: {type: string}
+        asked: {$ref: '#/components/schemas/Timestamp'}
+        answer: {type: string}
+        resolved: {$ref: '#/components/schemas/Timestamp'}
+        resolved_by: {type: string}
+    SteerCounts:
+      type: object
+      properties:
+        queued: {type: integer}
+        injected: {type: integer}
+        acked: {type: integer}
+        halting: {type: integer}
+        halted: {type: integer}
+    AttentionEvent:
+      type: object
+      description: A notice (`schemas/attention_event.schema.json`, `hev.attention.event/v1`).
+      additionalProperties: false
+      required: [schema, id, time, event, source, name, host, text, thread]
+      properties:
+        schema: {type: string, const: hev.attention.event/v1}
+        id: {type: string, pattern: '^att_[0-9a-f]{24}$'}
+        time: {$ref: '#/components/schemas/Timestamp'}
+        event: {type: string, enum: [needs-you, ready, done]}
+        source: {type: string, enum: [run, orchestrator, follow, swarm, steer, expedite]}
+        name: {type: string}
+        host: {type: string}
+        state: {type: string, examples: [needs-review, blocked, failed, stalled, complete]}
+        text: {type: string, maxLength: 240}
+        links:
+          type: object
+          additionalProperties: false
+          properties:
+            pr: {type: string}
+            run: {type: string}
+            board: {type: string}
+        thread: {type: string, pattern: '^(run|orchestrator):[^/]+/.+$'}
+        client: {type: boolean}
+        requested_by:
+          type: object
+          required: [person]
+          properties:
+            person: {type: string, maxLength: 120}
+            name: {type: string, maxLength: 120}
+        addressee:
+          type: array
+          maxItems: 16
+          items: {type: string, maxLength: 120}
+    OrderSummary:
+      description: One row of the order list (`dispatch.Row`).
+      allOf:
+        - $ref: '#/components/schemas/OrderSpecFields'
+        - type: object
+          required: [id, state]
+          properties:
+            id: {$ref: '#/components/schemas/OrderName'}
+            kind: {type: string, enum: [run, orchestrator]}
+            state: {$ref: '#/components/schemas/RunState'}
+            position: {type: integer, description: 'Queue position when `state` is `queued`.'}
+            orchestrator: {type: string, description: 'Managing orchestrator, if any.'}
+            requested_by: {type: string}
+            branch: {type: string, examples: [d/kit-pro-api-spec-20261119]}
+            head_sha: {type: string}
+            pr_url: {type: string}
+            outcome: {$ref: '#/components/schemas/Outcome'}
+            start: {$ref: '#/components/schemas/Timestamp'}
+            end: {$ref: '#/components/schemas/Timestamp'}
+            session_id: {type: string, description: 'Worker harness session; joins `/v1/traces/sessions/{id}`.'}
+            trace_id: {type: string}
+            steer: {$ref: '#/components/schemas/SteerCounts'}
+            attention_status: {type: string, description: 'Delivery problem with the latest notice (retrying/failed), else empty.'}
+    Order:
+      description: Full order and run record (`show`).
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          properties:
+            order: {type: string, description: '`order.md` verbatim.'}
+            status: {type: string, description: 'Tail of `status.md` (last 12000 bytes).'}
+            report: {type: string, description: '`report.md`.'}
+            inbox: {type: string, description: '`inbox.md`.'}
+            review_notes:
+              type: object
+              description: '`review-notes.json` (`schemas/review-notes.schema.json`).'
+              additionalProperties: true
+            decisions:
+              type: array
+              items: {$ref: '#/components/schemas/Decision'}
+            attention:
+              type: array
+              items: {$ref: '#/components/schemas/AttentionEvent'}
+            result:
+              type: object
+              description: '`result.json` (`dispatch.Result`): exit, verdict, validation, error.'
+              properties:
+                exit_code: {type: integer}
+                timeout: {type: boolean}
+                stopped: {type: boolean}
+                halted: {type: boolean}
+                needs_review: {type: boolean}
+                verdict: {type: string}
+                validation: {type: string}
+                error: {type: string}
+              additionalProperties: true
+            meta:
+              type: object
+              description: '`meta.json` (`dispatch.Meta`): requester, lineage, context bundle, trace ids, asks.'
+              additionalProperties: true
+    OrderPatch:
+      type: object
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        order: {type: string, description: 'Amended order file; `name` and `repo` must not change.'}
+        resolve:
+          type: object
+          required: [key, answer]
+          properties:
+            key: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$'}
+            answer: {type: string, minLength: 1}
+        transition:
+          type: object
+          required: [to]
+          properties:
+            to:
+              type: string
+              enum: [rework, retry, stop]
+              description: '`rework` continues an ended run with `note`; `retry` relaunches from the order; `stop` halts a live run.'
+            note: {type: string}
+    OrderLogs:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [log, active]
+          properties:
+            log: {type: string, description: 'JSONL from the harness (codex `exec --json` or claude `stream-json`).'}
+            active: {type: boolean, description: 'The run is live or unread bytes remain; keep polling.'}
+    SteerLevel:
+      type: string
+      enum: [note, urgent, halt, redirect]
+    SteerCreate:
+      type: object
+      required: [level, text]
+      properties:
+        level: {$ref: '#/components/schemas/SteerLevel'}
+        text: {type: string, minLength: 1}
+        halt_timeout: {type: string, description: 'Go duration before a halt escalates to a hard stop.', examples: [2m]}
+    SteerMark:
+      type: object
+      properties:
+        at: {$ref: '#/components/schemas/Timestamp'}
+        event: {type: string}
+        session: {type: string}
+        turn: {type: string}
+        tool_call: {type: string}
+        tool: {type: string}
+        by: {type: string}
+    SteerMessage:
+      type: object
+      description: A steer receipt (`steer.Message`).
+      required: [id, target, level, text, state, queued_at]
+      properties:
+        id: {type: string, pattern: '^st-[0-9a-z]{26}$'}
+        target: {type: string, pattern: '^(dispatch|orch):.+$'}
+        level: {$ref: '#/components/schemas/SteerLevel'}
+        text: {type: string}
+        from: {type: string}
+        state: {type: string, enum: [queued, injected, acked]}
+        delivery: {type: string, enum: [tool-boundary, turn-boundary]}
+        queued_at: {$ref: '#/components/schemas/Timestamp'}
+        injected: {$ref: '#/components/schemas/SteerMark'}
+        acked: {$ref: '#/components/schemas/SteerMark'}
+        blocked: {type: integer, description: 'Mutating tool calls held while unacked.'}
+        halt_timeout: {type: string}
+        escalated: {$ref: '#/components/schemas/SteerMark'}
+        redirected: {type: boolean}
+
+    # ── Peers ──
+    PeerId:
+      type: string
+      pattern: '^[A-Za-z0-9._-]+:[A-Za-z0-9._%:-]+$'
+      examples: ['mini:foh-kit']
+    PeerRole:
+      type: string
+      description: '`foh` (reception) and `boh` (back of house) take part in messaging; `offline` does not.'
+      enum: [foh, boh, offline]
+    PeerState:
+      type: string
+      description: Pane state as `peers ls` shows it; `?` unknown, `-` no agent.
+      enum: [working, idle, draft, prompt, '?', '-']
+    PeerPresence:
+      type: object
+      description: What a host reports about one agent session (a beacon snapshot pane).
+      required: [agent, state, recipient_incarnation]
+      properties:
+        agent: {type: [string, 'null'], examples: [claude, codex, pi, opencode]}
+        agent_pid: {type: integer}
+        agent_started: {$ref: '#/components/schemas/Timestamp'}
+        session_id: {type: string, description: 'Harness session id; joins `/v1/traces/sessions/{id}`.'}
+        recipient_incarnation:
+          type: string
+          description: Identity messages bind to (sha256 of the tmux session coordinates, `process:HOST:PID:BIRTH`, or a managed runner's uuid).
+        state: {$ref: '#/components/schemas/PeerState'}
+        role: {$ref: '#/components/schemas/PeerRole'}
+        cwd: {type: string}
+        repo: {type: string, description: 'Remote URL of the checkout at `cwd`, when known.'}
+        branch: {type: string}
+        title: {type: string}
+        dispatch: {type: [string, 'null'], description: 'Dispatch run (order id) this session is executing.'}
+        headless: {type: boolean}
+        managed: {type: boolean, description: 'A managed runner (`managed:NAME`), always inbox-mode.'}
+        attached: {type: boolean}
+        inbox: {type: boolean, description: 'Inbox mode is on (messages are held, never pasted).'}
+        activity: {$ref: '#/components/schemas/Timestamp'}
+        screen:
+          type: array
+          maxItems: 40
+          description: Last screen lines, only if the host chooses to publish them.
+          items: {type: string}
+    Peer:
+      allOf:
+        - $ref: '#/components/schemas/PeerPresence'
+        - type: object
+          required: [id, address, host, name, last_seen, stale]
+          properties:
+            id: {$ref: '#/components/schemas/PeerId'}
+            address: {type: string, description: '`HOST/NAME`, the form `peers send` takes.', examples: [mini/foh-kit]}
+            host: {type: string}
+            name: {type: string, description: 'tmux session name, `managed:NAME` or `pid:N`.'}
+            last_seen: {$ref: '#/components/schemas/Timestamp'}
+            stale: {type: boolean, description: 'No heartbeat for 900s.'}
+            inbox_status: {$ref: '#/components/schemas/InboxStatus'}
+    InboxStatus:
+      type: object
+      required: [recipient_incarnation, unread, unacknowledged]
+      properties:
+        recipient_incarnation: {type: string}
+        unread: {type: integer, description: 'Current incarnation, not consumed.'}
+        unacknowledged: {type: integer, description: 'Current incarnation, not acknowledged.'}
+        historical: {type: integer, description: 'Held for an earlier incarnation.'}
+    TransportState:
+      type: string
+      enum: [queued, consumed, acknowledged, dropped]
+    PeerMessageCreate:
+      type: object
+      required: [from, message]
+      properties:
+        id: {type: string, maxLength: 160, description: 'Client id for idempotent retry; generated when absent.'}
+        from: {type: string, pattern: '^[A-Za-z0-9._-]+/[A-Za-z0-9._:-]+$', description: 'Sender address `HOST/NAME`; must be a peer the key may speak for.'}
+        message: {type: string, minLength: 1, maxLength: 1000000}
+        recipient_incarnation:
+          type: string
+          description: Bind to this incarnation only; 409 if the peer has restarted since. Default is the current one.
+        order: {type: string, pattern: '^[A-Za-z0-9._:-]{1,160}$', description: 'Order the message concerns.'}
+        run: {type: string, pattern: '^[A-Za-z0-9._:-]{1,160}$'}
+        thread: {type: string, description: 'Chat thread id, for group messages.'}
+        title: {type: string}
+        from_agent: {type: string}
+        from_cwd: {type: string}
+        from_desc: {type: string}
+    PeerMessage:
+      type: object
+      description: A held message (inbox row) with its receipts folded in.
+      required: [id, ts, from, to, message, recipient_incarnation, transport_state]
+      properties:
+        id: {type: string}
+        ts: {$ref: '#/components/schemas/Timestamp'}
+        origin_ts: {$ref: '#/components/schemas/Timestamp'}
+        from: {type: string, description: 'Sender address.'}
+        to: {type: string, description: 'Recipient address, or `#THREAD` for a chat line in the sent log.'}
+        from_agent: {type: string}
+        from_cwd: {type: string}
+        from_desc: {type: string}
+        header:
+          type: string
+          description: The line the agent sees above the message, including how to reply.
+          examples: ['[peer message from mini/foh-kit (claude, ~/workspace/kit). Reply with: peers send mini/foh-kit "..."]']
+        message: {type: string}
+        order: {type: string}
+        run: {type: string}
+        thread: {type: string}
+        title: {type: string}
+        recipient_incarnation: {type: string}
+        current: {type: boolean, description: 'Bound to the peer''s current incarnation.'}
+        replyable: {type: boolean}
+        transport_state: {$ref: '#/components/schemas/TransportState'}
+        consumed_at: {$ref: '#/components/schemas/Timestamp'}
+        acknowledged_at: {$ref: '#/components/schemas/Timestamp'}
+
+    # ── Hooks ──
+    HookId:
+      type: string
+      pattern: '^hook_[0-9a-z]{26}$'
+      examples: [hook_01jd2x8c7k4m5n6p7q8r9s0t1v]
+    HookHarness:
+      type: string
+      description: '`claude` and `codex` as in `schemas/hook_event.schema.json`; `kit` for events kit raises itself (the `HEV_HOOK_HARNESS=kit` local handlers already see).'
+      enum: [claude, codex, kit]
+    HookEventType:
+      type: string
+      description: |
+        One concrete event.
+
+        Harness events (`hev hook`, RFC 0013; `harness` `claude`/`codex`):
+        `session-start`, `prompt-submit`, `pre-tool`, `post-tool`, `stop`,
+        `pre-compact`.
+
+        Meta-harness events, raised by kit rather than a harness. Five exist
+        in kit today and reach local `hev-hook-NAME` handlers, each with its
+        own document: the attention notices `needs-you`, `ready` and `done`
+        (`hev.attention.event/v1`), `peer-message` (`hev.peer.message/v1`)
+        and `board-post` (`hev.board.post/v1`, a post or a reply). The rest
+        are new in Pro, raised by the server from changes on the other four
+        surfaces, and arrive as `hev.hook.event/v1` with `harness: kit` and
+        `data`:
+
+        * `order-created`, `order-state` (run state changed), `order-amended`, `order-deleted`
+        * `steer-queued`, `steer-injected`, `steer-acked`, `steer-escalated` (the steer receipt states)
+        * `admission-queued`, `admission-admitted`, `admission-refused`
+        * `cluster-join`, `cluster-suspect`, `cluster-leave` (hevd cluster membership)
+        * `peer-online`, `peer-stale`, `peer-acked`
+        * `board-updated`, `board-deleted` (board edit and delete are Pro-only)
+      enum:
+        - session-start
+        - prompt-submit
+        - pre-tool
+        - post-tool
+        - stop
+        - pre-compact
+        - needs-you
+        - ready
+        - done
+        - order-created
+        - order-state
+        - order-amended
+        - order-deleted
+        - steer-queued
+        - steer-injected
+        - steer-acked
+        - steer-escalated
+        - admission-queued
+        - admission-admitted
+        - admission-refused
+        - cluster-join
+        - cluster-suspect
+        - cluster-leave
+        - peer-online
+        - peer-stale
+        - peer-message
+        - peer-acked
+        - board-post
+        - board-updated
+        - board-deleted
+    HookEventName:
+      description: A concrete event, a family pattern (`order-*`, `steer-*`, `admission-*`, `cluster-*`, `peer-*`, `board-*`) or `*` for everything.
+      anyOf:
+        - $ref: '#/components/schemas/HookEventType'
+        - type: string
+          enum: ['*', 'order-*', 'steer-*', 'admission-*', 'cluster-*', 'peer-*', 'board-*']
+    HookDecision:
+      type: string
+      description: '`allow` is the local handlers'' `continue`.'
+      enum: [allow, block, halt]
+    HookTool:
+      type: object
+      description: pre-tool and post-tool only (`hook_event.schema.json` `tool`). `command`, `input` and `response` reach only hooks with `include_content` and are never stored.
+      required: [name, kind]
+      properties:
+        name: {type: string, examples: [Bash, Edit, apply_patch]}
+        use_id: {type: string}
+        kind: {type: string, enum: [read, mutate, steer, other]}
+        command: {type: string}
+        input: {description: "The harness's tool_input, verbatim."}
+        response: {description: 'post-tool tool_response, verbatim.'}
+        input_bytes: {type: integer}
+        response_bytes: {type: integer}
+    ClusterMember:
+      type: object
+      description: One hevd cluster member as the SWIM membership sees it (docs/cluster.md).
+      required: [name, state]
+      properties:
+        name: {type: string, maxLength: 64}
+        state: {type: string, enum: [alive, suspect, dead, left]}
+        version: {type: string}
+        since: {$ref: '#/components/schemas/Timestamp'}
+    HookEvent:
+      type: object
+      description: |
+        `hev.hook.event/v1` (`schemas/hook_event.schema.json`): the body of
+        `POST /v1/hooks/events` and of every harness-event delivery. Harness
+        events carry exactly the schema's fields. Pro adds, additively, for
+        its Pro-only kit events: `harness: kit` and their names (the JSON
+        schema's enums widen to match), `host`, `data` and `reason`. Unknown
+        fields must be ignored.
+      required: [schema, id, time, event, harness]
+      properties:
+        schema: {type: string, const: hev.hook.event/v1}
+        id: {type: string, pattern: '^[0-9a-z]{26}$', description: Lowercase ULID for this event.}
+        time: {$ref: '#/components/schemas/Timestamp'}
+        event: {$ref: '#/components/schemas/HookEventType'}
+        harness: {$ref: '#/components/schemas/HookHarness'}
+        host: {type: string, description: 'The host the event happened on (dispatch config name). Set by the server from the key when the client omits it.'}
+        native_event: {type: string, examples: [PreToolUse]}
+        session_id: {type: string}
+        turn_id: {type: string, description: Codex only.}
+        transcript_path: {type: string}
+        cwd: {type: string}
+        model: {type: string}
+        prompt: {type: string, description: 'prompt-submit only; delivered only with `include_content`, never stored.'}
+        prompt_bytes: {type: integer}
+        source: {type: string, description: 'session-start source (startup, resume, clear, compact) or pre-compact trigger (manual, auto).'}
+        stop_hook_active: {type: boolean}
+        target: {type: string, description: 'Steering target the hook resolved: dispatch:NAME, orch:NAME or peers:SESSION.'}
+        tool: {$ref: '#/components/schemas/HookTool'}
+        reason: {type: string, description: 'Kit events only: why, e.g. the admission refusal or the order-state transition.'}
+        data:
+          description: |
+            Pro-only kit events, the record the event is about, in its `/v1`
+            shape: `order-*` and `admission-*` → `OrderSummary`; `steer-*` →
+            `SteerMessage`; `cluster-*` → `ClusterMember`;
+            `peer-online`/`peer-stale` → `Peer`; `peer-acked` → `PeerMessage`
+            (`message` only with `include_content`); `board-updated` /
+            `board-deleted` → `BoardPost` (`body` only with `include_content`).
+          anyOf:
+            - $ref: '#/components/schemas/OrderSummary'
+            - $ref: '#/components/schemas/SteerMessage'
+            - $ref: '#/components/schemas/ClusterMember'
+            - $ref: '#/components/schemas/Peer'
+            - $ref: '#/components/schemas/PeerMessage'
+            - $ref: '#/components/schemas/BoardPost'
+    HookPayload:
+      description: |
+        The body of an observe-only delivery: the same document a local
+        `hev-hook-NAME` handler reads on stdin for that event, told apart by
+        `schema` (and `X-Hev-Event`).
+      oneOf:
+        - $ref: '#/components/schemas/HookEvent'
+        - $ref: '#/components/schemas/AttentionEvent'
+        - $ref: '#/components/schemas/PeerMessageEvent'
+        - $ref: '#/components/schemas/BoardPostEvent'
+      discriminator:
+        propertyName: schema
+        mapping:
+          hev.hook.event/v1: '#/components/schemas/HookEvent'
+          hev.attention.event/v1: '#/components/schemas/AttentionEvent'
+          hev.peer.message/v1: '#/components/schemas/PeerMessageEvent'
+          hev.board.post/v1: '#/components/schemas/BoardPostEvent'
+    PeerMessageEvent:
+      type: object
+      description: '`peer-message` (`schemas/peer_message_event.schema.json`, `hev.peer.message/v1`), raised after a peer message is delivered or a chat message posted. `text` is redacted, sent only to hooks with `include_content`, and never stored.'
+      additionalProperties: false
+      required: [schema, id, time, event, host, cwd, from, to, chat, kind, text_bytes]
+      properties:
+        schema: {type: string, const: hev.peer.message/v1}
+        id: {type: string, minLength: 1}
+        time: {$ref: '#/components/schemas/Timestamp'}
+        event: {type: string, const: peer-message}
+        host: {type: string}
+        cwd: {type: string}
+        from: {type: string}
+        to: {type: string}
+        chat: {type: boolean}
+        kind: {type: string, enum: [note, urgent, halt, chat]}
+        text: {type: string}
+        text_bytes: {type: integer, minimum: 0}
+        reply_to: {type: string}
+    BoardPostEvent:
+      type: object
+      description: '`board-post` (`schemas/board_post_event.schema.json`, `hev.board.post/v1`), raised after the board accepts a post or a reply. `body` is redacted, sent only to hooks with `include_content`, and never stored.'
+      additionalProperties: false
+      required: [schema, id, time, event, host, cwd, board, kind, title, tags, body_bytes, url, author]
+      properties:
+        schema: {type: string, const: hev.board.post/v1}
+        id: {type: string, minLength: 1}
+        time: {$ref: '#/components/schemas/Timestamp'}
+        event: {type: string, const: board-post}
+        host: {type: string}
+        cwd: {type: string}
+        board: {type: string}
+        kind: {type: string, enum: [post, reply]}
+        title: {type: string}
+        tags: {type: array, items: {type: string}}
+        body: {type: string}
+        body_bytes: {type: integer, minimum: 0}
+        url: {type: string, format: uri}
+        thread_id: {type: integer, minimum: 1, description: 'The post a reply belongs to; required when `kind` is `reply`.'}
+        author: {type: string}
+      if: {properties: {kind: {const: reply}}}
+      then: {properties: {thread_id: {type: integer}}, required: [thread_id]}
+    HookEventRecord:
+      description: |
+        One line of the hosted event log, as `~/.hev/hooks/events.jsonl`
+        keeps it: a harness event with its merged decision (`hooks.Log.Event`),
+        or a kit event's document without its content field (`text`, `body`).
+      anyOf:
+        - $ref: '#/components/schemas/HookEventLogRow'
+        - $ref: '#/components/schemas/HookPayload'
+    HookEventLogRow:
+      allOf:
+        - $ref: '#/components/schemas/HookEvent'
+        - type: object
+          required: [decision, elapsed_ms]
+          properties:
+            decision:
+              type: string
+              description: The merged answer. Local log rows say `continue` where the API says `allow`; ingest maps it.
+              enum: [allow, block, halt]
+            injected_bytes: {type: integer, description: Bytes of context injected.}
+            elapsed_ms: {type: integer}
+            deliveries: {type: integer, description: Webhooks the event was sent to.}
+    HookResponse:
+      type: object
+      description: |
+        A blocking hook's answer: the handler response of
+        `schemas/hook_event.schema.json` (`$defs.response`) in API words. The
+        local names are accepted too, so one handler can serve both:
+        `continue` for `allow` and `context` for `add_context`.
+      properties:
+        decision:
+          type: string
+          enum: [allow, continue, block, halt]
+          default: allow
+        reason: {type: string, description: Shown to the model when blocking or halting.}
+        add_context: {type: string, maxLength: 10000, description: 'Injected as additional context on session-start, prompt-submit and post-tool.'}
+        context: {type: string, maxLength: 10000, description: Alias of `add_context`.}
+        system_message: {type: string, description: 'Shown to the person, not the model.'}
+    HookGateResult:
+      type: object
+      description: The merged answer `hev hook` applies (with its local handlers' answers).
+      required: [event_id, decision, blocking_hooks, elapsed_ms]
+      properties:
+        event_id: {type: string}
+        decision: {$ref: '#/components/schemas/HookDecision'}
+        reason: {type: string}
+        add_context: {type: string}
+        system_message: {type: string}
+        blocking_hooks: {type: integer, description: Blocking webhooks consulted.}
+        failed_open: {type: integer, description: 'Of those, how many timed out or errored and counted as allow.'}
+        elapsed_ms: {type: integer}
+    HookHealth:
+      type: object
+      description: Delivery health over the last 24 hours (test deliveries excluded).
+      required: [state, consecutive_failures, deliveries_24h]
+      properties:
+        state:
+          type: string
+          description: '`idle`: nothing delivered in 24h. `failing`: the last delivery failed. `disabled`: see the hook''s `disabled_reason`.'
+          enum: [healthy, failing, idle, disabled]
+        last_delivery_at: {$ref: '#/components/schemas/Timestamp'}
+        last_success_at: {$ref: '#/components/schemas/Timestamp'}
+        last_failure_at: {$ref: '#/components/schemas/Timestamp'}
+        last_status_code: {type: [integer, 'null']}
+        last_error: {type: string}
+        consecutive_failures: {type: integer}
+        deliveries_24h: {type: integer}
+        success_rate_24h: {type: number, minimum: 0, maximum: 1}
+        latency_p50_ms_24h: {type: integer}
+        latency_p95_ms_24h: {type: integer}
+        failed_open_24h: {type: integer, description: Blocking deliveries that timed out or errored and counted as allow.}
+        pending_retries: {type: integer}
+    Hook:
+      type: object
+      description: A registered webhook. The Pro side of a `hev-hook-NAME` handler.
+      required: [id, url, events, enabled, blocking, timeout_ms, include_content, secret_hint, created_at, updated_at, health]
+      properties:
+        id: {$ref: '#/components/schemas/HookId'}
+        url: {type: string, format: uri, pattern: '^https://'}
+        description: {type: string, maxLength: 200}
+        events:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items: {$ref: '#/components/schemas/HookEventName'}
+        enabled: {type: boolean}
+        disabled_reason:
+          type: [string, 'null']
+          description: '`gone`: the endpoint answered 410. `failing`: 50 consecutive failed deliveries and no success in 72 hours. `null` when enabled or disabled by a person.'
+          enum: [gone, failing, null]
+        blocking: {type: boolean}
+        timeout_ms: {type: integer}
+        include_content: {type: boolean}
+        secret_hint: {type: string, description: Last four characters of the current secret.}
+        created_by: {$ref: '#/components/schemas/Poster'}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        updated_at: {$ref: '#/components/schemas/Timestamp'}
+        secret_rotated_at: {$ref: '#/components/schemas/Timestamp'}
+        health: {$ref: '#/components/schemas/HookHealth'}
+    HookWithSecret:
+      allOf:
+        - $ref: '#/components/schemas/Hook'
+        - type: object
+          properties:
+            secret:
+              type: string
+              description: The signing secret. Returned on create and on rotation only; store it then.
+              examples: [whsec_3q2+7w...]
+    HookCreate:
+      type: object
+      required: [url, events]
+      properties:
+        url: {type: string, format: uri, pattern: '^https://'}
+        description: {type: string, maxLength: 200}
+        events:
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/HookEventName'}
+          examples: [[pre-tool, needs-you, 'order-*']]
+        enabled: {type: boolean, default: true}
+        blocking:
+          type: boolean
+          default: false
+          description: Gate the gateable harness events (`session-start`, `prompt-submit`, `pre-tool`, `post-tool`) with `blockingHookEvent`. Every other matching event is still delivered observe-only.
+        timeout_ms:
+          type: integer
+          minimum: 100
+          maximum: 8000
+          default: 1500
+          description: Budget for a blocking delivery. The default leaves room under the local `[hooks] timeout` (2s); raise that too before going higher, and stay under the harness's own 10s hook timeout.
+        include_content:
+          type: boolean
+          default: false
+          description: Also send prompt text, tool input, command, tool output and peer message bodies. Off by default, so a webhook sees what `events.jsonl` keeps.
+        secret:
+          type: string
+          writeOnly: true
+          minLength: 32
+          maxLength: 256
+          description: HMAC-SHA256 signing secret. Omit to have one generated.
+    HookPatch:
+      type: object
+      minProperties: 1
+      properties:
+        url: {type: string, format: uri, pattern: '^https://'}
+        description: {type: string, maxLength: 200}
+        events:
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/HookEventName'}
+        enabled: {type: boolean}
+        blocking: {type: boolean}
+        timeout_ms: {type: integer, minimum: 100, maximum: 8000}
+        include_content: {type: boolean}
+        secret: {type: string, writeOnly: true, minLength: 32, maxLength: 256}
+        rotate_secret: {type: boolean, description: Generate a new secret. Not with `secret`.}
+    HookDeliveryStatus:
+      type: string
+      description: '`failed`: retries exhausted, 410, or a blocking delivery that failed open.'
+      enum: [pending, succeeded, retrying, failed]
+    HookAttempt:
+      type: object
+      required: [n, at]
+      properties:
+        n: {type: integer, minimum: 1}
+        at: {$ref: '#/components/schemas/Timestamp'}
+        status_code: {type: [integer, 'null'], description: '`null` when no response arrived.'}
+        latency_ms: {type: integer}
+        error: {type: string, examples: [timeout, connection refused, invalid response body]}
+    HookDelivery:
+      type: object
+      description: One event sent to one hook, with every attempt.
+      required: [id, hook_id, event_id, event, blocking, test, status, attempts, created_at]
+      properties:
+        id: {type: string, pattern: '^dlv_[0-9a-z]{26}$'}
+        hook_id: {$ref: '#/components/schemas/HookId'}
+        event_id: {type: string}
+        event: {$ref: '#/components/schemas/HookEventType'}
+        blocking: {type: boolean}
+        test: {type: boolean}
+        status: {$ref: '#/components/schemas/HookDeliveryStatus'}
+        status_code: {type: [integer, 'null'], description: Of the last attempt.}
+        latency_ms: {type: integer, description: Of the last attempt.}
+        attempts:
+          type: array
+          items: {$ref: '#/components/schemas/HookAttempt'}
+        next_retry_at: {type: [string, 'null'], format: date-time}
+        decision: {$ref: '#/components/schemas/HookDecision'}
+        failed_open: {type: boolean, description: A blocking delivery that timed out or errored and counted as allow.}
+        created_at: {$ref: '#/components/schemas/Timestamp'}
+        completed_at: {$ref: '#/components/schemas/Timestamp'}

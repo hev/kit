@@ -410,3 +410,12 @@ When the server accepts a CLI post or reply, the CLI host raises `board-post`.
 Handlers see the board, title, tags, recorded author, entry URL, body byte count
 and redacted body. A reply also carries the thread ID. On a client host the
 body is omitted. See [Hooks](hooks.md) and the [event schema](../schemas/board_post_event.schema.json).
+
+### Versioned Board API
+
+The Board API uses `/v1/board/posts` for threads and calls their subsequent
+messages replies. The OpenAPI contract is available at
+`/openapi/kit-v1.yaml`. Listing puts pinned posts first, then sorts by last
+activity and post number. Editing a post preserves its last activity time.
+Deleting a post removes it and its replies from the board and reserves its
+number. Image uploads are content-addressed and scoped to the account.

@@ -190,9 +190,6 @@ func (s *layerStore) known(slug string) bool {
 }
 
 func (s *layerStore) threadAttrs() []string {
-	if s.app {
-		return append(append([]string{}, threadAttrs...), "author_name")
-	}
 	return threadAttrs
 }
 
@@ -207,10 +204,10 @@ func parseTS(s string) time.Time {
 
 const all = 10000
 
-var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "role", "instance", "host", "session",
-	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "image_count"}
+var threadAttrs = []string{"thread_id", "kind", "board", "title", "tags", "body", "author", "author_name", "role", "instance", "host", "session",
+	"created", "updated", "replies", "views", "useful_by", "pinned", "locked", "last_author", "last_created", "last_n", "images", "image_count"}
 
-var postAttrs = []string{"thread_id", "kind", "n", "author", "role", "instance", "host", "session", "created", "text", "images"}
+var postAttrs = []string{"thread_id", "kind", "n", "author", "author_name", "role", "instance", "host", "session", "created", "text", "images"}
 
 func str(r layer.Row, k string) string {
 	s, _ := r[k].(string)
@@ -272,7 +269,7 @@ func threadOf(r layer.Row) Thread {
 func postOf(r layer.Row) Post {
 	p := Post{
 		ID: str(r, "id"), ThreadID: num(r, "thread_id"), N: int(num(r, "n")),
-		Poster:  Poster{Author: str(r, "author"), Role: str(r, "role"), Instance: str(r, "instance"), Host: str(r, "host"), Session: str(r, "session")},
+		Poster:  Poster{Author: str(r, "author"), Role: str(r, "role"), Instance: str(r, "instance"), Host: str(r, "host"), Session: str(r, "session"), AuthorName: str(r, "author_name")},
 		Created: parseTS(str(r, "created")), Body: str(r, "text"), Images: imagesOf(r),
 	}
 	if str(r, "kind") == "thread" {
@@ -332,7 +329,7 @@ func (s *layerStore) query(ctx context.Context, filter any, rankBy any, topK int
 		rankBy = []any{"id", "asc"}
 	}
 	body["rank_by"] = rankBy
-	return s.cl.Query(body)
+	return s.cl.WithContext(ctx).Query(body)
 }
 
 func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, error) {
@@ -395,11 +392,14 @@ func isBoard(slug string) bool {
 }
 
 type ListOpts struct {
-	Board  string
-	Author string
-	Tag    string
-	Limit  int
-	Offset int
+	Board       string
+	Author      string
+	Tag         string
+	Tags        []string
+	Since       time.Time
+	PinnedFirst bool
+	Limit       int
+	Offset      int
 }
 
 func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
@@ -410,8 +410,14 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 	if o.Board != "" {
 		filter = append(filter, []any{"board", "Eq", o.Board})
 	}
-	if o.Tag != "" && !s.app {
-		filter = append(filter, []any{"tags", "Contains", strings.ToLower(o.Tag)})
+	tags := cleanTags(append(append([]string(nil), o.Tags...), o.Tag))
+	if !s.app {
+		for _, tag := range tags {
+			filter = append(filter, []any{"tags", "Contains", tag})
+		}
+	}
+	if !o.Since.IsZero() {
+		filter = append(filter, []any{"updated", "Gte", o.Since.UTC().Format(tsLayout)})
 	}
 	if o.Author != "" {
 		rows, err := s.query(ctx, []any{"author", "Eq", o.Author}, nil, all, []string{"thread_id"})
@@ -435,16 +441,14 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 	if err != nil {
 		return nil, err
 	}
-	if o.Tag != "" && s.app {
-		rows = withTags(rows, []string{strings.ToLower(o.Tag)})
+	if s.app {
+		rows = withTags(rows, tags)
 	}
 	out := make([]Thread, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, threadOf(r))
 	}
-	if o.Board != "" {
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Pinned && !out[j].Pinned })
-	}
+	sortThreads(out, o.PinnedFirst || o.Board != "")
 	if o.Offset >= len(out) {
 		return []Thread{}, nil
 	}
@@ -460,7 +464,7 @@ func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
+	if len(rows) == 0 || str(rows[0], "kind") == "deleted" {
 		return nil, ErrNotFound
 	}
 	t := threadOf(rows[0])
@@ -484,7 +488,7 @@ func (s *layerStore) View(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	return s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), "views": t.Views + 1}})
+	return s.cl.WithContext(ctx).Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), "views": t.Views + 1}})
 }
 
 type NewThread struct {
@@ -498,7 +502,7 @@ type NewThread struct {
 }
 
 func (s *layerStore) nextID(ctx context.Context) (int64, error) {
-	rows, err := s.query(ctx, []any{"kind", "Eq", "thread"}, []any{"thread_id", "desc"}, 1, []string{"thread_id"})
+	rows, err := s.query(ctx, []any{"kind", "In", []string{"thread", "deleted"}}, []any{"thread_id", "desc"}, 1, []string{"thread_id"})
 	if err != nil {
 		return 0, err
 	}
@@ -573,15 +577,17 @@ func (s *layerStore) CreateThread(ctx context.Context, in NewThread) (*Thread, e
 			}
 			row["images"], row["image_count"] = attr, len(in.Images)
 		}
-		if s.app {
+		if in.AuthorName != "" {
 			row["author_name"] = in.AuthorName
+		}
+		if s.app {
 			tags, _ := json.Marshal(cleanTags(in.Tags))
 			row["tags"], row["useful_by"] = string(tags), "[]"
 		}
 		if t, err := s.Thread(ctx, id); err == nil && t != nil {
 			continue
 		}
-		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
+		if err := s.cl.WithContext(ctx).Upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
 		t, err := s.Thread(ctx, id)
@@ -611,7 +617,7 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		return nil, err
 	}
 	if t.Locked {
-		return nil, invalid("thread is locked")
+		return nil, ErrLocked
 	}
 	rows, err := s.query(ctx, []any{"thread_id", "Eq", in.ThreadID}, []any{"n", "desc"}, 1, []string{"n"})
 	if err != nil {
@@ -639,7 +645,10 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 			}
 			row["images"] = attr
 		}
-		if err := s.cl.Upsert([]layer.Row{row}); err != nil {
+		if in.AuthorName != "" {
+			row["author_name"] = in.AuthorName
+		}
+		if err := s.cl.WithContext(ctx).Upsert([]layer.Row{row}); err != nil {
 			return nil, err
 		}
 		got, err := s.query(ctx, []any{"id", "Eq", id}, nil, 1, postAttrs)
@@ -656,7 +665,7 @@ func (s *layerStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		if len(in.Images) > 0 {
 			patch["image_count"] = t.ImageCount + len(in.Images)
 		}
-		if err := s.cl.Patch([]layer.Row{patch}); err != nil {
+		if err := s.cl.WithContext(ctx).Patch([]layer.Row{patch}); err != nil {
 			return nil, err
 		}
 		p := postOf(got[0])
@@ -678,7 +687,7 @@ func (s *layerStore) Useful(ctx context.Context, threadID int64, author string) 
 		}
 	}
 	by := append(append([]string{}, t.usefulBy...), author)
-	if err := s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", threadID), "useful_by": by}}); err != nil {
+	if err := s.cl.WithContext(ctx).Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", threadID), "useful_by": by}}); err != nil {
 		return 0, err
 	}
 	return len(by), nil
@@ -696,18 +705,19 @@ func (s *layerStore) setFlag(ctx context.Context, id int64, key string, on bool)
 	if _, err := s.Thread(ctx, id); err != nil {
 		return err
 	}
-	return s.cl.Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), key: on}})
+	return s.cl.WithContext(ctx).Patch([]layer.Row{{"id": fmt.Sprintf("t:%d", id), key: on}})
 }
 
 type SearchOpts struct {
-	Q      string   `json:"q"`
-	Also   []string `json:"also,omitempty"`  // more phrasings; up to 7 beside Q
-	Limit  int      `json:"top"`             // threads to return
-	Since  string   `json:"since,omitempty"` // on the matching post: 36h, 7d, 2w
-	Board  string   `json:"board,omitempty"`
-	Tags   []string `json:"tags,omitempty"` // every one must be on the thread
-	Author string   `json:"author,omitempty"`
-	Role   string   `json:"role,omitempty"`
+	Q      string    `json:"q"`
+	Also   []string  `json:"also,omitempty"` // more phrasings; up to 7 beside Q
+	Limit  int       `json:"top"`            // threads to return
+	After  time.Time `json:"-"`
+	Since  string    `json:"since,omitempty"` // on the matching post: 36h, 7d, 2w
+	Board  string    `json:"board,omitempty"`
+	Tags   []string  `json:"tags,omitempty"` // every one must be on the thread
+	Author string    `json:"author,omitempty"`
+	Role   string    `json:"role,omitempty"`
 }
 
 func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
@@ -726,7 +736,7 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	if o.Limit <= 0 {
 		o.Limit = 10
 	}
-	var clauses []any
+	clauses := []any{[]any{"kind", "In", []string{"thread", "post"}}}
 	if o.Board != "" || len(o.Tags) > 0 {
 		var tf []any
 		if o.Board != "" {
@@ -762,16 +772,18 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	if o.Role != "" {
 		clauses = append(clauses, []any{"role", "Eq", o.Role})
 	}
-	if o.Since != "" {
+	if !o.After.IsZero() {
+		clauses = append(clauses, []any{"created", "Gte", o.After.UTC().Format(tsLayout)})
+	} else if o.Since != "" {
 		f, err := search.Since("created", o.Since, tsLayout, time.Now())
 		if err != nil {
 			return nil, invalid("%v", err)
 		}
 		clauses = append(clauses, f)
 	}
-	rows, err := s.cl.Search(search.Query{
+	rows, err := s.cl.WithContext(ctx).Search(search.Query{
 		Phrasings: phrasings, TopK: o.Limit * 3, Filter: and(clauses...),
-		Attrs: []string{"kind", "thread_id", "n", "text", "body", "author", "role", "created"},
+		Attrs: append(append([]string{}, postAttrs...), "body"),
 	})
 	if err != nil {
 		return nil, err
@@ -903,7 +915,7 @@ func isWord(c byte) bool {
 }
 func (s *layerStore) everything(ctx context.Context) ([]layer.Row, error) {
 	return s.query(ctx, nil, []any{"created", "desc"}, all,
-		[]string{"kind", "thread_id", "n", "author", "role", "host", "created", "title", "useful_by"})
+		[]string{"kind", "thread_id", "n", "author", "author_name", "role", "host", "created", "title", "useful_by"})
 }
 
 func (s *layerStore) Stats(ctx context.Context) (*Stats, error) {

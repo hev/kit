@@ -62,6 +62,7 @@ type filePost struct {
 	Body    string    `json:"body"`
 	Created time.Time `json:"created"`
 	Images  []Image   `json:"images,omitempty"`
+	Deleted bool      `json:"deleted,omitempty"`
 }
 
 type fileFlags struct {
@@ -237,6 +238,9 @@ func readPost(path string) (*filePost, error) {
 		}
 		return nil, fmt.Errorf("board post %s: %w", path, err)
 	}
+	if p.Deleted {
+		return nil, os.ErrNotExist
+	}
 	return &p, nil
 }
 
@@ -270,12 +274,12 @@ func (f *fileStore) writeFlags(id int64, fl fileFlags) error {
 
 // patch is a read-modify-write of one thread's flags under the lock.
 func (f *fileStore) patch(id int64, fn func(*fileFlags) error) error {
-	if _, err := os.Stat(f.threadPath(id)); errors.Is(err, os.ErrNotExist) {
-		return ErrNotFound
-	} else if err != nil {
-		return err
-	}
 	return f.locked(func() error {
+		if _, err := readPost(f.threadPath(id)); errors.Is(err, os.ErrNotExist) || errors.Is(err, errSkip) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
 		fl, err := f.readFlags(id)
 		if err != nil {
 			return err
@@ -492,23 +496,15 @@ func (f *fileStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) {
 	if err != nil {
 		return nil, err
 	}
-	tag := strings.ToLower(o.Tag)
+	tags := cleanTags(append(append([]string(nil), o.Tags...), o.Tag))
 	out := []Thread{}
 	for _, ft := range fts {
-		if (o.Board != "" && ft.Board != o.Board) || (tag != "" && !hasTag(ft.Tags, tag)) || (o.Author != "" && !ft.postedBy(o.Author)) {
+		if (o.Board != "" && ft.Board != o.Board) || !hasTags(ft.Tags, tags) || (o.Author != "" && !ft.postedBy(o.Author)) || ft.updated().Before(o.Since) {
 			continue
 		}
 		out = append(out, ft.thread())
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if !out[i].Updated.Equal(out[j].Updated) {
-			return out[i].Updated.After(out[j].Updated)
-		}
-		return out[i].ID > out[j].ID
-	})
-	if o.Board != "" {
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Pinned && !out[j].Pinned })
-	}
+	sortThreads(out, o.PinnedFirst || o.Board != "")
 	if o.Offset >= len(out) {
 		return []Thread{}, nil
 	}
@@ -613,7 +609,7 @@ func (f *fileStore) Reply(ctx context.Context, in NewPost) (*Post, error) {
 		return nil, err
 	}
 	if fls[in.ThreadID].Locked {
-		return nil, invalid("thread is locked")
+		return nil, ErrLocked
 	}
 	dir := f.replyDir(in.ThreadID)
 	if err := platformops.MkdirAll(dir, 0o700); err != nil {
@@ -828,8 +824,8 @@ func (f *fileStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 	if o.Board != "" && !f.known(o.Board) {
 		return nil, invalid("no board %q — see `hev board boards`", o.Board)
 	}
-	var since time.Time
-	if o.Since != "" {
+	since := o.After
+	if since.IsZero() && o.Since != "" {
 		d, err := search.ParseSince(o.Since)
 		if err != nil {
 			return nil, invalid("%v", err)

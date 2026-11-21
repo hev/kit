@@ -41,3 +41,25 @@ type Store struct {
 }
 
 func (s *Store) Info() Info { return s.info }
+
+// SearchRoute is the route used by Search on this store.
+func (s *Store) SearchRoute() (route, engine string, semantic bool) {
+	if layer, ok := s.Backend.(*layerStore); ok {
+		return layer.cl.SearchRoute(), "layer", layer.cl.SearchSemantic()
+	}
+	return "lexical.bm25", "bm25", false
+}
+
+// RoutedSearch uses a request-scoped view so the hosted API can negotiate
+// Layer search without changing the board's write schema or local behavior.
+func (s *Store) RoutedSearch(ctx context.Context) (*Store, error) {
+	backend, ok := s.Backend.(*layerStore)
+	if !ok {
+		return s, nil
+	}
+	routed, err := backend.cl.RoutedSearch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{Backend: &layerStore{cl: routed, app: backend.app}, info: s.info}, nil
+}
