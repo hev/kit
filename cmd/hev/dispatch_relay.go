@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/pkg/kitapi"
 	"io"
 	"net/http"
 	"net/url"
@@ -21,21 +23,40 @@ import (
 
 func dispatchRelayCommand() *cobra.Command {
 	var origin, host string
+	var syncPeers bool
 	cmd := &cobra.Command{
 		Use: "relay", Short: "Poll once for work from an authenticated order service", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			key := os.Getenv("HEV_API_KEY")
-			u, err := url.Parse(origin)
-			if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
-				(u.Path != "" && u.Path != "/") || host == "" || !strings.HasPrefix(key, "hk_") {
-				return errors.New("relay requires an HTTPS origin, host label and HEV_API_KEY")
+			base := origin
+			if cfg := kitSignedIn(); cfg != nil {
+				if base == "" {
+					base = cfg.API
+					if key == "" {
+						key = cfg.Key
+					}
+				} else if key == "" && strings.TrimRight(base, "/") == strings.TrimRight(cfg.API, "/") {
+					key = cfg.Key
+				}
+			}
+			u, err := url.Parse(base)
+			if err != nil || !kitapi.ValidBaseURL(base) || u.Scheme != "https" ||
+				(u.Path != "" && u.Path != "/") || !dispatch.ValidLabel(host) || !strings.HasPrefix(key, "hk_") {
+				return errors.New("relay requires an HTTPS origin, a host label and a kit key")
 			}
 			u.Path = hostrelay.Path
-			return pollRelay(cmd.Context(), u.String(), host, key)
+			if err := pollRelay(cmd.Context(), u.String(), host, key); err != nil {
+				return err
+			}
+			if syncPeers {
+				return relayPeerPresence(cmd.Context(), base, host, key)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&origin, "origin", "", "Order service HTTPS origin")
 	cmd.Flags().StringVar(&host, "host", "", "Enrolled execution host label")
+	cmd.Flags().BoolVar(&syncPeers, "sync-peers", false, "Publish local inbox peers and their receipts after polling")
 	return cmd
 }
 
@@ -98,6 +119,75 @@ func pollRelay(ctx context.Context, endpoint, host, key string) error {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("relay result refused (%d)", resp.StatusCode)
+	}
+	return nil
+}
+
+func relayPeerPresence(ctx context.Context, base, host, key string) error {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	backend := peers.RPCBackend{"relay": {Host: host}}
+	local, err := backend.Execute(ctx, "relay", peers.Request{Action: "list"})
+	if err != nil || local.Status != 200 {
+		return errors.New("local peers unavailable")
+	}
+	var rows []map[string]any
+	if json.Unmarshal(local.Body, &rows) != nil {
+		return errors.New("invalid local peers response")
+	}
+	client := kitapi.New(base, key)
+	client.Retries = 0
+	for _, row := range rows {
+		id, _ := row["id"].(string)
+		incarnation, _ := row["recipient_incarnation"].(string)
+		if id == "" || !strings.HasPrefix(id, host+":") || incarnation == "" || row["inbox"] != true || row["role"] == "offline" {
+			continue
+		}
+		path := "/v1/peers/" + url.PathEscape(id)
+		for _, field := range []string{"id", "address", "name", "host", "last_seen", "stale", "inbox_status"} {
+			delete(row, field)
+		}
+		if err := client.Do(ctx, http.MethodPut, path, nil, row, nil); err != nil {
+			return errors.New("peer heartbeat refused")
+		}
+		msgs, err := backend.Execute(ctx, "relay", peers.Request{Action: "messages", ID: id})
+		if err != nil || msgs.Status != 200 {
+			return errors.New("local inbox unavailable")
+		}
+		if err := relayReceipts(ctx, client, path, incarnation, msgs.Body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func relayReceipts(ctx context.Context, client *kitapi.Client, path, incarnation string, raw json.RawMessage) error {
+	var body struct {
+		Data []struct {
+			ID             string `json:"id"`
+			Current        bool   `json:"current"`
+			ConsumedAt     string `json:"consumed_at"`
+			AcknowledgedAt string `json:"acknowledged_at"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &body) != nil {
+		return errors.New("invalid local inbox response")
+	}
+	for _, kind := range []string{"consumed", "acknowledged"} {
+		ids := []string{}
+		for _, message := range body.Data {
+			if message.Current && message.ID != "" && message.ConsumedAt != "" && (kind == "consumed" || message.AcknowledgedAt != "") {
+				ids = append(ids, message.ID)
+			}
+		}
+		for len(ids) > 0 {
+			n := min(64, len(ids))
+			doc := map[string]any{"kind": kind, "ids": ids[:n], "recipient_incarnation": incarnation}
+			if err := client.Do(ctx, http.MethodPost, path+"/receipts", nil, doc, nil); err != nil {
+				return errors.New("peer receipts refused")
+			}
+			ids = ids[n:]
+		}
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hev/kit/internal/redact"
 )
@@ -133,4 +134,35 @@ func scrubAPILog(line, dir string) string {
 		}
 	}
 	return redact.PublicTokens(out)
+}
+
+// cancelQueuedAPI preserves the API's cancelled order record. The caller
+// holds the dispatch root lock, excluding the scheduler during the move.
+func cancelQueuedAPI(entry queueEntry) error {
+	q := entry.Request
+	dir := filepath.Join(Root(), q.Name)
+	if err := os.Mkdir(dir, 0700); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte(q.Order), 0600); err != nil {
+		return err
+	}
+	if err := WriteJSON(filepath.Join(dir, "meta.json"), q.Meta); err != nil {
+		return err
+	}
+	result := Result{Start: q.Meta.Start, End: time.Now().UTC(), Stopped: true, Halted: true, ExitCode: 143}
+	if err := WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
+		return err
+	}
+	if err := os.Remove(queuePath(q.Name)); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

@@ -79,6 +79,9 @@ func enqueue(q Request) (Response, error) {
 	if _, err := resolveSkills(o.Skills); err != nil {
 		return Response{}, err
 	}
+	if q.APILocalOnly && o.Host == "" {
+		o.Host = q.Meta.Host
+	}
 	q.Meta.Order = o
 	q.Meta.Swarm = swarmIdentity(q.Orchestrator)
 	entries, err := queueEntries()
@@ -118,6 +121,9 @@ func controlQueued(q Request) (Response, bool, error) {
 		}
 		r := Response{Message: fmt.Sprintf("queued %s (position %d): waiting for a free host slot and earlier FIFO orders", q.Name, i+1), Files: map[string]string{"order.md": e.Request.Order}}
 		if q.Action == "stop" {
+			if q.APILocalOnly {
+				return r, true, cancelQueuedAPI(e)
+			}
 			err = os.Remove(queuePath(q.Name))
 			r.Message = "cancelled queued " + q.Name
 		}

@@ -556,6 +556,12 @@ func Handle(q Request) (r Response, handleErr error) {
 			m.SameHost = m.SameHost || result.SameHost
 			row := Row{Kind: "run", Schedule: loadSchedule(filepath.Join(Root(), d.Name())), Meta: m, State: State(rp, live[d.Name()]), PR: result.PR, Head: result.Head, Trace: result.Session, Validation: result.Validation, Error: result.Error, NotifyError: result.NotifyError, Outcome: result.Outcome, Key: result.Key, Question: result.Question, Reason: result.Reason,
 				ClosedAt: result.ClosedAt, ClosedBy: result.ClosedBy, ClosedReason: result.ClosedReason, SupersededBy: result.SupersededBy}
+			if q.APILocalOnly && result.Stopped {
+				row.State = "halted"
+			}
+			if q.APILocalOnly && live[d.Name()] && exists(filepath.Join(Root(), d.Name(), "stop")) {
+				row.State = "halting"
+			}
 			if m.Forward == nil {
 				row.Attention = attentionStatus(filepath.Join(Root(), d.Name()))
 				row.Steer = steerCounts(filepath.Join(Root(), d.Name()))
@@ -763,6 +769,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		policy, err := targetPolicy()
 		if err != nil {
 			return r, fmt.Errorf("target admission config: %w", err)
+		}
+		if q.APILocalOnly && len(policy.Admission.Repos) == 0 {
+			return r, fmt.Errorf("API execution requires an explicit repository allowlist")
 		}
 		cap := policy.Cap
 		// A sender's ceiling applies when it sends. A queued request carries

@@ -51,6 +51,12 @@ func (b RPCBackend) Execute(ctx context.Context, team string, req Request) (Repl
 	if !ok || !dispatch.ValidLabel(route.Host) {
 		return Reply{}, ErrForbidden
 	}
+	for other, target := range b {
+		if other != team && target.SSH == route.SSH {
+			return Reply{}, ErrForbidden
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	payload, err := json.Marshal(req)

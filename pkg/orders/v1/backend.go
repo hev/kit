@@ -64,6 +64,12 @@ func (b RPCBackend) Execute(ctx context.Context, team string, req Request) (Repl
 		return Reply{}, ErrForbidden
 	}
 	req.Host = route.Host
+	for other, target := range b {
+		if other != team && target.SSH == route.SSH {
+			return Reply{}, ErrForbidden
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	return execute(ctx, route, req)

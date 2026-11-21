@@ -54,7 +54,7 @@ func (e *Engine) apiExecute(ctx context.Context, q apiRequest) (int, any) {
 		for _, peer := range peers {
 			id := strings.Replace(peer.Address, "/", ":", 1)
 			if apiPeerID.MatchString(id) && !seen[id] {
-				result = append(result, e.apiPresence(peer, id))
+				result = append(result, e.apiPresence(ctx, peer, id))
 				seen[id] = true
 			}
 		}
@@ -72,7 +72,7 @@ func (e *Engine) apiExecute(ctx context.Context, q apiRequest) (int, any) {
 	}
 	switch q.Action {
 	case "get":
-		return 200, e.apiPresence(peer, q.ID)
+		return 200, e.apiPresence(ctx, peer, q.ID)
 	case "put":
 		var body Message
 		if json.Unmarshal(q.Body, &body) != nil || body == nil {
@@ -81,7 +81,7 @@ func (e *Engine) apiExecute(ctx context.Context, q apiRequest) (int, any) {
 		if q.CallerHost != host || body["recipient_incarnation"] != peer.Identity {
 			return 403, nil
 		}
-		return 200, e.apiPresence(peer, q.ID)
+		return 200, e.apiPresence(ctx, peer, q.ID)
 	case "messages":
 		ms, err := e.view(peer.Session, peer.Identity)
 		if err != nil {
@@ -104,7 +104,7 @@ func (e *Engine) apiExecute(ctx context.Context, q apiRequest) (int, any) {
 	}
 }
 
-func (e *Engine) apiPresence(p Peer, id string) Message {
+func (e *Engine) apiPresence(ctx context.Context, p Peer, id string) Message {
 	host, name, _ := strings.Cut(id, ":")
 	var agent any
 	if p.Agent != "" {
@@ -119,6 +119,11 @@ func (e *Engine) apiPresence(p Peer, id string) Message {
 		"inbox": p.Inbox, "last_seen": time.Now().UTC(), "stale": false}
 	if p.Run {
 		m["dispatch"] = p.Session
+	} else if role, err := e.tmux(ctx, "show-options", "-qv", "-t", "="+p.Session, "@peers-role"); err == nil {
+		switch strings.TrimSpace(role) {
+		case "foh", "boh", "offline":
+			m["role"] = strings.TrimSpace(role)
+		}
 	}
 	if ms, err := e.view(p.Session, p.Identity); err == nil {
 		m["inbox_status"] = apiInboxStatus(ms, p.Identity)
@@ -140,6 +145,9 @@ func (e *Engine) apiSend(ctx context.Context, q apiRequest, p Peer) (int, any) {
 	}
 	if json.Unmarshal(q.Body, &body) != nil || !validSender(body.From) || strings.TrimSpace(body.Text) == "" || len(body.Text) > 4_000_000 || len(body.ID) > 640 {
 		return 400, nil
+	}
+	if presence := e.apiPresence(ctx, p, q.ID); presence["role"] == "offline" {
+		return 403, nil
 	}
 	if !strings.HasPrefix(body.From, q.CallerHost+"/") || !p.Inbox {
 		return 403, nil
