@@ -175,3 +175,11 @@ without prompt text, tool input, command or tool output (their sizes only),
 plus the decision, injected bytes and elapsed milliseconds. It rotates to
 `events.jsonl.1` past 32 MiB. Steering latency and blocks can be read from it
 and from the receipts; `hev traces` does not ingest it yet.
+
+## Hosted event forwarding
+
+When the host has a Kit API key, `hev hook` also posts supported Claude Code
+and Codex events to `/v1/hooks/events`. The hosted answer is merged with the
+local handlers under the same hook deadline. A failed request produces a
+warning and local handlers still decide the result. The per-host
+`events.jsonl` continues to record the redacted event and merged decision.

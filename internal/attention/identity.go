@@ -92,6 +92,12 @@ func readSignIn() kitSignIn {
 	return k
 }
 
+// HostedCredentials returns the configured Kit API endpoint and bearer key.
+func HostedCredentials() (endpoint, key string) {
+	k := readSignIn()
+	return k.API, k.Key
+}
+
 // configWhoami asks the kit service who this host's key belongs to. A host
 // without a key is logged out. A failed call falls back to the author the
 // last sign-in recorded, so a brief outage does not change who notices are
