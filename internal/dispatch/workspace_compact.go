@@ -342,7 +342,7 @@ func compactDispatch(name string, all bool) (string, error) {
 		return compactWorkspace(dir, m)
 	}
 	if !all {
-		if !cachedWorkspaceLicense(time.Now()) {
+		if !workspaceEntitled(time.Now()) {
 			return "", errWorkspaceLicense
 		}
 		if err := compact(name); err != nil {
@@ -350,7 +350,7 @@ func compactDispatch(name string, all bool) (string, error) {
 		}
 		return "compacted " + name, nil
 	}
-	if !cachedWorkspaceLicense(time.Now()) {
+	if !workspaceEntitled(time.Now()) {
 		return "", errWorkspaceLicense
 	}
 	entries, err := os.ReadDir(Root())
