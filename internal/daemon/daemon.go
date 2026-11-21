@@ -18,6 +18,7 @@ import (
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
 	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/hygiene"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/license"
@@ -103,6 +104,10 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	configuredHygiene, err := hygiene.Load(DefaultConfigPath())
+	if err != nil {
+		return err
+	}
 	cache, membership, stopSidecars := startSecretSidecars(ctx, logger)
 	defer stopSidecars()
 	licenseCtx, stopLicense := context.WithCancel(ctx)
@@ -181,6 +186,8 @@ func Run(ctx context.Context) error {
 		},
 	}
 	defer cronRunner.Start(ctx, configuredCron)()
+	hygieneRunner := hygiene.Runner{Home: home, Logger: logger}
+	defer hygieneRunner.Start(ctx, configuredHygiene)()
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {

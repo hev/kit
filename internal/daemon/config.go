@@ -165,6 +165,8 @@ type fileConfig struct {
 	// Preserve license settings on config rewrites. License decoding and
 	// entitlement are independent of daemon capture configuration.
 	License any `toml:"license,omitempty"`
+	// Preserve [hygiene] settings on config rewrites.
+	Hygiene any `toml:"hygiene,omitempty"`
 }
 
 type archiveConfig struct {

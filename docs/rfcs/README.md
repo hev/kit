@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0028](0028-disk-hygiene.md) | Native disk-pressure and cache hygiene in hevd | Implemented | Absorbs cross-OS worktree compaction, stale tmp pruning, and macOS APFS snapshot thinning into hevd with strict safety guards and dry-run support. |
 | [0024](0024-workspaces.md) | Workspaces | Proposed | Scope host routing, harness subscriptions and storage to a workspace. |
 | [0024](0024-licensing.md) | Offline Kit Pro licenses | Implemented | Distinct Ed25519 verification and local entitlement for Kit Pro. |
 | [0023](0023-climb.md) | `hev climb` — multi-day hill climbing on a scored goal | Proposed | A meta-harness can spend agent-hours for days on its own hosts and plans; the missing piece is the loop: a pinned numeric objective (an RFC 0021 `metric` scorer), a population of branches, selection, paced budgets, and control rules so the fleet cannot dispatch, merge or grade itself. |
