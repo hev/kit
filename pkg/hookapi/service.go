@@ -151,6 +151,7 @@ type Service struct {
 	path             string
 	seal             cipher.AEAD
 	wake             chan struct{}
+	done             chan struct{}
 }
 
 // Open loads encrypted state and starts bounded workers for observe deliveries.
@@ -173,9 +174,17 @@ func OpenWithPublications(ctx context.Context, path string, key []byte, source P
 		workers.Go(func() { s.worker(ctx) })
 	}
 	workers.Go(func() { s.expire(ctx) })
-	go func() { workers.Wait(); s.db.Close() }()
+	go func() {
+		workers.Wait()
+		s.db.Close()
+		close(s.done)
+	}()
 	return s, nil
 }
+
+// Done closes after the service context has ended, its workers have stopped,
+// and its database is closed. Callers can use it before reopening the path.
+func (s *Service) Done() <-chan struct{} { return s.done }
 
 func open(ctx context.Context, path string, key []byte) (*Service, error) {
 	if path == "" || len(key) < 32 {
@@ -192,7 +201,7 @@ func open(ctx context.Context, path string, key []byte) (*Service, error) {
 	}
 	s := &Service{
 		accounts: make(map[string]*account), client: webhookClient(),
-		path: path, seal: seal, wake: make(chan struct{}, observeWorkers), sending: make(map[string]bool),
+		path: path, seal: seal, wake: make(chan struct{}, observeWorkers), done: make(chan struct{}), sending: make(map[string]bool),
 	}
 	if err := s.openState(ctx); err != nil {
 		if s.db != nil {
