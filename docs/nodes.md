@@ -389,7 +389,7 @@ restrict,command="\"/path/to/hev\" nodes enroll" ssh-ed25519 AAAA... hev-nodes-e
 
 The key on that line is the same in every `hev` build and its private half is
 public: `hev cluster join` uses it to open an SSH session that can only run
-`hev cluster enroll` (no shell, PTY or forwarding). Anyone who can reach the
+`nodes enroll` (no shell, PTY or forwarding). Anyone who can reach the
 host's sshd can therefore start an enrollment while an invitation is open,
 which is why everything rests on the code. The line is removed as soon as no
 invitation is open (request recorded, locked, withdrawn), and on the next

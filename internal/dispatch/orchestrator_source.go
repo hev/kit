@@ -160,7 +160,7 @@ func fetchSource(ctx context.Context, s OrchestratorSpec) (SourceBatch, error) {
 		return batch, e
 	}
 	if !desc.Source {
-		return batch, fmt.Errorf("plugin does not advertise source support")
+		return batch, fmt.Errorf("source exec command does not advertise source support")
 	}
 	batch.Ack, batch.AckBatch = desc.Ack, desc.Ack && desc.AckBatch
 	var cursor struct {
