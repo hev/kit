@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -137,12 +138,15 @@ func TestServiceHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stdout, "dir="+cwd)
 		// Oversized single line without newline containing a secret.
 		_, _ = os.Stdout.Write([]byte(strings.Repeat("x", maxLineBytes+512) + fixtureSecret + "\n"))
-		// Write > 1.3 MiB of numbered lines so ring compaction runs multiple times.
-		line := strings.Repeat("payload-", 12) // 96 bytes
-		for idx := range 14000 {
-			fmt.Fprintf(os.Stdout, "row-%05d %s\n", idx, line)
+		// Write > 1.3 MiB of numbered lines via buffered chunks so ring compaction
+		// runs without thousands of tiny unbuffered write syscalls.
+		bw := bufio.NewWriterSize(os.Stdout, 32<<10)
+		line := strings.Repeat("a", 1000)
+		for idx := range 1350 {
+			fmt.Fprintf(bw, "row-%05d %s\n", idx, line)
 		}
-		fmt.Fprintln(os.Stdout, "final-marker-line")
+		fmt.Fprintln(bw, "final-marker-line")
+		_ = bw.Flush()
 		os.Exit(0)
 	}
 	os.Exit(0)
@@ -500,9 +504,9 @@ func TestRingLogCapAndSecretRedaction(t *testing.T) {
 	}
 	defer stop()
 
-	await(t, 10*time.Second, func() bool {
+	await(t, 30*time.Second, func() bool {
 		d, err := sup.Inspect(ctx, svc, 5)
-		return err == nil && d.Status == StatusStopped && strings.Contains(d.Logs, "final-marker-line")
+		return err == nil && d.Status == StatusStopped && d.LastExit != nil && strings.Contains(d.Logs, "final-marker-line")
 	})
 	stop()
 

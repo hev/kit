@@ -26,9 +26,10 @@ var outputScrubber = sync.OnceValues(func() (*redact.Scrubber, error) {
 	return redact.New(salt[:])
 })
 
-func newTextScrubber(values map[string]string, paths ...string) (func(string) string, *strings.Replacer) {
+func newTextScrubber(values map[string]string, paths ...string) (func(string) string, *strings.Replacer, int) {
 	var terms []string
 	var multiTerms []string
+	maxMultiLen := 0
 	seen := make(map[string]bool)
 	addTerm := func(v string, multiline bool) {
 		if v == "" || seen[v] {
@@ -38,6 +39,9 @@ func newTextScrubber(values map[string]string, paths ...string) (func(string) st
 		terms = append(terms, v)
 		if multiline {
 			multiTerms = append(multiTerms, v)
+			if len(v) > maxMultiLen {
+				maxMultiLen = len(v)
+			}
 		}
 	}
 	for _, v := range values {
@@ -88,27 +92,28 @@ func newTextScrubber(values map[string]string, paths ...string) (func(string) st
 		text, _ := scrubber.Text(replacer.Replace(raw))
 		return strings.ToValidUTF8(text, "\uFFFD")
 	}
-	return scrub, multiReplacer
+	return scrub, multiReplacer, maxMultiLen
 }
 
 func scrubReason(reason string, paths ...string) string {
 	if reason == "" {
 		return ""
 	}
-	scrub, _ := newTextScrubber(nil, paths...)
+	scrub, _, _ := newTextScrubber(nil, paths...)
 	return strings.TrimSpace(scrub(reason))
 }
 
 type ringLog struct {
-	mu        sync.Mutex
-	path      string
-	buf       []byte
-	loaded    bool
-	multiline *strings.Replacer
+	mu          sync.Mutex
+	path        string
+	buf         []byte
+	loaded      bool
+	multiline   *strings.Replacer
+	maxMultiLen int
 }
 
-func newRingLog(path string, multiline *strings.Replacer) *ringLog {
-	return &ringLog{path: path, multiline: multiline}
+func newRingLog(path string, multiline *strings.Replacer, maxMultiLen int) *ringLog {
+	return &ringLog{path: path, multiline: multiline, maxMultiLen: maxMultiLen}
 }
 
 func (r *ringLog) ensureLoadedLocked() error {
@@ -176,8 +181,8 @@ func (r *ringLog) appendScrubbed(clean string) {
 	r.buf = append(r.buf, chunk...)
 
 	rewrotePrior := false
-	if r.multiline != nil {
-		window := len(chunk) + maxLineBytes
+	if r.multiline != nil && r.maxMultiLen > 0 {
+		window := len(chunk) + r.maxMultiLen
 		if window > len(r.buf) {
 			window = len(r.buf)
 		}
@@ -301,6 +306,26 @@ func (w *streamWriter) Flush() {
 	}
 }
 
+func tailLinesBytes(data []byte, lines int) []byte {
+	if lines <= 0 || len(data) == 0 {
+		return data
+	}
+	end := len(data)
+	if data[end-1] == '\n' {
+		end--
+	}
+	seen := 0
+	for i := end - 1; i >= 0; i-- {
+		if data[i] == '\n' {
+			seen++
+			if seen == lines {
+				return data[i+1:]
+			}
+		}
+	}
+	return data
+}
+
 func readServiceLogs(dir string, lines int, paths ...string) (string, error) {
 	f, err := os.Open(filepath.Join(dir, "service.log"))
 	if os.IsNotExist(err) {
@@ -317,7 +342,13 @@ func readServiceLogs(dir string, lines int, paths ...string) (string, error) {
 	if len(data) > LogLimit {
 		data = compactBytes(data, LogLimit)
 	}
-	scrub, _ := newTextScrubber(nil, paths...)
+	if len(data) == 0 {
+		return "", nil
+	}
+	if lines > 0 {
+		data = tailLinesBytes(data, lines)
+	}
+	scrub, _, _ := newTextScrubber(nil, paths...)
 	clean := scrub(string(data))
 	if lines <= 0 || clean == "" {
 		return clean, nil

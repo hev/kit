@@ -62,8 +62,8 @@ func startServiceProcess(s Service, home, dir string, values map[string]string) 
 	}
 
 	paths := append([]string{home, cmd.Dir, cmd.Path}, s.Cmd...)
-	scrub, multiline := newTextScrubber(values, paths...)
-	ring := newRingLog(filepath.Join(dir, "service.log"), multiline)
+	scrub, multiline, maxMultiLen := newTextScrubber(values, paths...)
+	ring := newRingLog(filepath.Join(dir, "service.log"), multiline, maxMultiLen)
 	stdout := &streamWriter{ring: ring, scrub: scrub}
 	stderr := &streamWriter{ring: ring, scrub: scrub}
 	cmd.Stdout = stdout
