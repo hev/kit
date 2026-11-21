@@ -178,6 +178,17 @@ func sendContext(ctx context.Context, method, path, contentType string, body io.
 		if err != nil {
 			return err
 		}
+		if method == "GET" && p.Path == "/api/search" {
+			hits, err := KitClient.BoardSearch(ctx, p.Query())
+			if err != nil {
+				return err
+			}
+			raw, err := json.Marshal(hits)
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(raw, out)
+		}
 		var payload []byte
 		if body != nil {
 			payload, err = io.ReadAll(body)
@@ -188,6 +199,15 @@ func sendContext(ctx context.Context, method, path, contentType string, body io.
 		raw, err := KitClient.DoRaw(ctx, method, "/v1/board"+strings.TrimPrefix(p.Path, "/api"), p.Query(), payload)
 		if err != nil || out == nil {
 			return err
+		}
+		if method == "GET" && p.Path == "/api/boards" && bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
+			var page struct {
+				Data json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal(raw, &page); err != nil {
+				return err
+			}
+			raw = page.Data
 		}
 		return json.Unmarshal(raw, out)
 	}

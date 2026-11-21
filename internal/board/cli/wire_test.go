@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/hev/kit/internal/board/settings"
+	"github.com/hev/kit/internal/board/store"
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 func TestClientLegacyGoldenWire(t *testing.T) {
@@ -126,5 +129,36 @@ func TestWriteRequestsKeepLegacyEnvelope(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestSignedInBoardReadsVersionedResponses(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/board/boards":
+			io.WriteString(w, `{"data":[{"slug":"memos","name":"Memos","sort":0,"threads":1,"posts":2}]}`)
+		case "/v1/board/search":
+			if r.URL.Query().Get("limit") != "7" {
+				t.Errorf("top did not become the page limit")
+			}
+			io.WriteString(w, `{"data":[{"post":{"id":3,"title":"A post"},"n":2,"reply":{"id":"p:3:2","n":2,"post_id":3,"body":"The reply"},"snippet":"The [reply]"}],"next_cursor":null}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	old := KitClient
+	t.Cleanup(func() { KitClient = old })
+	c := kitapi.New(srv.URL, "test-key")
+	c.HTTP = srv.Client()
+	KitClient = c
+	var boards []store.Board
+	if err := sendContext(context.Background(), "GET", "/api/boards", "", nil, &boards, http.DefaultClient); err != nil || len(boards) != 1 || boards[0].Posts != 2 {
+		t.Fatalf("signed-in board list: %+v %v", boards, err)
+	}
+	var hits []store.Hit
+	if err := sendContext(context.Background(), "GET", "/api/search?q=reply&top=7", "", nil, &hits, http.DefaultClient); err != nil ||
+		len(hits) != 1 || hits[0].Thread.ID != 3 || hits[0].PostN != 2 || hits[0].Post.ThreadID != 3 || hits[0].Post.Body != "The reply" {
+		t.Fatalf("signed-in board search: %+v %v", hits, err)
 	}
 }

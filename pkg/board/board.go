@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/hev/kit/internal/blob"
 	"github.com/hev/kit/internal/board/layer"
 	"github.com/hev/kit/internal/board/server"
 	"github.com/hev/kit/internal/board/store"
@@ -80,6 +81,8 @@ type HandlerOptions struct {
 	Author AuthorFunc
 	// ReadOnly refuses every write with 403.
 	ReadOnly bool
+	// BlobDir overrides the local image store for a hosted account.
+	BlobDir string
 }
 
 type posterKey struct{}
@@ -123,7 +126,13 @@ func Handler(st *Store, opts HandlerOptions) (http.Handler, error) {
 	if opts.Author != nil {
 		st = store.Wrap(stamped{st.Backend}, st.Info())
 	}
-	srv, err := server.New(st)
+	open := server.New
+	if opts.BlobDir != "" {
+		open = func(st *Store) (*server.Server, error) {
+			return server.NewWithBlobs(st, blob.New(opts.BlobDir, 0))
+		}
+	}
+	srv, err := open(st)
 	if err != nil {
 		return nil, err
 	}

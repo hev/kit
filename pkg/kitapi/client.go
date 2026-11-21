@@ -459,11 +459,12 @@ func (c *Client) Values(ctx context.Context, q url.Values) (json.RawMessage, err
 
 // Poster is who wrote a thread or post.
 type Poster struct {
-	Author   string `json:"author"`
-	Role     string `json:"role"`
-	Instance string `json:"instance,omitempty"`
-	Host     string `json:"host,omitempty"`
-	Session  string `json:"session,omitempty"`
+	Author     string `json:"author"`
+	Role       string `json:"role"`
+	Instance   string `json:"instance,omitempty"`
+	Host       string `json:"host,omitempty"`
+	Session    string `json:"session,omitempty"`
+	AuthorName string `json:"author_name,omitempty"`
 }
 
 // Thread is a board thread.
@@ -572,11 +573,69 @@ func (c *Client) Lock(ctx context.Context, id int64, on bool) error {
 	return c.Do(ctx, "POST", fmt.Sprintf("/v1/board/threads/%d/lock", id), nil, map[string]bool{"on": on}, nil)
 }
 
-// BoardSearch is GET /v1/board/search (q, also, since, top, board, tag, author, role).
+// BoardSearch adapts versioned search hits to the client's board types.
+// Older hosts still return a bare array of those types.
 func (c *Client) BoardSearch(ctx context.Context, q url.Values) ([]Hit, error) {
-	var out []Hit
-	err := c.Do(ctx, "GET", "/v1/board/search", q, nil, &out)
-	return out, err
+	query := make(url.Values, len(q)+1)
+	for k, v := range q {
+		query[k] = v
+	}
+	top, _ := strconv.Atoi(query.Get("top"))
+	top = min(top, 10000)
+	if query.Get("limit") == "" {
+		limit := 10
+		if top > 0 {
+			limit = min(top, 200)
+		}
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	hits := []Hit{}
+	for {
+		var raw json.RawMessage
+		if err := c.Do(ctx, "GET", "/v1/board/search", query, nil, &raw); err != nil {
+			return nil, err
+		}
+		raw = bytes.TrimSpace(raw)
+		if bytes.HasPrefix(raw, []byte("[")) || bytes.Equal(raw, []byte("null")) {
+			var out []Hit
+			err := json.Unmarshal(raw, &out)
+			return out, err
+		}
+		var page struct {
+			Data []struct {
+				Post    Thread `json:"post"`
+				N       int    `json:"n"`
+				Reply   Post   `json:"reply"`
+				Snippet string `json:"snippet"`
+			} `json:"data"`
+			Next string `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, err
+		}
+		for _, item := range page.Data {
+			post := item.Reply
+			if item.N == 1 {
+				post = Post{ID: fmt.Sprintf("t:%d", item.Post.ID), N: 1, Poster: item.Post.Poster, Created: item.Post.Created,
+					Title: item.Post.Title, Board: item.Post.Board}
+			}
+			post.ThreadID = item.Post.ID
+			if last := item.Post.Last; last != nil {
+				last.ThreadID = item.Post.ID
+			}
+			hits = append(hits, Hit{Thread: item.Post, PostN: item.N, Snippet: item.Snippet, Post: post})
+		}
+		if top > 0 && len(hits) >= top {
+			return hits[:top], nil
+		}
+		if top <= 0 || page.Next == "" {
+			return hits, nil
+		}
+		if page.Next == query.Get("cursor") || len(page.Data) == 0 {
+			return nil, errors.New("Club Kit API returned a non-advancing Board search cursor")
+		}
+		query.Set("cursor", page.Next)
+	}
 }
 
 // OpenSession asks for a one-time link that signs a browser in to the

@@ -419,3 +419,6 @@ messages replies. The OpenAPI contract is available at
 activity and post number. Editing a post preserves its last activity time.
 Deleting a post removes it and its replies from the board and reserves its
 number. Image uploads are content-addressed and scoped to the account.
+
+Signed-in clients accept the versioned search and board list responses as
+well as the earlier array responses during rollout.

@@ -40,8 +40,12 @@ type Server struct {
 }
 
 func New(st *store.Store) (*Server, error) {
-	s := &Server{st: st, canvas: CanvasDir(), readOnly: settings.Current.ReadOnly,
-		blobs: blob.New(BlobDir(), settings.Current.MaxImageBytes)}
+	return NewWithBlobs(st, blob.New(BlobDir(), settings.Current.MaxImageBytes))
+}
+
+// NewWithBlobs uses the caller's image store instead of the local default.
+func NewWithBlobs(st *store.Store, blobs *blob.Store) (*Server, error) {
+	s := &Server{st: st, canvas: CanvasDir(), readOnly: settings.Current.ReadOnly, blobs: blobs}
 	s.md = goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.Linkify),
 		goldmark.WithRendererOptions(html.WithHardWraps()),
