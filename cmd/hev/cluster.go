@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"text/tabwriter"
 
 	"github.com/hev/kit/internal/cluster"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/spf13/cobra"
 )
 
@@ -55,6 +57,15 @@ func newClusterCommand() *cobra.Command {
 				}
 				return printClusterStatus(cmd.OutOrStdout(), r.Status)
 			}
+			event := "cluster-join"
+			if action == "leave" {
+				event = "cluster-remove"
+			}
+			name := cfg.Name
+			if name == "" {
+				name = hostlabel.Self(os.Hostname)
+			}
+			clusterNodeEvent(cmd, event, name, "node")
 			fmt.Fprintln(cmd.OutOrStdout(), "cluster "+action+": ok")
 			return nil
 		}}

@@ -21,8 +21,6 @@ answers in the harness's own shape.
 | `stop` | `Stop` | observe |
 | `pre-compact` | `PreCompact` | observe |
 | `needs-you`, `ready`, `done` | Kit attention notices | observe |
-| `peer-message` | Kit peers delivery or chat post | observe |
-| `board-post` | Kit board thread or reply | observe |
 | `evidence-created`, `evidence-updated`, `evidence-sealed` | Kit [evidence](evidence.md) package written | observe |
 
 Codex 0.162 sends Claude-compatible JSON (plus `turn_id`); its tools are `Bash`
@@ -45,14 +43,32 @@ again ([dedupe by subject](notify.md#dedupe-by-subject)). Each event says who it
 `addressee` ([who a notice is for](notify.md#who-a-notice-is-for)). Handlers
 observe; their output is ignored.
 
-Kit also raises `peer-message` on the sending host after a peer message is
-delivered or a chat message is posted, and `board-post` on the CLI host after
-the board accepts a thread or reply. See the [peers event schema](../schemas/peer_message_event.schema.json)
-and [board event schema](../schemas/board_post_event.schema.json). The same
-observe-only delivery applies. The message or body is redacted before handlers
-see it. On a client host (`[notify] client = true`) handlers get metadata and
-byte counts with the content field omitted. The copy in `events.jsonl` omits
-the content field on every host.
+## Meta-harness events
+
+These events use the same envelope and handler discovery, with
+`harness: kit`, the emitting `host` and a `data` object. They run under the same hook budget.
+
+| Events | Data |
+| --- | --- |
+| `order-queued`, `order-started`, `order-rework` | `name`, `repo`, `worker_harness`; rework adds `action` |
+| `steer-sent`, `steer-acked`, `steer-escalated` | `steer_id`, `target`, `level`, `delivery` |
+| `admission-check`, `admission-denied` | `name`, `repo`, `action`; denial adds `reason` to the envelope |
+| `cluster-join`, `cluster-invite`, `cluster-remove` | `name`, `kind` |
+| `peer-online`, `peer-offline` | `peer`, `agent` |
+| `board-reply`, `board-pin` | `thread_id`; replies also include `entry_id`, `board`, `author`, `body_bytes` |
+
+The repository allowlist applies first. When it allows work, an
+`admission-check` handler can deny it by returning `block` or `halt` with a
+`reason`. An empty or `continue` response allows work. Errors, bad output and
+timeouts fail open. Allowlist and handler refusals emit `admission-denied`.
+Every other event ignores handler decisions. Admission is checked again
+when the queue actually launches a run under the node's current policy.
+
+Existing `peer-message` and `board-post` handlers receive their
+[peer message](../schemas/peer_message_event.schema.json) and
+[board post](../schemas/board_post_event.schema.json) envelopes.
+All three activity events may give handlers redacted message or body text.
+Client hosts omit that text, and it is always omitted from the event log.
 
 Writing an [evidence package](evidence.md) raises `evidence-created`,
 `evidence-updated` and `evidence-sealed` on the writing host, observe-only

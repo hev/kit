@@ -182,7 +182,7 @@ func checkAmendAdmission(q Request, m Meta, live map[string]bool, existing bool)
 	if !existing {
 		repo = resolveRepo(m.Repo, cfg.Workspace)
 	}
-	return cfg, admitTargetRepo(repo, m.Repo, m.Host)
+	return cfg, admitTargetRepo(repo, m, "amend")
 }
 
 func amend(q Request) (Response, error) {

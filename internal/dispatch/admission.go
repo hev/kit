@@ -1,7 +1,9 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
+	"github.com/hev/kit/internal/hooks"
 	"net/url"
 	"os"
 	"path"
@@ -62,15 +64,6 @@ func admitRepo(policy Admission, repo, label, host string) error {
 	return refusal
 }
 
-// Policy is owned by this process's target, independent of all request fields.
-func admitTargetRepo(repo, label, host string) error {
-	cfg, err := targetPolicy()
-	if err != nil {
-		return fmt.Errorf("target admission config: %w", err)
-	}
-	return admitRepo(cfg.Admission, repo, label, host)
-}
-
 // targetPolicy never accepts a sender-selected path or host alias.
 func targetPolicy() (Config, error) {
 	cfg, err := loadTarget("", "")
@@ -78,4 +71,41 @@ func targetPolicy() (Config, error) {
 		return cfg, nil
 	}
 	return cfg, err
+}
+
+// admitWork applies local repository policy before letting hooks add restrictions.
+func admitWork(cfg Config, repo string, m Meta, action string) error {
+	data := map[string]any{"name": m.Name, "repo": m.Repo, "action": action}
+	ctx := context.Background()
+	if err := admitRepo(cfg.Admission, repo, m.Repo, m.Host); err != nil {
+		hooks.Meta(ctx, "admission-denied", data, err.Error())
+		return err
+	}
+	result := hooks.Meta(ctx, "admission-check", data, "")
+	if result.Decision == hooks.Block || result.Decision == hooks.Halt {
+		reason := result.Reason
+		if reason == "" {
+			reason = "denied by an admission hook"
+		}
+		hooks.Meta(ctx, "admission-denied", data, reason)
+		return fmt.Errorf("admission denied: %s", reason)
+	}
+	return nil
+}
+
+func orderEvent(event string, m Meta, action string) {
+	data := map[string]any{"name": m.Name, "repo": m.Repo, "worker_harness": m.Harness}
+	if action != "" {
+		data["action"] = action
+	}
+	hooks.Meta(context.Background(), event, data, "")
+}
+
+// admitTargetRepo uses the receiver-owned policy regardless of sender fields.
+func admitTargetRepo(repo string, m Meta, action string) error {
+	cfg, err := targetPolicy()
+	if err != nil {
+		return fmt.Errorf("target admission config: %w", err)
+	}
+	return admitWork(cfg, repo, m, action)
 }

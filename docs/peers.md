@@ -313,3 +313,6 @@ event for urgent and halt. Use `peers send TARGET MESSAGE --reply-to ID` to
 include a parent message ID in the observation. Handlers see the destination,
 message kind, byte count and redacted text, with the text omitted on client
 hosts. See [Hooks](hooks.md) and the [event schema](../schemas/peer_message_event.schema.json).
+
+A running hevd samples the local peer inventory for `peer-online` and
+`peer-offline` transitions.

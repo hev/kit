@@ -4,9 +4,11 @@
 package steer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hooks"
 	"os"
 	"path/filepath"
 	"sort"
@@ -278,7 +280,13 @@ func (s Store) Enqueue(level, text, from, delivery string, haltTimeout time.Dura
 	if err != nil {
 		return Message{}, err
 	}
-	defer unlock()
+	var queued *Message
+	defer func() {
+		unlock()
+		if queued != nil {
+			Emit("steer-sent", *queued)
+		}
+	}()
 	// QueuedAt is taken under the lock, so it orders strictly against an
 	// attempt's closure (EndHalts), which the hooks use to tell a halt for
 	// the starting attempt from one an ended attempt left behind.
@@ -286,7 +294,11 @@ func (s Store) Enqueue(level, text, from, delivery string, haltTimeout time.Dura
 	if m.Halting() && haltTimeout > 0 {
 		m.HaltTimeout = haltTimeout.String()
 	}
-	return m, s.Put(m)
+	err = s.Put(m)
+	if err == nil {
+		queued = &m
+	}
+	return m, err
 }
 
 // ErrNotInjected refuses an ack for a message the agent was never shown.
@@ -440,4 +452,15 @@ func (s Store) Update(id string, f func(*Message)) (Message, error) {
 	}
 	f(&m)
 	return m, s.Put(m)
+}
+
+// Emit reports a steering receipt without exporting its message or sender.
+func Emit(event string, m Message) {
+	EmitContext(context.Background(), event, m)
+}
+
+func EmitContext(ctx context.Context, event string, m Message) {
+	hooks.Meta(ctx, event, map[string]any{
+		"steer_id": m.ID, "target": m.Target, "level": m.Level, "delivery": m.Delivery,
+	}, "")
 }

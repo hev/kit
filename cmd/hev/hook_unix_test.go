@@ -187,8 +187,12 @@ func TestHookUrgentBlocksWriteNatively(t *testing.T) {
 	if v.HookSpecificOutput.HookEventName != "PreToolUse" || v.HookSpecificOutput.PermissionDecision != "deny" || !strings.Contains(v.HookSpecificOutput.PermissionDecisionReason, m.ID) || !strings.Contains(v.HookSpecificOutput.PermissionDecisionReason, "steer ack") {
 		t.Fatalf("%+v", v)
 	}
+	out.Reset()
+	runHook([]string{"pre-tool", "--harness", "claude"}, strings.NewReader(writeCall), &out)
 	events, _ := os.ReadFile(filepath.Join(home, ".hev", "hooks", "events.jsonl"))
-	if !strings.Contains(string(events), `"decision":"block"`) || !strings.Contains(string(events), `"target":"dispatch:demo"`) {
+	if !strings.Contains(string(events), `"decision":"block"`) || !strings.Contains(string(events), `"target":"dispatch:demo"`) ||
+		strings.Count(string(events), `"event":"steer-sent"`) != 1 || strings.Count(string(events), `"event":"steer-acked"`) != 1 ||
+		!strings.Contains(string(events), `"steer_id":"`+m.ID+`"`) || strings.Contains(string(events), "scope changed") {
 		t.Fatalf("%s", events)
 	}
 }

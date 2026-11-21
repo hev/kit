@@ -101,7 +101,7 @@ func TestRemoveRepoGrantAddFromAttributionIdempotency(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(workspace, "widget", ".git")); err != nil {
 		t.Fatalf("clone removed: %v", err)
 	}
-	if err = admitTargetRepo(filepath.Join(workspace, "widget"), "widget", "here"); err == nil {
+	if err = admitTargetRepo(filepath.Join(workspace, "widget"), Meta{Order: Order{Repo: "widget", Host: "here"}}, "start"); err == nil {
 		t.Fatal("removed repo still admitted")
 	}
 

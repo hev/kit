@@ -769,7 +769,15 @@ func Handle(q Request) (r Response, handleErr error) {
 				// is released here, and dequeue admits the class like any start.
 				releaseClassSlotLocked(slot)
 				released = true
-				return enqueue(q)
+				response, err := enqueue(q)
+				var queued queueEntry
+				emit := err == nil && readJSON(queuePath(q.Name), &queued) == nil
+				unlock()
+				locked = false
+				if emit {
+					orderEvent("order-queued", queued.Request.Meta, "")
+				}
+				return response, err
 			}
 		}
 		if e = CheckCap(len(live), cap); e != nil {
@@ -890,7 +898,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			repo := resolveRepo(m.Repo, workspace)
 			m.ResolvedRepo = repo
-			if e = admitTargetRepo(repo, m.Repo, m.Host); e != nil {
+			if e = admitTargetRepo(repo, m, "start"); e != nil {
 				return r, e
 			}
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {
@@ -921,7 +929,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
 				return r, fmt.Errorf("worktree was cleaned")
 			}
-			if e = admitTargetRepo(filepath.Join(dir, "wt"), m.Repo, m.Host); e != nil {
+			if e = admitTargetRepo(filepath.Join(dir, "wt"), m, originalAction); e != nil {
 				return r, e
 			}
 			cfg, err := loadTarget(m.ConfigPath, m.Host)
@@ -1005,7 +1013,13 @@ func Handle(q Request) (r Response, handleErr error) {
 		if err != nil {
 			return r, err
 		}
-		defer unlockLaunch()
+		var reworked bool
+		defer func() {
+			unlockLaunch()
+			if reworked {
+				orderEvent("order-rework", m, originalAction)
+			}
+		}()
 		if q.Action == "start" && exists(filepath.Join(dir, "stop")) {
 			r.Message = "cancelled " + q.Name
 			return r, nil
@@ -1013,6 +1027,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		_ = os.Remove(filepath.Join(dir, "stop"))
 		_ = os.Remove(filepath.Join(dir, "supervisor.json"))
 		beginAttempt(&m, launchParent)
+		m.Dequeued = q.Dequeue
 		// The worktree exists and nothing has launched: build this attempt's
 		// context bundle, record the attempt either way, and launch only if
 		// the bundle was built.
@@ -1043,6 +1058,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			return r, e
 		}
+		reworked = q.Action == "rework"
 		r.Message = "started " + q.Name
 		return r, nil
 	}

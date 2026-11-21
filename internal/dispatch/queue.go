@@ -70,7 +70,10 @@ func enqueue(q Request) (Response, error) {
 	if workspace == "" {
 		workspace = q.Workspace
 	}
-	if err := admitRepo(cfg.Admission, resolveRepo(o.Repo, workspace), o.Repo, o.Host); err != nil {
+	m := q.Meta
+	m.Order = o
+	m.Host = o.Host
+	if err := admitWork(cfg, resolveRepo(o.Repo, workspace), m, "queue"); err != nil {
 		return Response{}, err
 	}
 	// The order's own skills: refuse two modes or an unknown skill now rather

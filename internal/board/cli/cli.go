@@ -642,6 +642,9 @@ func runFlag(cmd string, args []string) error {
 	if err := call("POST", fmt.Sprintf("/api/threads/%d/%s", id, which), map[string]any{"on": on}, nil); err != nil {
 		return err
 	}
+	if cmd == "pin" {
+		hooks.Meta(context.Background(), "board-pin", map[string]any{"thread_id": id}, "")
+	}
 	fmt.Printf("#%d %s\n", id, map[string]string{"pin": "pinned", "unpin": "unpinned", "lock": "locked", "unlock": "unlocked"}[cmd])
 	return nil
 }

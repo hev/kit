@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/feed"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/secrets"
@@ -61,7 +62,7 @@ func ObservePeerMessage(ctx context.Context, ev PeerMessage, text string) {
 	}
 	ev.Activity.complete("hev.peer.message/v1", "peer-message")
 	ev.TextBytes = len(text)
-	observeActivity(ctx, ev.Event, text, func(_ context.Context, safe *string) any {
+	observeActivity(ctx, ev.Event, text, false, func(_ context.Context, safe *string) any {
 		ev.Text = safe
 		return ev
 	})
@@ -72,7 +73,7 @@ func ObservePeerMessage(ctx context.Context, ev PeerMessage, text string) {
 func ObserveBoardPost(ctx context.Context, ev BoardPost, body string, thread func(context.Context) (string, string, []string)) {
 	ev.Activity.complete("hev.board.post/v1", "board-post")
 	ev.BodyBytes = len(body)
-	observeActivity(ctx, ev.Event, body, func(ctx context.Context, safe *string) any {
+	observeActivity(ctx, ev.Event, body, ev.Kind == "reply", func(ctx context.Context, safe *string) any {
 		if thread != nil {
 			// Reserve most of the budget for the handlers if the board is slow.
 			if deadline, ok := ctx.Deadline(); ok {
@@ -107,7 +108,7 @@ func (a *Activity) complete(schema, event string) {
 	}
 }
 
-func observeActivity(ctx context.Context, event, text string, payload func(context.Context, *string) any) {
+func observeActivity(ctx context.Context, event, text string, reply bool, payload func(context.Context, *string) any) {
 	if Disabled(os.Getenv("HEV_HOOKS")) {
 		return
 	}
@@ -123,8 +124,10 @@ func observeActivity(ctx context.Context, event, text string, payload func(conte
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	metadata := payload(ctx, nil)
-	if err := log.Append("events.jsonl", metadata); err != nil {
-		lifecycleWarn(log, event, err.Error())
+	if !reply {
+		if err := log.Append("events.jsonl", metadata); err != nil {
+			lifecycleWarn(log, event, err.Error())
+		}
 	}
 	body := metadata
 	if warning == "" && allowsActivityBody(path) {
@@ -146,6 +149,15 @@ func observeActivity(ctx context.Context, event, text string, payload func(conte
 	raw, err := json.Marshal(body)
 	if err != nil {
 		lifecycleWarn(log, event, err.Error())
+		return
+	}
+	if reply {
+		feed.ObserveLifecycle(event, raw)
+		post := body.(BoardPost)
+		meta(ctx, "board-reply", map[string]any{
+			"thread_id": post.ThreadID, "entry_id": post.ID, "board": post.Board,
+			"author": post.Author, "body_bytes": post.BodyBytes,
+		}, "", post.Body)
 		return
 	}
 	RunLifecycle(ctx, event, raw, os.Getenv("PATH"), cfg, log)
@@ -214,5 +226,5 @@ func ObserveEvidence(ctx context.Context, event string, ev EvidenceEvent) {
 	if ev.AddedClaimIDs == nil {
 		ev.AddedClaimIDs = []string{}
 	}
-	observeActivity(ctx, event, "", func(context.Context, *string) any { return ev })
+	observeActivity(ctx, event, "", false, func(context.Context, *string) any { return ev })
 }

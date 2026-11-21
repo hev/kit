@@ -3,6 +3,7 @@
 package hooks
 
 import (
+	"context"
 	"os/exec"
 	"syscall"
 )
@@ -17,4 +18,8 @@ func ownGroup(c *exec.Cmd) {
 		}
 		return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
 	}
+}
+
+func handlerCommand(ctx context.Context, exe, event string) (*exec.Cmd, error) {
+	return exec.CommandContext(ctx, exe, event), nil
 }

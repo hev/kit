@@ -30,7 +30,7 @@ func TestSchemaMatchesEvent(t *testing.T) {
 	if s.Title != Schema || s.Properties["schema"].Const != Schema {
 		t.Fatalf("schema version %q", s.Title)
 	}
-	if !reflect.DeepEqual(s.Properties["event"].Enum, Events) || !reflect.DeepEqual(s.Properties["harness"].Enum, Harnesses) {
+	if !reflect.DeepEqual(s.Properties["event"].Enum, append(append([]string{}, Events...), MetaEvents...)) || !reflect.DeepEqual(s.Properties["harness"].Enum, append(append([]string{}, Harnesses...), "kit")) {
 		t.Fatal("event or harness enum drifted")
 	}
 	if got := s.Properties["tool"].Properties["kind"].Enum; !reflect.DeepEqual(got, []string{KindRead, KindMutate, KindSteer, KindOther}) {

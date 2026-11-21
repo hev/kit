@@ -125,12 +125,12 @@ func TestEscalateHaltAfterTimeout(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "run")
 	store := steer.Store{Dir: filepath.Join(dir, "steer")}
 	m, _ := store.Enqueue(steer.HaltL, "stop", "", steer.ToolBoundary, time.Hour)
-	if escalateHalt(dir) {
+	if _, ok := escalateHalt(dir); ok {
 		t.Fatal("escalated early")
 	}
 	store.Update(m.ID, func(x *steer.Message) { x.HaltTimeout = "1ms" })
 	time.Sleep(5 * time.Millisecond)
-	if !escalateHalt(dir) {
+	if _, ok := escalateHalt(dir); !ok {
 		t.Fatal("not escalated")
 	}
 	got, _ := store.Get(m.ID)

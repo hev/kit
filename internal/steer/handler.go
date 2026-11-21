@@ -13,6 +13,11 @@ import (
 // and holds tool calls while an urgent waits for its ack or a halt is
 // pending. ack is the command line the agent should run to acknowledge.
 func (s Store) Handle(ev hooks.Event, ack string, now time.Time) (hooks.Response, error) {
+	return s.HandleObserved(ev, ack, now, nil)
+}
+
+// HandleObserved reports durable first deliveries to the hook caller.
+func (s Store) HandleObserved(ev hooks.Event, ack string, now time.Time, observe func([]Message)) (hooks.Response, error) {
 	unlock, err := s.Lock(time.Second)
 	if err != nil {
 		return hooks.Response{}, err
@@ -35,7 +40,7 @@ func (s Store) Handle(ev hooks.Event, ack string, now time.Time) (hooks.Response
 		}
 		return m
 	}
-	var changed []Message
+	var changed, delivered []Message
 	put := func(m *Message) { changed = append(changed, *m) }
 	// endHalts closes halts whose turn has ended. At a session or turn start
 	// (starting), a queued halt admitted for this attempt is kept: a
@@ -172,9 +177,15 @@ func (s Store) Handle(ev hooks.Event, ack string, now time.Time) (hooks.Response
 		if err := s.Put(m); err != nil {
 			return hooks.Response{}, err
 		}
+		if observe != nil && m.State == Injected && m.Injected != nil && m.Injected.At.Equal(now) {
+			delivered = append(delivered, m)
+		}
 	}
 	if err := s.SaveState(st); err != nil {
 		return hooks.Response{}, err
+	}
+	if len(delivered) > 0 {
+		observe(delivered)
 	}
 	return r, nil
 }

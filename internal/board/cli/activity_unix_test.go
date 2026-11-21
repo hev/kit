@@ -16,7 +16,7 @@ import (
 
 func TestBoardPostActivityHook(t *testing.T) {
 	const body = "token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
-	for _, mode := range []string{"capture", "off", "client", "hang", "fail", "rejected", "reply"} {
+	for _, mode := range []string{"capture", "off", "client", "hang", "fail", "rejected", "reply", "reply-client", "pin"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("HOME", dir)
@@ -31,6 +31,8 @@ func TestBoardPostActivityHook(t *testing.T) {
 					http.Error(w, `{"error":"rejected"}`, http.StatusForbidden)
 				case r.Method == "GET" && r.URL.RequestURI() == "/api/threads/42?peek=1":
 					_, _ = w.Write([]byte(`{"thread":{"id":42,"board":"watercooler","title":"Recorded title","tags":["test"]}}`))
+				case r.Method == "POST" && r.URL.Path == "/api/threads/42/pin":
+					_, _ = w.Write([]byte(`{"ok":true}`))
 				case r.Method == "POST" && r.URL.Path == "/api/threads/42/posts":
 					_, _ = w.Write([]byte(`{"id":"p:42:2","n":2,"author":"recorded","body":"` + body + `"}`))
 				case r.Method == "POST" && r.URL.Path == "/api/threads":
@@ -50,7 +52,7 @@ func TestBoardPostActivityHook(t *testing.T) {
 			switch mode {
 			case "off":
 				t.Setenv("HEV_HOOKS", "off")
-			case "client":
+			case "client", "reply-client":
 				config += "[notify]\nclient = true\n"
 			case "hang":
 				config = "[hooks]\ntimeout = \"300ms\"\n"
@@ -65,9 +67,13 @@ func TestBoardPostActivityHook(t *testing.T) {
 			}
 			args := []string{"post", "--board", "watercooler", "--title", "Test post", "-m", body}
 			entryURL, kind, id := server.URL+"/t/42", "post", "42"
-			if mode == "reply" {
+			reply := mode == "reply" || mode == "reply-client"
+			if reply {
 				args = []string{"reply", "42", "-m", body, "--json"}
 				entryURL, kind, id = entryURL+"#p2", "reply", "p:42:2"
+			}
+			if mode == "pin" {
+				args = []string{"pin", "42"}
 			}
 			start := time.Now()
 			out, err := run(t, args...)
@@ -87,6 +93,36 @@ func TestBoardPostActivityHook(t *testing.T) {
 			raw, err := os.ReadFile(logPath)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if reply || mode == "pin" {
+				var logged hooks.Event
+				decode(t, string(raw), &logged)
+				want := "board-reply"
+				if mode == "pin" {
+					want = "board-pin"
+				}
+				if logged.Event != want || logged.Data["thread_id"] != float64(42) || logged.Data["body"] != nil {
+					t.Fatalf("unexpected hook log: %s", raw)
+				}
+				raw, err = os.ReadFile(capture)
+				if err != nil {
+					t.Fatal(err)
+				}
+				header, payload, _ := strings.Cut(string(raw), "\n")
+				var event hooks.Event
+				decode(t, payload, &event)
+				if header != want+" "+want+" kit" || event.Schema != hooks.Schema || event.ID != logged.ID {
+					t.Fatalf("unexpected handler event: %s", raw)
+				}
+				if reply && (event.Data["entry_id"] != id || event.Data["author"] != "recorded" ||
+					event.Data["board"] != "watercooler" || event.Data["body_bytes"] != float64(len(body))) {
+					t.Fatalf("unexpected reply metadata: %s", raw)
+				}
+				if mode == "reply" && event.Data["body"] == nil || mode != "reply" && event.Data["body"] != nil ||
+					strings.Contains(string(raw), "AbCdEfGh") {
+					t.Fatalf("unexpected reply body: %s", raw)
+				}
+				return
 			}
 			var record map[string]any
 			decode(t, string(raw), &record)
