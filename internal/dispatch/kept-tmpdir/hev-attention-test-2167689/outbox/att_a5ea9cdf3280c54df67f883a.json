@@ -1,0 +1,28 @@
+{
+  "notice": {
+    "schema": "hev.attention.event/v1",
+    "id": "att_a5ea9cdf3280c54df67f883a",
+    "time": "2026-11-21T03:09:07.692205898Z",
+    "event": "done",
+    "source": "run",
+    "name": "climb-env-minimal",
+    "host": "here",
+    "state": "done",
+    "text": "done",
+    "links": {
+      "run": "hev dispatch show climb-env-minimal --host here"
+    },
+    "thread": "run:here/climb-env-minimal",
+    "requested_by": {
+      "person": "local:hev",
+      "name": "local:hev"
+    },
+    "addressee": [
+      "local:hev"
+    ]
+  },
+  "state_dir": "/tmp/TestClimbWorkerEnvironmentEndToEndminimal3200979528/002/dispatch/climb-env-minimal",
+  "created": "2026-11-21T03:09:07.6924737Z",
+  "hooks": "2026-11-21T03:09:07.692474Z",
+  "slack_skip": "not configured"
+}

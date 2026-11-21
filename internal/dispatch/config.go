@@ -81,6 +81,16 @@ type Config struct {
 	// Harnesses holds optional per-harness launch settings
 	// ([harnesses.NAME]); see HarnessConfig.
 	Harnesses map[string]HarnessConfig `toml:"harnesses"`
+	// Climb holds the target's climb settings ([climb]).
+	Climb ClimbConfig `toml:"climb"`
+}
+
+// ClimbConfig is the target's [climb] table.
+type ClimbConfig struct {
+	// WorkerEnv lists extra host variables an env: minimal worker may get,
+	// such as a read-only Layer key. Admission of a minimal run refuses a
+	// list that names a refused variable (see checkClimbWorkerEnv).
+	WorkerEnv []string `toml:"worker_env"`
 }
 
 func Expand(s string) string {
@@ -127,6 +137,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			Validation     toml.Primitive            `toml:"validation"`
 			DefaultHost    toml.Primitive            `toml:"default_host"`
 			Harnesses      map[string]HarnessConfig  `toml:"harnesses"`
+			Climb          ClimbConfig               `toml:"climb"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
@@ -134,6 +145,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			c.Classes = raw.Classes
 			c.Fallbacks, c.Orchestrate, c.LegacyExpedite = raw.Fallbacks, raw.Orchestrate, raw.LegacyExpedite
 			c.Harnesses = raw.Harnesses
+			c.Climb = raw.Climb
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}

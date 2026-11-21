@@ -90,7 +90,7 @@ func enqueue(q Request) (Response, error) {
 	if len(entries) > 0 && !q.Meta.Start.After(entries[len(entries)-1].Enqueued) {
 		q.Meta.Start = entries[len(entries)-1].Enqueued.Add(time.Nanosecond)
 	}
-	q.Meta.LaunchEnv = nil
+	q.Meta.LaunchEnv, q.Meta.WorkerEnv = nil, nil
 	q.Meta.LaunchResolved = false
 	q.ReserveClass, q.ClassToken = false, ""
 	q.Meta.HarnessWrapper = nil

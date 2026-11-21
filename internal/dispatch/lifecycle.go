@@ -37,7 +37,10 @@ func launchEnvironment(dir string) ([]string, error) {
 	return withoutPluginOnlyEnv(out), nil
 }
 
-func resolveLaunch(m *Meta, cfg Config) {
+// resolveLaunch records this host's launch settings on m. An env: minimal
+// run also records its worker's names, and is refused if the target's
+// [climb] worker_env names a refused variable.
+func resolveLaunch(m *Meta, cfg Config) error {
 	if m.Fallbacks == nil {
 		m.Fallbacks = cfg.Fallbacks
 	}
@@ -54,6 +57,17 @@ func resolveLaunch(m *Meta, cfg Config) {
 	for _, key := range cfg.Hosts[m.Host].Env {
 		names[key] = true
 	}
+	m.WorkerEnv = nil
+	if m.MinimalEnv() {
+		m.LaunchEnv, m.LaunchResolved = nil, false
+		if err := resolveMinimalLaunch(m, cfg); err != nil {
+			return err
+		}
+		// The supervisor needs a worker_env value to pass it on.
+		for _, key := range m.WorkerEnv {
+			names[key] = true
+		}
+	}
 	if len(cfg.Hosts[m.Host].HarnessWrapper) > 0 {
 		m.HarnessWrapper = cfg.Hosts[m.Host].HarnessWrapper
 	}
@@ -66,6 +80,7 @@ func resolveLaunch(m *Meta, cfg Config) {
 	sort.Strings(out)
 	m.LaunchEnv = out
 	m.LaunchResolved = true
+	return nil
 }
 
 // addReservations adds runs whose admission or supervisor process is live.

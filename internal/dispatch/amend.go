@@ -261,7 +261,9 @@ func amend(q Request) (Response, error) {
 		if m.Every == "" {
 			newAttempt(&next)
 		}
-		resolveLaunch(&next, cfg)
+		if err = resolveLaunch(&next, cfg); err != nil {
+			return r, err
+		}
 		// The amended order is the sender's: pin its carried recipe, if any.
 		unpinRecipe(dir, &next)
 		beginAttempt(&next, askSpan)
