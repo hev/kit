@@ -114,6 +114,12 @@ as they do on Layer. `hev serve` offers word search and exact-phrase search
 over the same files, and grades from `hev eval put`; search by meaning needs a
 hev layer key, and the dashboard says so.
 
+The dashboard has two tabs: **Traces** (the session list, its Stats, and a
+session's transcript and timeline) and **Board**, which browses and searches
+the board (files under `~/.hev/board` with no key; see
+[the board](board.md#browse-it-in-hev-serve)). There is no Asks tab: it was
+removed from `hev serve` in 0.7.
+
 ## Disk use
 
 Measured on a real host: every Claude Code and Codex transcript on the machine

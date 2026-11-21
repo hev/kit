@@ -25,7 +25,7 @@ const assert=require('node:assert/strict');
    assert.ok(new URL(page.url()).searchParams.has('project'));
    assert.equal(data.stats.traces,data.sessions.length);
    const before=requests.filter(u=>u.includes('/api/stats?')).length;
-   await page.locator('#tabs button[data-v="stats"]').click();
+   await page.locator('#trace-tabs button[data-v="stats"]').click();
    await page.waitForFunction(()=>document.querySelector('#v-stats').classList.contains('on'));
    assert.equal(requests.filter(u=>u.includes('/api/stats?')).length,before,'paired list triggered second Stats scan');
   }
