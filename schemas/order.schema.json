@@ -81,6 +81,11 @@
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
     },
+    "env": {
+      "description": "Worker environment. minimal forwards only PATH, LANG, LC_ALL, TMPDIR, SHELL, the harness login and the target's [climb] worker_env, with a scratch HOME. class: climb implies minimal.",
+      "type": "string",
+      "enum": ["standard", "minimal"]
+    },
     "timeout": {
       "description": "Minutes.",
       "type": "integer",

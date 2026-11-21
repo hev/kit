@@ -50,6 +50,10 @@ type Meta struct {
 	ConfigPath string `json:"config_path,omitempty"`
 	Namespace  string `json:"namespace,omitempty"`
 
+	// WorkerEnv names the host variables an env: minimal worker gets (see
+	// climb.go). Resolved on the target at admission, like LaunchEnv.
+	WorkerEnv []string `json:"worker_env,omitempty"`
+
 	// ContextDigest and ContextBundle record the bundle this attempt was
 	// built from the order's context recipe (see context.go). Optional:
 	// runs without a recipe and older records have neither.
@@ -725,9 +729,18 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if err != nil {
 		return err
 	}
-	childEnv := append(workerEnvironment(m, os.Environ(), env), descriptor.Dispatch.Env...)
+	var childEnv []string
+	if m.MinimalEnv() {
+		// Built from nothing: never the supervisor's own environment.
+		if childEnv, err = minimalWorkerEnvironment(dir, m); err != nil {
+			return err
+		}
+	} else {
+		childEnv = workerEnvironment(m, os.Environ(), env)
+	}
+	childEnv = append(childEnv, descriptor.Dispatch.Env...)
 	childEnv = append(childEnv, hookEnv...)
-	if m.Namespace != "" {
+	if m.Namespace != "" && !m.MinimalEnv() {
 		childEnv = namespaceEnvironment(childEnv, m.Namespace)
 	}
 	// [harnesses.NAME] adds resolved secret env and agy's model provider.
@@ -735,6 +748,10 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
 	childEnv, args, secretValues, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
+	if m.MinimalEnv() {
+		// env_refs and harness settings cannot put a refused name back.
+		childEnv = withoutRefusedWorkerEnv(childEnv, m.WorkerEnv)
+	}
 	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
 	// Output reaches the log with resolved env_refs values redacted.

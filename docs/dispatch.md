@@ -91,7 +91,10 @@ at launch and gives it to the worker (see [Context recipes](#context-recipes)).
 shelf for this run only; the target refuses names it cannot resolve and more
 than one `mode` pack (see [the skills shelf](skills-shelf.md)).
 `class` names the order's concurrency class with the same pattern as `name`; see
-[Dispatch classes](#dispatch-classes). [`schemas/order.schema.json`](../schemas/order.schema.json)
+[Dispatch classes](#dispatch-classes). `env: minimal` (optional; the default is
+`standard`) gives the worker a minimal environment and a scratch `HOME`, and
+`class: climb` marks a climb unit and implies `env: minimal`; see
+[Minimal worker environment and climb units](#minimal-worker-environment-and-climb-units). [`schemas/order.schema.json`](../schemas/order.schema.json)
 lists every frontmatter key. Unknown,
 duplicate, empty, nested, and malformed fields are rejected. Every order
 must contain `## Acceptance`. `--host` overrides its host selection.
@@ -564,6 +567,86 @@ the harness's environment (from `env_refs` or inherited; on Windows the name
 matches case-insensitively, as the child sees it). That lets any Gemini
 model name (`gemini-4-carbon-high`, `gemini-4-neon-medium`, ...) run through
 agy. `model_provider` on another harness is rejected, as are unknown keys.
+
+## Minimal worker environment and climb units
+
+An order with `env: minimal` runs its worker harness in an environment built
+from nothing instead of the host's forwarding allowlist (RFC 0023, control
+requirement 1). `class: climb` marks the run as a climb unit and always means
+`env: minimal`; `class: climb` with `env: standard` is refused. Without
+either key, or with `env: standard`, nothing changes.
+
+A minimal worker **keeps**, when the host sets them:
+
+- `PATH`, `LANG`, `LC_ALL`, `TMPDIR` and `SHELL` (on Windows also
+  `SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `TEMP` and `TMP`);
+- the harness's own login: `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, or, when they
+  are unset, a link to its default login under the real `HOME` (`~/.claude`
+  and `~/.claude.json` for claude, `~/.codex` for codex, `~/.gemini` for agy);
+- the names in the target's `[climb] worker_env` (below);
+- a scratch `HOME`, `<run>/scratch-home`, mode `0700`, made fresh for every
+  attempt. It holds only the harness login links and a `.gitconfig` with the
+  operator's commit name and email and an empty `credential.helper`. Git runs
+  with `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`;
+- `HEV_RUN_ENV=minimal`, and `HEV_RUN_CLASS=climb` for a climb unit, plus the
+  usual `HEV_REQUESTED_BY` and trace context.
+
+A minimal worker is **refused**:
+
+- `HEV_DISPATCH_CONFIG`, `HEV_CONFIG`, `SSH_AUTH_SOCK`, `GH_TOKEN`,
+  `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`,
+  `GIT_ASKPASS`, `SSH_ASKPASS`, `XDG_CONFIG_HOME` and `BOAT_API_KEY`;
+- every `HEVLAYER_*` and `LAYER_*` name (keys, `*_OP_REF` and `*_REF`
+  references, namespace, endpoint and store), including the host's
+  `namespace`;
+- every `[hosts.<name>].env` entry: host env is not forwarded to a minimal
+  worker, so an entry naming a refused variable never reaches it;
+- a `HOME` containing `~/.config/hev`, `~/.config/gh`, `~/.ssh` or git
+  credential helpers;
+- a refused name added by `[harnesses.<name>].env_refs`, which is dropped
+  from the worker's environment after it is resolved.
+
+The supervisor itself keeps the ordinary launch environment; only the worker
+harness and what it starts are isolated. `meta.json` records the names the
+worker gets as `worker_env`, never values. A worker running as the host's
+account can still read files by absolute path; this is isolation for
+cooperative agents, not an OS sandbox.
+
+### `[climb] worker_env`
+
+A target can allow extra variables for minimal workers with a top-level
+`[climb]` table in its default dispatch configuration:
+
+```toml
+[climb]
+worker_env = ["HEVLAYER_READ_API_KEY", "HEVLAYER_ENDPOINT", "GOMODCACHE"]
+```
+
+Admission of a minimal or climb run is refused if `worker_env` names a
+refused variable, `HOME`, `USERPROFILE`, any `HEV_*` name, an invalid name or
+a Layer write key. A Layer name that carries a credential (it contains `KEY`,
+`TOKEN` or `SECRET`, or ends in `_REF`) is a write key unless it says `READ`
+(for example `HEVLAYER_READ_API_KEY`); Layer settings such as
+`HEVLAYER_ENDPOINT` are allowed. Names compare case-insensitively. The
+refusal names the variable, never a value. Standard runs ignore `[climb]`.
+
+### Climb units cannot dispatch
+
+Admission refuses `start`, `say`, `rework` and `stop`, and the other run
+control actions (`retry`, `amend`, `peer-send`, `steer`, `pause`, `resume`,
+`wake`, `retire`, `close`, `clean`, `adopt`, `orchestrator-apply`), when the
+caller is a climb unit:
+
+```text
+refused: start from inside climb unit NAME; climb workers cannot start, steer or stop dispatch work (RFC 0023, control requirement 1)
+```
+
+A caller is a climb unit when `HEV_RUN_CLASS=climb` is in its environment, or,
+on Linux, when its process lineage reaches the recorded harness of a live
+`class: climb` run, so clearing the variable does not help. The caller's side
+records the mark on the request (`caller_class`), so a target reached over SSH
+refuses it as well. Reads (`list`, `show`, `logs`) stay open, and ordinary
+callers, including other minimal runs, are unchanged.
 
 ## Target capacity
 

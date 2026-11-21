@@ -33,7 +33,7 @@ func migrateAmend(q Request, old, next Meta, live map[string]bool) (Response, er
 	next.Namespace = target.Namespace
 	next.HarnessWrapper = nil
 	next.LaunchResolved = false
-	next.LaunchEnv = nil
+	next.LaunchEnv, next.WorkerEnv = nil, nil
 	next.Imported = true
 	next.Forward = nil
 	request := Request{Action: "amend-check", Name: q.Name, Order: q.Order, Meta: next, Cap: target.Cap}
@@ -249,7 +249,9 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	next.ResolvedRepo = repo
 	next.WorktreeCreated = false
 	next.BranchCreated = true
-	resolveLaunch(&next, cfg)
+	if err = resolveLaunch(&next, cfg); err != nil {
+		return r, err
+	}
 	if err = WriteJSON(filepath.Join(dir, "meta.json"), next); err != nil {
 		return r, err
 	}

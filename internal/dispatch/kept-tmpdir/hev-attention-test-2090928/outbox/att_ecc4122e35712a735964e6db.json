@@ -1,0 +1,28 @@
+{
+  "notice": {
+    "schema": "hev.attention.event/v1",
+    "id": "att_ecc4122e35712a735964e6db",
+    "time": "2026-11-21T03:06:39.682776858Z",
+    "event": "done",
+    "source": "run",
+    "name": "climb-env-standard",
+    "host": "here",
+    "state": "done",
+    "text": "done",
+    "links": {
+      "run": "hev dispatch show climb-env-standard --host here"
+    },
+    "thread": "run:here/climb-env-standard",
+    "requested_by": {
+      "person": "local:hev",
+      "name": "local:hev"
+    },
+    "addressee": [
+      "local:hev"
+    ]
+  },
+  "state_dir": "/tmp/TestClimbWorkerEnvironmentEndToEndstandard2072931556/002/dispatch/climb-env-standard",
+  "created": "2026-11-21T03:06:39.689661032Z",
+  "hooks": "2026-11-21T03:06:39.689661082Z",
+  "slack_skip": "not configured"
+}

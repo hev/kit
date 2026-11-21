@@ -36,7 +36,10 @@ type Request struct {
 	ReserveClass bool `json:"reserve_class,omitempty"`
 	// ClassToken is the token a ReserveClass probe returned. A start
 	// carrying it may release only that reservation, never a later one.
-	ClassToken       string           `json:"class_token,omitempty"`
+	ClassToken string `json:"class_token,omitempty"`
+	// CallerClass is "climb" when the caller runs inside a climb unit;
+	// admission refuses its run control (see admitCaller).
+	CallerClass      string           `json:"caller_class,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
@@ -221,6 +224,10 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 // owner budget and a forwarded mutation must not reacquire that same lock.
 func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	requestOrchestratorIdentity(&q)
+	markCallerClass(&q)
+	if e := admitCaller(q); e != nil {
+		return Response{}, e
+	}
 	if q.Action == "start" && q.Meta.Sender == "" {
 		q.Meta.Sender = LocalSender()
 	}
@@ -317,6 +324,9 @@ func workerInternal(action string) bool {
 func Handle(q Request) (r Response, handleErr error) {
 	r = Response{Version: version.Version, FollowNames: true}
 	requestOrchestratorIdentity(&q)
+	if e := admitCaller(q); e != nil {
+		return r, e
+	}
 	// Every definitive start rejection, at any step, frees the class slot its
 	// probe reserved. A rejection under the start's admission lock releases
 	// there; an earlier one takes the lock here. released records either.
@@ -801,7 +811,7 @@ func Handle(q Request) (r Response, handleErr error) {
 				m.RequestedBy = m.Sender
 			}
 			// Launch settings are resolved on this host; never persist sender-supplied values.
-			m.LaunchEnv, m.LaunchResolved = nil, false
+			m.LaunchEnv, m.WorkerEnv, m.LaunchResolved = nil, nil, false
 			// So is the context bundle, including the base commit it pins.
 			m.ContextBundle, m.ContextDigest, m.ContextRecipeSHA256 = nil, "", ""
 			if m.Parent != "" {
@@ -883,7 +893,9 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
 				return r, fmt.Errorf("target config: %w", err)
 			}
-			resolveLaunch(&m, cfg)
+			if e = resolveLaunch(&m, cfg); e != nil {
+				return r, e
+			}
 			workspace := q.Workspace
 			if workspace == "" {
 				workspace = cfg.Workspace
@@ -981,7 +993,9 @@ func Handle(q Request) (r Response, handleErr error) {
 					}
 				}
 			}
-			resolveLaunch(&m, cfg)
+			if e = resolveLaunch(&m, cfg); e != nil {
+				return r, e
+			}
 			if m.Every == "" {
 				newAttempt(&m)
 			}

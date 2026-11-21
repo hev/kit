@@ -31,6 +31,10 @@ type Order struct {
 	Reply       string        `json:"reply,omitempty"`
 	Issue       string        `json:"issue,omitempty"`
 	Class       string        `json:"class,omitempty"`
+	// Env selects the worker environment: "" or "standard" forwards the
+	// host's launch allowlist; "minimal" gives the worker only the kept
+	// names and a scratch HOME (see climb.go). class: climb implies minimal.
+	Env string `json:"env,omitempty"`
 	// Context names a context recipe: a JSON file in the order's repository,
 	// read at the run's base commit. Empty means no recipe (see context.go).
 	Context string `json:"context,omitempty"`
@@ -138,7 +142,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "supersedes", "skills", "fallbacks":
+		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "env", "context", "context_recipe", "trace", "supersedes", "skills", "fallbacks":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -253,6 +257,8 @@ func Parse(text string) (Order, error) {
 			o.Issue = v
 		case "class":
 			o.Class = v
+		case "env":
+			o.Env = v
 		case "context":
 			o.Context = v
 		case "context_recipe":
@@ -296,6 +302,17 @@ func Parse(text string) (Order, error) {
 	}
 	if o.Class != "" && !ValidLabel(o.Class) {
 		return o, fmt.Errorf("invalid class")
+	}
+	switch o.Env {
+	case "", EnvStandard, EnvMinimal:
+	default:
+		return o, fmt.Errorf("invalid env: want standard or minimal")
+	}
+	if o.Class == ClimbClass {
+		if o.Env == EnvStandard {
+			return o, fmt.Errorf("class: climb requires env: minimal")
+		}
+		o.Env = EnvMinimal
 	}
 	if o.Repo == "" {
 		return o, fmt.Errorf("repo required")
