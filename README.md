@@ -1,12 +1,16 @@
 # hev kit
 
-hev kit is what you need to make your machine part of a software factory.
-It's one binary with the tools a factory needs: a daemon that collects
-traces, dispatch that sends work to your hosts, and an admission controller
-that decides which repos a host accepts (and probably tools and skills over
-time). `brew install hev` gets you everything you need to run a factory. To
-get the most out of the factory you'll want headless machines locally or in
-the cloud.
+hev kit is a meta-harness for Claude Code, Codex, Antigravity, Pi, and OpenCode.
+One binary runs on macOS, Linux, and Windows and provides shared tools for
+traces, board, peers, dispatch, cron, orchestration, secrets, and cluster management.
+
+A workspace binds subscriptions and authentication to a home folder and a
+private network with a cluster. A cluster is the set of machines running hevd
+and using SWIM for membership. Start on one machine and add local or cloud
+hosts as you need capacity. Each host controls which repositories it accepts.
+
+Starter Kit runs locally without a hosted account. Pro adds hosted services
+for shared storage and search.
 
 ## Install
 
@@ -22,7 +26,7 @@ upgrade that compatibility formula, which depends on `hev`.
 
 Linux and Windows binaries are on [GitHub Releases](https://github.com/hev/kit/releases).
 Extract the archive for your OS and architecture and put the binary on your PATH.
-0.6 is not tagged yet; build from main for the factory features described here
+0.6 is not tagged yet; build from main for the features described here
 (Go is required):
 
 ```sh
@@ -105,7 +109,7 @@ hev traces search 'architecture' --order explain-project
 
 The [dispatch guide](docs/dispatch.md) covers remote hosts, inline tasks,
 notifications, validation, and rework. The [online docs](https://hevkit.com/docs)
-walk through the factory setup.
+walk through the cluster setup.
 
 ## Dispatch
 
