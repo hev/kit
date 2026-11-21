@@ -14,7 +14,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/platformops"
-	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/version"
@@ -166,6 +165,9 @@ type fileConfig struct {
 	// Update is read by internal/update; kept here so a rewrite of the file
 	// (hev bucket use) carries it over.
 	Update *update.Config `toml:"update,omitempty"`
+	// Preserve license settings on config rewrites. License decoding and
+	// entitlement are independent of daemon capture configuration.
+	License any `toml:"license,omitempty"`
 }
 
 type archiveConfig struct {
@@ -386,7 +388,7 @@ func applyConfigFile(c *Config) error {
 	var fc fileConfig
 	md, err := toml.DecodeFile(c.ConfigPath, &fc)
 	if err != nil {
-		return fmt.Errorf("read config %s: %s", c.ConfigPath, redact.HideKitKeys(err.Error(), ""))
+		return fmt.Errorf("read config %s: invalid TOML or daemon settings", c.ConfigPath)
 	}
 	if md.IsDefined("projects") {
 		fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")

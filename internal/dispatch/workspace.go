@@ -3,7 +3,6 @@ package dispatch
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/license"
 	"github.com/hev/kit/internal/platformops"
 )
 
@@ -36,13 +36,13 @@ func (w WorkspaceConfig) validate() error {
 	return nil
 }
 
-var errWorkspaceLicense = errors.New("workspace operation requires a valid Pro edition license")
+var errWorkspaceLicense = errors.New("workspace operation requires a active Kit Pro license (HEV_LICENSE)")
 
 func workspacePro(w WorkspaceConfig) (bool, error) {
 	if w.Mode == "oss" {
 		return false, nil
 	}
-	licensed := cachedWorkspaceLicense(time.Now())
+	licensed := workspaceEntitled(time.Now())
 	if !licensed && w.Mode == "pro" {
 		return false, errWorkspaceLicense
 	}
@@ -74,35 +74,8 @@ func workspaceStatePath(name string) string {
 	return filepath.Join(home, ".hev", name)
 }
 
-// CacheWorkspaceLicense stores only the receiver's entitlement and a short
-// expiry. Dispatch never contacts the gateway on its request path.
-func CacheWorkspaceLicense(valid bool, until time.Time) error {
-	path := workspaceStatePath("workspace-license.json")
-	if path == "" {
-		return errors.New("workspace license cache needs a home directory")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return errors.New("cannot create workspace license cache directory")
-	}
-	data, err := json.Marshal(workspaceLicense{Pro: valid, Until: until})
-	if err != nil {
-		return errors.New("cannot encode workspace license cache")
-	}
-	if err := platformops.WriteFileAtomic(path, data, 0600); err != nil {
-		return errors.New("cannot write workspace license cache")
-	}
-	return nil
-}
-
-type workspaceLicense struct {
-	Pro   bool
-	Until time.Time
-}
-
-func cachedWorkspaceLicense(now time.Time) bool {
-	var lic workspaceLicense
-	path := workspaceStatePath("workspace-license.json")
-	return path != "" && readJSON(path, &lic) == nil && lic.Pro && now.Before(lic.Until)
+func workspaceEntitled(now time.Time) bool {
+	return license.ReadProjection(now).Entitled()
 }
 
 func workspacePool(repo string) (string, error) {
