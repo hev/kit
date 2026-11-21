@@ -248,3 +248,9 @@ func (c *Client) WithContext(ctx context.Context) *Client {
 func (c *Client) SearchSemantic() bool {
 	return c.SearchRoute() == "layer.multi_query" || c.transport.Caps.CanEmbed()
 }
+
+// WithHTTP sends the board's requests through h.
+func (c *Client) WithHTTP(h *http.Client) *Client {
+	c.HTTP, c.transport.HTTP = h, h
+	return c
+}

@@ -63,3 +63,7 @@ func (s *Store) RoutedSearch(ctx context.Context) (*Store, error) {
 	}
 	return &Store{Backend: &layerStore{cl: routed, app: backend.app}, info: s.info}, nil
 }
+
+// Wrap is a Store over any Backend, for callers that decorate one (for
+// example to stamp the poster from an authenticated request).
+func Wrap(b Backend, info Info) *Store { return &Store{Backend: b, info: info} }
