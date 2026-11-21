@@ -10,10 +10,11 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "hev",
-	Short: "Make your machine part of a software factory",
-	Long: `hev kit is what you need to make your machine part of a software factory.
-One binary collects traces, dispatches work to your hosts, and controls which
-repos each host accepts. Add headless machines locally or in the cloud.
+	Short: "Meta-harness for coding agents and clusters",
+	Long: `hev kit is a meta-harness for coding agents on macOS, Linux, and Windows.
+A workspace binds subscriptions and authentication to a home folder and a
+private network with a cluster of hevd hosts. Collect traces, coordinate agents,
+and dispatch work to the hosts that accept your repositories.
 
   hev up        Start an archive and capture
   hev d / s     Start capture or check daemon status
@@ -73,7 +74,7 @@ func main() {
 		return
 	}
 	addDirectSurface()
-	groupFactoryCommands(rootCmd)
+	groupClusterCommands(rootCmd)
 	installPluginHelp(rootCmd)
 	if handled, code := executePlugin(rootCmd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
 		os.Exit(code)
@@ -91,10 +92,10 @@ func main() {
 	}
 }
 
-// Keep the factory workflow first.
-func groupFactoryCommands(root *cobra.Command) {
+// Keep the cluster workflow first.
+func groupClusterCommands(root *cobra.Command) {
 	root.AddGroup(
-		&cobra.Group{ID: "factory", Title: "Factory:"},
+		&cobra.Group{ID: "cluster", Title: "Cluster:"},
 		&cobra.Group{ID: "other", Title: "Other commands:"},
 	)
 	root.SetHelpCommandGroupID("other")
@@ -102,7 +103,7 @@ func groupFactoryCommands(root *cobra.Command) {
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
 		case "up", "d", "s", "dispatch", "swarm", "peers", "board", "traces", "watch":
-			cmd.GroupID = "factory"
+			cmd.GroupID = "cluster"
 		default:
 			cmd.GroupID = "other"
 		}

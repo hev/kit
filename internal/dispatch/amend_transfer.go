@@ -247,6 +247,11 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	dirCreated = true
 	next := q.Meta
 	next.ResolvedRepo = repo
+	next.Compacted, next.HeadSHA, next.WorkspaceBase = false, "", ""
+	next.WorkspaceCap, err = dispatchWorkspaceCap()
+	if err != nil {
+		return r, err
+	}
 	next.WorktreeCreated = false
 	next.BranchCreated = true
 	resolveLaunch(&next, cfg)
