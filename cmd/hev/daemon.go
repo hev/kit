@@ -187,6 +187,9 @@ var daemonStatusCmd = &cobra.Command{
 			} else {
 				fmt.Printf("Last error: %s\n", status.LastError)
 			}
+			if status.Notice != "" {
+				fmt.Printf("Notice: %s\n", status.Notice)
+			}
 		}
 		writeUpdateStatus(cmd.OutOrStdout())
 		if status, configured := license.Inspect(time.Now()); configured {
