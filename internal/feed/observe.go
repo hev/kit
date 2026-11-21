@@ -3,6 +3,7 @@ package feed
 import (
 	"bufio"
 	"encoding/json"
+	"github.com/hev/kit/internal/hevpaths"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,8 +64,7 @@ func (o Observer) dispatchRoot() string {
 	if o.DispatchRoot != "" {
 		return o.DispatchRoot
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "dispatch")
+	return hevpaths.Dir(hevpaths.Orders)
 }
 
 func (o Observer) add(rec Record) {

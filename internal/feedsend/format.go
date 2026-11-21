@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/hevpaths"
 	"io"
 	"net/http"
 	"os"
@@ -471,8 +472,7 @@ func fullQuestion(rec feed.Record, key, q string) string {
 	if !strings.HasSuffix(q, "…") {
 		return q
 	}
-	home, _ := os.UserHomeDir()
-	root := filepath.Join(home, "dispatch")
+	root := hevpaths.Dir(hevpaths.Orders)
 	var files []string
 	if rec.Thread.Kind == feed.ThreadOrchestrator {
 		rounds, _ := filepath.Glob(filepath.Join(root, "orch-"+rec.Thread.Name, "rounds", "*", "reply.md"))

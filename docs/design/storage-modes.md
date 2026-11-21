@@ -30,12 +30,34 @@ error: kit never falls back to files when the operator asked for Layer. `Peek`
 reports the mode without reading a secret, for status lines. Every piece with two
 modes calls this function rather than test for a key itself.
 
+## Data layout
+
+Every OSS surface keeps its files in one directory under `~/.hev/`, named for
+its hev layer `/v1` route (board memo #555):
+
+| Surface | Directory | Legacy directory kept when present | Override |
+| --- | --- | --- | --- |
+| Traces | `~/.hev/traces/` | `~/.hev/archive/` | `HEV_ARCHIVE_DIR`, `[archive] dir` |
+| Board | `~/.hev/board/` | none | `HEV_BOARD_DIR`, `[board] dir` |
+| Orders (dispatch run records) | `~/.hev/orders/` | `~/dispatch/` | `HEV_ORDERS_DIR` |
+| Peers | `~/.hev/peers/` | `~/.local/state/peers-v2/` | `HEV_PEERS_STATE` |
+| Hooks | `~/.hev/hooks/` | none | none |
+| Evidence | `~/.hev/evidence/` | none | `HEV_EVIDENCE_DIR` |
+
+`internal/hevpaths` applies one rule per surface: the override wins; else
+`~/.hev/<surface>/` if it exists; else the legacy directory if it exists;
+else `~/.hev/<surface>/`. Nothing is moved, so live hosts on legacy paths keep
+working, and `hev up` creates only the resolved directories, never a unified
+directory beside a kept legacy one (it would take over as soon as it existed).
+In Layer mode traces and the board leave the disk (below); `hev up` in that
+mode creates no local surface directories and unloads the local dashboard.
+
 ## Where each piece stands
 
 | Piece | Filesystem mode | Layer mode |
 | --- | --- | --- |
 | Board | `~/.hev/board`, one JSON file per thread, BM25 search | unchanged |
-| Trace capture | file archive under `~/.hev/archive/<namespace>/` | unchanged |
+| Trace capture | file archive under `~/.hev/traces/<namespace>/` | unchanged |
 | App capture (`hev collect`) | archive namespace `<prefix>-<app namespace>` per app namespace, grep search; app boards and envelopes under the archive root ([app traces](../app-traces.md)) | Layer namespaces, hybrid |
 | Trace images | bytes in `<archive>/<namespace>/blobs`, metadata on block rows | bytes stay in the same local `blobs` directory; rows carry metadata only |
 | Find / query / search | list/show over the archive; lexical search | unchanged (hybrid) |
@@ -54,7 +76,8 @@ systemd, installs the skills, and starts nothing in Docker. hevd writes
 through `index.Archive`, the storage surface cut out of `*layer.Client`; the
 Layer client is one implementation and `internal/filearchive` is the other.
 
-The file archive lives at `~/.hev/archive/<namespace>/` (namespace default
+The file archive lives at `~/.hev/traces/<namespace>/` (legacy hosts:
+`~/.hev/archive/<namespace>/`; see Data layout) (namespace default
 `hev-traces`). `[archive] dir` in the config or `HEV_ARCHIVE_DIR` moves the
 root. It holds `sessions/<shard>/<id>.json`, `chunks/<shard>/<id>.jsonl`,
 `blocks/<shard>/<id>.jsonl`, `instructions.jsonl` and `index/`. Every write
@@ -96,7 +119,7 @@ session in either mode.
 
 ### Peers
 
-**Today.** Files only: `~/.local/state/peers-v2` (or `HEV_PEERS_STATE`),
+**Today.** Files only: `~/.hev/peers` (legacy hosts `~/.local/state/peers-v2`; `HEV_PEERS_STATE` wins),
 JSONL journals behind the `peers.Store` interface with `platformops.LockPath`.
 The optional hevd listener is configured under `[peers]`. Never calls Layer.
 
@@ -110,8 +133,9 @@ exactly-once receipts) are file semantics Layer does not offer directly.
 ### Dispatch
 
 **Today.** Files only: `~/.config/hev/dispatch.toml`, run records under
-`~/dispatch/<name>/` (order, meta, result, supervisor state, worktree,
-evidence), `~/dispatch/.queue/`. The only Layer touchpoint is a per-host
+`~/.hev/orders/<name>/` (legacy hosts `~/dispatch/<name>/`: order, meta,
+result, supervisor state, worktree, evidence), and the queue beside them in
+`.queue/`. The only Layer touchpoint is a per-host
 `namespace` passed to workers as `HEVLAYER_NAMESPACE` so their traces land in
 that archive. Follow-through orchestrators post handoffs with `hev board post`, so it already
 follows the board's mode.

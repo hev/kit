@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         # Kill the actual supervisor while its harness is still gated. A
         # backstop invocation must recover capacity and stop the orphan.
         assert "position 1" in submit("after-crash")
-        supervisor = json.loads((root / "dispatch/third/supervisor.json").read_text())["pid"]
+        supervisor = json.loads((root / ".hev/orders/third/supervisor.json").read_text())["pid"]
         os.kill(supervisor, signal.SIGKILL)
         wait_for(lambda: subprocess.run([real_tmux, "-S", socket, "has-session", "-t", "d-third"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0, "dead supervisor session")
         cli("sweep")
@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         assert "cancelled queued" in cli("stop", "cancel-two")
         assert not [r for r in inventory() if r["state"] == "queued"]
         (root / "release-after-crash").touch()
-        wait_for(lambda: (root / "dispatch/after-crash/result.json").exists() and json.loads((root / "dispatch/after-crash/result.json").read_text()).get("end", "0001").startswith("20"), "last result")
+        wait_for(lambda: (root / ".hev/orders/after-crash/result.json").exists() and json.loads((root / ".hev/orders/after-crash/result.json").read_text()).get("end", "0001").startswith("20"), "last result")
         assert starts() == ["first", "second", "third", "after-crash"], starts()
         # result.json's end is not the supervisor's exit: it still writes the
         # attention notice, removes its records and drains the queue in HOME.

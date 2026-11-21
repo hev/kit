@@ -128,7 +128,7 @@ func TestUpWithoutAKeyKeepsTracesInFiles(t *testing.T) {
 	if !strings.Contains(got, "launchctl bootstrap") {
 		t.Fatalf("hevd not installed:\n%s", got)
 	}
-	archive := filepath.Join(home, ".hev", "archive", "hev-traces")
+	archive := filepath.Join(home, ".hev", "traces", "hev-traces")
 	if !strings.Contains(out.String(), "traces are kept in files under "+archive) || strings.Contains(out.String(), "turbopuffer") {
 		t.Fatalf("output:\n%s", &out)
 	}

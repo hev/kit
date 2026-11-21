@@ -67,6 +67,9 @@ jobs:
       - name: Dispatch FIFO CLI acceptance
         run: python3 scripts/test-dispatch-queue.py "$RUNNER_TEMP/hev-orchestrators"
 
+      - name: E2E OSS -> Pro funnel (temporary homes, private tmux, loopback Pro stub)
+        run: python3 scripts/test-e2e-oss-pro.py "$RUNNER_TEMP/hev-orchestrators"
+
       - name: Stats compact frontend path (no browser)
         run: node scripts/test-stats-path.cjs
 

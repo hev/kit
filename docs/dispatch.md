@@ -1,8 +1,20 @@
 # Dispatch agent work
 
 `hev dispatch` sends an order to a configured machine and leaves a durable run
-record under `~/dispatch/<name>/`. Dispatch works without a daemon. Trace
+record under `~/.hev/orders/<name>/`. Dispatch works without a daemon. Trace
 capture still requires the normal capture/indexing setup.
+
+Run records live in the orders directory: `HEV_ORDERS_DIR` when set, else
+`~/.hev/orders/`, except on a machine that already has `~/dispatch/` and no
+`~/.hev/orders/`, which keeps `~/dispatch/` (every host set up before the
+unified `~/.hev/<surface>/` layout). Paths below written `~/dispatch/` mean that
+directory. Each host resolves its own: a sender never names the target's path.
+
+With no dispatch config, `hev up` writes `~/.config/hev/dispatch.toml` (mode
+0600) naming this machine as the local host `here` (`default_host = "here"`,
+`[hosts.here] local = true`, `workspace = "~/workspace"` or the workspace
+chosen in `hev onboard`). An existing config, or one named by
+`HEV_DISPATCH_CONFIG`, is never written.
 
 Create `~/.config/hev/dispatch.toml` on the machine sending work. Configure `notify` separately on each target;
 the supervisor reads its target configuration again at completion:
