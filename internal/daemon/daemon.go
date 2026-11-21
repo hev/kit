@@ -5,10 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/attention"
-	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/feed"
-	"github.com/hev/kit/internal/harness"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,8 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/feed"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/license"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
@@ -98,6 +99,9 @@ func Run(ctx context.Context) error {
 	}
 
 	defer startSecrets(ctx, logger)()
+	licenseCtx, stopLicense := context.WithCancel(ctx)
+	defer stopLicense()
+	go license.Refresh(licenseCtx)
 
 	cfg, err := LoadConfig()
 	if err != nil {
