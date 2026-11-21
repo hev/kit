@@ -17,7 +17,8 @@ type apiRequest struct {
 	Body       json.RawMessage `json:"body"`
 }
 
-var apiPeerID = regexp.MustCompile(`^[A-Za-z0-9._-]+:[A-Za-z0-9._-]+$`)
+var apiPeerID = regexp.MustCompile(`^[A-Za-z0-9._-]+:[A-Za-z0-9._%:-]+$`)
+var apiSender = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._:-]+$`)
 
 // HandleAPIRPC is for a trusted execution account. It exposes inbox-only
 // delivery and never calls the interactive terminal paste path.
@@ -143,7 +144,7 @@ func (e *Engine) apiSend(ctx context.Context, q apiRequest, p Peer) (int, any) {
 		Title       string `json:"title"`
 		Agent       string `json:"from_agent"`
 	}
-	if json.Unmarshal(q.Body, &body) != nil || !validSender(body.From) || strings.TrimSpace(body.Text) == "" || len(body.Text) > 4_000_000 || len(body.ID) > 640 {
+	if json.Unmarshal(q.Body, &body) != nil || !apiSender.MatchString(body.From) || strings.TrimSpace(body.Text) == "" || len(body.Text) > 4_000_000 || len(body.ID) > 640 {
 		return 400, nil
 	}
 	if presence := e.apiPresence(ctx, p, q.ID); presence["role"] == "offline" {
