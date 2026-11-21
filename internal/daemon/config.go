@@ -14,6 +14,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/version"
@@ -37,6 +38,7 @@ type Config struct {
 	// Local is the stack `hev up` owns.
 	Local LocalConfig
 
+	Kit    *KitConfig `json:"-"`
 	Invite *InviteConfig
 
 	// S3
@@ -150,6 +152,8 @@ type localFileConfig struct {
 }
 
 type fileConfig struct {
+	Kit          *KitConfig           `toml:"kit,omitempty"`
+	KitPrior     *layerConfig         `toml:"kit_prior,omitempty"`
 	Skills       *skillsources.Config `toml:"skills,omitempty"`
 	Invite       *InviteConfig        `toml:"invite,omitempty"`
 	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
@@ -382,7 +386,7 @@ func applyConfigFile(c *Config) error {
 	var fc fileConfig
 	md, err := toml.DecodeFile(c.ConfigPath, &fc)
 	if err != nil {
-		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
+		return fmt.Errorf("read config %s: %s", c.ConfigPath, redact.HideKitKeys(err.Error(), ""))
 	}
 	if md.IsDefined("projects") {
 		fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")
@@ -399,6 +403,7 @@ func applyConfigFile(c *Config) error {
 	if fc.Layer.Store != "" {
 		c.LayerStore = fc.Layer.Store
 	}
+	c.Kit = fc.Kit
 	c.Invite = fc.Invite
 	if fc.Archive != nil && fc.Archive.Namespace != "" && fc.Layer.Namespace == "" {
 		c.LayerNamespace = fc.Archive.Namespace

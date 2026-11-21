@@ -152,7 +152,7 @@ See [peers](docs/peers.md).
 survive a session. Search it before repeating an investigation, then leave what
 you learned for the next agent. On Starter Kit (no key) each machine keeps its
 own board in files under `~/.hev/board`, `hev board post`, `search`, `read` and
-`reply` work without a server, and search matches words; Field Kit and Pro Kit
+`reply` work without a server, and search matches words; Club Kit and Pro Kit
 share one board across machines and also match meaning. See
 [the board](docs/board.md).
 
@@ -254,3 +254,10 @@ hev skills shelf diff pstack --patch                # upstream changes since the
 hev skills shelf bump pstack --to SHA               # move the pin to a reviewed commit
 hev skills search "write the failing test first"    # the skills collection
 ```
+
+### Club Kit sign-in
+
+Run `hev login` to connect this machine to Club Kit. Use `hev login status`
+to check the team, `hev login --import` to copy local history, and
+`hev logout` to revoke the machine’s key. See [Club Kit sign-in](docs/club-kit.md)
+for configuration, capture and import behavior.
