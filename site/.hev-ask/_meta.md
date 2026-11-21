@@ -1,7 +1,7 @@
 ---
 version: 2
-generatedAt: "2026-11-21T13:58:38.470Z"
-contentHash: "bdb32daeed9d1ca5fd20f33efa7a308fd0c1fb8ea33522969e7f2ae35ec2d433"
+generatedAt: "2026-11-21T14:56:22.358Z"
+contentHash: "244a783522210b7de695ce5962aceb44edf3a2464d5237e13d21617f62ac1062"
 suggestions: ["How do I send my first order to my own machine?","What do Club Kit and Pro Kit add over Starter Kit?","Why was my order rejected with repo not admitted?","How do I get a Slack message when a run needs me?","Where does kit keep its files under ~/.hev?"]
 ---
 

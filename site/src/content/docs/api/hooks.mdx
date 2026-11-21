@@ -12,6 +12,10 @@ import Callout from "../../../components/docs/Callout.astro";
 import CodeTabs from "../../../components/docs/CodeTabs.astro";
 import LinkGrid from "../../../components/docs/LinkGrid.astro";
 
+<Callout label="Early access / 0.7 rollout">
+The `/v1/hooks` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
+</Callout>
+
 The hooks API is the hosted side of [hooks](/docs/hooks). In OSS hooks are
 local: `hev hook EVENT --harness claude|codex` normalizes the harness's hook
 JSON to `hev.hook.event/v1`, runs `hev-hook-NAME` handlers on `PATH` under a
@@ -276,10 +280,6 @@ def verify(secret: str, headers: dict, body: bytes) -> bool:
 
 ```js
 import { createHmac, timingSafeEqual } from "node:crypto";
-
-<Callout label="Early access / 0.7 rollout">
-The `/v1/hooks` routes are rolling out to Club Kit and Pro Kit accounts on the 0.7 train; until they are on for your account, kit keeps this surface in its local folder. See the [API overview](/docs/api).
-</Callout>
 
 export function verify(secret, headers, body /* Buffer */) {
   const ts = headers["x-hev-timestamp"];
