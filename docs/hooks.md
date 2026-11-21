@@ -183,3 +183,9 @@ and Codex events to `/v1/hooks/events`. The hosted answer is merged with the
 local handlers under the same hook deadline. A failed request produces a
 warning and local handlers still decide the result. The per-host
 `events.jsonl` continues to record the redacted event and merged decision.
+
+Hosted webhook registrations accept public HTTPS endpoints. Deliveries use
+`X-Hev-Signature-256` with an HMAC-SHA256 over the Unix timestamp, a period,
+and the exact request body. Verify the timestamp and signature before using
+the payload. Observe deliveries can be repeated under the same delivery ID.
+Blocking deliveries run once and fail open on errors or timeout.

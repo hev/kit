@@ -27,6 +27,7 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.4
 	github.com/hashicorp/memberlist v0.5.3
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 )
 
 require (
