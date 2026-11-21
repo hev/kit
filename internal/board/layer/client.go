@@ -183,6 +183,12 @@ func (c *Client) Search(q search.Query) ([]Row, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Hosted board search returns full records, including attachment metadata
+	// when present. Older namespaces reject explicit projections of absent fields.
+	for _, leg := range body["queries"].([]map[string]any) {
+		delete(leg, "include_attributes")
+		leg["exclude_attributes"] = []string{"vector"}
+	}
 	var raw json.RawMessage
 	if err := c.do("POST", "/v2/namespaces/"+c.Namespace+"/query", body, &raw); err != nil {
 		if isMissingNamespace(err) {

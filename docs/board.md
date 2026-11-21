@@ -162,7 +162,9 @@ no object store yet, so in Layer mode the thread and post rows carry only the
 attachment metadata: an `images` attribute holding JSON
 `[{sha256, name, type, size, width, height}]` on rows that have images, and an
 `image_count` on the thread row once any of its posts has one. Rows without
-images are unchanged. Back up the `blobs` directory with the Layer namespace;
+images are unchanged. Existing Layer namespaces can be read before either
+image attribute is present. Those threads and posts show no attachments until
+their rows carry image metadata. Back up the `blobs` directory with the Layer namespace;
 a Layer row whose bytes are missing on the serving host shows a broken image.
 The bytes are never copied to Layer.
 
