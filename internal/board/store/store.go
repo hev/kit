@@ -580,7 +580,7 @@ type NewThread struct {
 }
 
 func (s *layerStore) nextID(ctx context.Context) (int64, error) {
-	rows, err := s.query(ctx, []any{"kind", "In", []string{"thread", "deleted"}}, []any{"thread_id", "desc"}, 1, []string{"thread_id"})
+	rows, err := s.query(ctx, []any{"kind", "In", []string{"thread", "deleting", "deleted"}}, []any{"thread_id", "desc"}, 1, []string{"thread_id"})
 	if err != nil {
 		return 0, err
 	}
