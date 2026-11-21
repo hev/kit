@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"math"
 	"net/http"
 	"strings"
@@ -54,6 +55,9 @@ func Inspect(b []byte, lim Limits) (Media, error) {
 		m, err := blob.Inspect(b)
 		if err != nil {
 			return Media{}, fmt.Errorf("%w: %v", ErrUnsupported, err)
+		}
+		if err := checkImageStructure(m.Type, b); err != nil {
+			return Media{}, fmt.Errorf("%w: the %s is truncated or corrupt (%v)", ErrUnsupported, strings.TrimPrefix(m.Type, "image/"), err)
 		}
 		return Media{Modality: "image", MIME: m.Type, Width: m.Width, Height: m.Height}, nil
 	case isBMFF(b):
@@ -238,6 +242,31 @@ func boxes(b []byte, start, end int) ([]box, error) {
 	return out, nil
 }
 
+// containerBoxes are the ISO BMFF boxes whose payload is only child boxes.
+var containerBoxes = map[string]bool{"moov": true, "trak": true, "mdia": true, "minf": true, "stbl": true,
+	"edts": true, "dinf": true, "mvex": true, "moof": true, "traf": true, "mfra": true}
+
+// checkContainers walks every container box below bs so that a child whose
+// declared size runs past its parent (and so past the file) is refused.
+func checkContainers(b []byte, bs []box, depth int) error {
+	if depth > 16 {
+		return errors.New("boxes nest too deeply")
+	}
+	for _, x := range bs {
+		if !containerBoxes[x.typ] {
+			continue
+		}
+		kids, err := boxes(b, x.start, x.end)
+		if err != nil {
+			return err
+		}
+		if err := checkContainers(b, kids, depth+1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func find(bs []box, typ string) (box, bool) {
 	for _, x := range bs {
 		if x.typ == typ {
@@ -253,6 +282,9 @@ func inspectBMFF(b []byte) (Media, error) {
 	}
 	top, err := boxes(b, 0, len(b))
 	if err != nil {
+		return corrupt(err.Error())
+	}
+	if err := checkContainers(b, top, 0); err != nil {
 		return corrupt(err.Error())
 	}
 	ftyp := top[0]
@@ -480,8 +512,11 @@ func inspectWebM(b []byte) (Media, error) {
 	if seg == nil {
 		return corrupt("no Segment")
 	}
-	// Scan the segment's children up to the first Cluster: Info and Tracks
-	// come before the media data.
+	// Walk every child of the segment to its end. Info and Tracks come
+	// before the media; each Cluster's children are bound-checked too, so a
+	// Cluster or block that declares more bytes than the file holds is a
+	// truncated file. A Cluster of unknown size (a live MediaRecorder file)
+	// runs until the next level-1 element: its children are walked in line.
 	m := Media{Modality: "video", MIME: "video/webm"}
 	foundInfo := false
 	for off := seg.start; off < seg.end; {
@@ -489,19 +524,27 @@ func inspectWebM(b []byte) (Media, error) {
 		if err != nil || n > 4 {
 			return corrupt("segment element id")
 		}
-		if id == idCluster {
-			break
-		}
 		size, sn, unknown, err := vint(b, off+n, false)
 		if err != nil {
 			return corrupt("segment element size")
 		}
 		p := off + n + sn
-		if unknown || size > uint64(seg.end-p) {
-			return corrupt(fmt.Sprintf("element %#x runs past the end of the file", id))
+		if unknown {
+			if id != idCluster {
+				return corrupt(fmt.Sprintf("element %#x has an unknown size", id))
+			}
+			off = p
+			continue
+		}
+		if size > uint64(seg.end-p) {
+			return corrupt(fmt.Sprintf("element %#x declares %d bytes past the end of the file", id, size-uint64(seg.end-p)))
 		}
 		end := p + int(size)
 		switch id {
+		case idCluster:
+			if _, err := elements(b, p, end); err != nil {
+				return corrupt(err.Error())
+			}
 		case idInfo:
 			foundInfo = true
 			kids, err := elements(b, p, end)
@@ -582,4 +625,177 @@ func inspectWebM(b []byte) (Media, error) {
 		m.Width, m.Height = 0, 0
 	}
 	return m, nil
+}
+
+// ── Image structure ──
+
+// checkImageStructure walks an image's container far enough to know it is
+// whole: every chunk, segment or block it declares lies inside the file and
+// the format's end marker is present. blob.Inspect reads only the header, so
+// a file cut after its header would otherwise pass.
+func checkImageStructure(typ string, b []byte) error {
+	switch typ {
+	case "image/png":
+		return checkPNG(b)
+	case "image/jpeg":
+		return checkJPEG(b)
+	case "image/gif":
+		return checkGIF(b)
+	case "image/webp":
+		return checkWebP(b)
+	}
+	return fmt.Errorf("unknown image type %s", typ)
+}
+
+// checkPNG: IHDR first, at least one IDAT, and IEND, every chunk inside the
+// file with a matching CRC.
+func checkPNG(b []byte) error {
+	off := 8
+	sawIDAT := false
+	for i := 0; ; i++ {
+		if len(b)-off < 12 {
+			return errors.New("no IEND chunk")
+		}
+		n := binary.BigEndian.Uint32(b[off:])
+		typ := string(b[off+4 : off+8])
+		if uint64(n) > uint64(len(b)-off-12) {
+			return fmt.Errorf("the %q chunk runs past the end of the file", typ)
+		}
+		if crc32.ChecksumIEEE(b[off+4:off+8+int(n)]) != binary.BigEndian.Uint32(b[off+8+int(n):]) {
+			return fmt.Errorf("the %q chunk fails its CRC", typ)
+		}
+		if i == 0 && typ != "IHDR" {
+			return errors.New("the first chunk is not IHDR")
+		}
+		switch typ {
+		case "IDAT":
+			sawIDAT = true
+		case "IEND":
+			if !sawIDAT {
+				return errors.New("no IDAT chunk")
+			}
+			return nil
+		}
+		off += 12 + int(n)
+	}
+}
+
+// checkJPEG: SOI, marker segments inside the file up to SOS, then an EOI
+// after the scan data.
+func checkJPEG(b []byte) error {
+	off := 2
+	for {
+		for off < len(b) && b[off] == 0xff && off+1 < len(b) && b[off+1] == 0xff {
+			off++ // fill bytes
+		}
+		if len(b)-off < 2 || b[off] != 0xff {
+			return errors.New("no SOS marker")
+		}
+		marker := b[off+1]
+		switch {
+		case marker == 0xd9:
+			return errors.New("EOI before any scan")
+		case marker == 0x01 || (marker >= 0xd0 && marker <= 0xd7):
+			off += 2
+			continue
+		}
+		if len(b)-off < 4 {
+			return fmt.Errorf("marker %#x is cut short", marker)
+		}
+		n := int(binary.BigEndian.Uint16(b[off+2:]))
+		if n < 2 || n > len(b)-off-2 {
+			return fmt.Errorf("marker %#x runs past the end of the file", marker)
+		}
+		off += 2 + n
+		if marker == 0xda {
+			break
+		}
+	}
+	if !bytes.Contains(b[off:], []byte{0xff, 0xd9}) {
+		return errors.New("no EOI marker")
+	}
+	return nil
+}
+
+// checkGIF walks the blocks after the screen descriptor: every extension
+// and image lies inside the file, there is at least one image, and the
+// trailer ends it.
+func checkGIF(b []byte) error {
+	if len(b) < 13 {
+		return errors.New("the header is cut short")
+	}
+	off := 13
+	if b[10]&0x80 != 0 {
+		off += 3 << (b[10]&7 + 1)
+	}
+	subBlocks := func() error {
+		for {
+			if off >= len(b) {
+				return errors.New("a data block runs past the end of the file")
+			}
+			n := int(b[off])
+			off++
+			if n == 0 {
+				return nil
+			}
+			if n > len(b)-off {
+				return errors.New("a data block runs past the end of the file")
+			}
+			off += n
+		}
+	}
+	images := 0
+	for {
+		if off >= len(b) {
+			return errors.New("no trailer")
+		}
+		switch b[off] {
+		case 0x3b:
+			if images == 0 {
+				return errors.New("no image")
+			}
+			return nil
+		case 0x21:
+			off += 2
+			if err := subBlocks(); err != nil {
+				return err
+			}
+		case 0x2c:
+			if len(b)-off < 11 {
+				return errors.New("an image descriptor is cut short")
+			}
+			flags := b[off+9]
+			off += 10
+			if flags&0x80 != 0 {
+				off += 3 << (flags&7 + 1)
+			}
+			off++ // LZW minimum code size
+			if err := subBlocks(); err != nil {
+				return err
+			}
+			images++
+		default:
+			return fmt.Errorf("unknown block %#x", b[off])
+		}
+	}
+}
+
+// checkWebP: the RIFF size matches the file and every chunk lies inside it.
+func checkWebP(b []byte) error {
+	riff := uint64(binary.LittleEndian.Uint32(b[4:]))
+	if riff+8 != uint64(len(b)) {
+		return fmt.Errorf("the RIFF header declares %d bytes but the file has %d", riff+8, len(b))
+	}
+	for off := 12; off < len(b); {
+		if len(b)-off < 8 {
+			return errors.New("a chunk header is cut short")
+		}
+		n := uint64(binary.LittleEndian.Uint32(b[off+4:]))
+		padded := n + n&1
+		if padded > uint64(len(b)-off-8) {
+			return fmt.Errorf("the %q chunk runs past the end of the file", string(b[off:off+4]))
+		}
+		off += 8 + int(padded)
+	}
+	return nil
 }

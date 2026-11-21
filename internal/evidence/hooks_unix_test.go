@@ -40,11 +40,15 @@ func TestHooksFireWithMetadataOnly(t *testing.T) {
 	secret := "ghp_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
 	img := pngOf(t, 32, 32)
 	textBody := "unique-text-body-marker " + secret
-	p, err := s.Create(Meta{Title: "hooked " + secret, Source: "browser-use"})
+	aws := "AKIA" + "ABCDEFGHIJKLMNOP"
+	p, err := s.Create(Meta{Title: "hooked " + secret, Source: "browser-use", Order: "order-" + aws, Branch: secret, Author: aws})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, item, err := s.AddItem(p.ID, ItemInput{Data: img, Name: "shot.png", Caption: "cap " + secret})
+	// The validator's case: a secret-pattern item name reached
+	// evidence-created's metadata. Names, metadata keys and values too.
+	_, item, err := s.AddItem(p.ID, ItemInput{Data: img, Name: "shot-" + secret + ".png", Caption: "cap " + secret,
+		Metadata: map[string]string{"key-" + secret: aws, "viewport": "390x844"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +62,7 @@ func TestHooksFireWithMetadataOnly(t *testing.T) {
 	if _, err := s.Seal(p.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Put(Meta{Title: "one-shot"}, []ItemInput{{Data: img, Name: "a.png"}}, nil); err != nil {
+	if _, err := s.Put(Meta{Title: "one-shot", Session: secret}, []ItemInput{{Data: img, Name: secret + ".png", Metadata: map[string]string{aws: secret}}}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,13 +87,17 @@ func TestHooksFireWithMetadataOnly(t *testing.T) {
 	if n := bytes.Count(log, []byte("\n")); n != len(want) {
 		t.Fatalf("events.jsonl has %d lines:\n%s", n, log)
 	}
-	forbidden := [][]byte{[]byte(secret), img[:16], []byte(base64.StdEncoding.EncodeToString(img)[:24]), []byte("unique-text-body-marker")}
+	forbidden := [][]byte{[]byte(secret), []byte(aws), img[:16], []byte(base64.StdEncoding.EncodeToString(img)[:24]), []byte("unique-text-body-marker")}
 	for i, b := range append(payloads, log) {
 		for _, f := range forbidden {
 			if bytes.Contains(b, f) {
 				t.Fatalf("payload %d carries %q:\n%s", i, f, b)
 			}
 		}
+	}
+	// The item is still described, under its redacted name.
+	if !bytes.Contains(payloads[1], []byte(`"name":"001-shot--REDACTED-`)) {
+		t.Fatalf("evidence-updated lost the redacted item name:\n%s", payloads[1])
 	}
 	var sealed struct {
 		Schema, Event, Harness string

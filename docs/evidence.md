@@ -65,10 +65,20 @@ caller gives.
 
 - SVG is refused (it can carry scripts); export it as PNG. So are BMP, TIFF,
   ICO, Matroska, binary files and invalid UTF-8.
+- An image must be whole, not just have a readable header: a PNG needs `IHDR`
+  first, an `IDAT` and an `IEND`, with every chunk inside the file and its CRC
+  matching; a JPEG needs every marker segment inside the file up to the scan
+  and an `EOI` after it; a GIF needs at least one image, every block inside
+  the file, and its trailer; a WebP's RIFF size must equal the file size, with
+  every chunk inside it.
 - Video containers are parsed in Go, with no `ffmpeg`: the duration comes from
-  `mvhd` (MP4, MOV) or the WebM `Info` timecode scale and duration. A truncated
-  or corrupt container, or one over a cap, is refused. A WebM written live
-  without a duration (a browser's MediaRecorder) is kept without
+  `mvhd` (MP4, MOV) or the WebM `Info` timecode scale and duration. Every
+  MP4/MOV box (top level and inside `moov`, `trak`, `mdia`, `minf`, `stbl` and
+  the other container boxes) and every WebM element (the Segment, each Cluster
+  and the blocks inside it) must fit in the file: one that declares more bytes
+  than the file holds is a truncated file and is refused, as is a corrupt
+  container or one over a cap. A WebM written live (a browser's MediaRecorder:
+  Segment and Cluster of unknown size, no duration) is kept without
   `duration_ms`. Packages on this machine have no video poster frame.
 - Text is stored as a file and, at 64 KiB or less, also inlined in the
   manifest with its `line_count`.
@@ -86,9 +96,14 @@ appears, so one bad file leaves no package behind.
 ## Redaction
 
 Every text item and every manifest string a person or agent writes (`title`,
-`summary`, `caption`, `url`, `app`, `step`, `metadata` values, and claim
-`text` and `criterion`) passes through kit's secret scrubber before it reaches
-the disk. A found secret becomes `[REDACTED:rule#fingerprint]`. Text items are
+`summary`, the provenance fields `order`, `session`, `gate`, `repo`,
+`branch`, `commit`, `host` and `author`, item names, `caption`, `url`, `app`,
+`step`, `metadata` keys and values, and claim `text` and `criterion`) passes
+through kit's secret scrubber before it reaches the disk or a hook event. A
+found secret becomes `[REDACTED:rule#fingerprint]`; in an item name the marker
+is then made file-name safe (`002-REDACTED-github-pat-4f31…-.txt`). A tag that
+holds a secret is refused, since tags are matched exactly. Error messages
+never repeat a refused name or key in clear. Text items are
 marked `redacted: true`, and the `sha256` in the manifest is of the stored,
 redacted bytes. Pixels and video frames cannot be scrubbed: do not capture a
 screen that shows a credential or client data you may not keep.

@@ -3,6 +3,7 @@ package evidence
 import (
 	"bytes"
 	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
@@ -102,6 +103,44 @@ func webmOf(doc string, durationMs float64, w, h int) []byte {
 		info = append(info, ebml(idDuration, binary.BigEndian.AppendUint64(nil, math.Float64bits(durationMs))))
 	}
 	tracks := ebml(idTracks, ebml(idTrackEntry, ebml(idVideo, ebml(idPixelWidth, []byte{byte(w >> 8), byte(w)}), ebml(idPixelHeight, []byte{byte(h >> 8), byte(h)}))))
-	seg := ebml(idSegment, ebml(idInfo, info...), tracks, ebml(idCluster, []byte("frames")))
+	seg := ebml(idSegment, ebml(idInfo, info...), tracks, webmCluster())
 	return append(head, seg...)
+}
+
+// webmCluster is a Cluster with a Timecode and one SimpleBlock.
+func webmCluster() []byte {
+	return ebml(idCluster, ebml(0xe7, []byte{0}), ebml(0xa3, []byte{0x81, 0, 0, 0x80, 'f', 'r', 'a', 'm', 'e'}))
+}
+
+// unknownSize is an 8-byte EBML size vint with every value bit set: "size
+// unknown", the way a live MediaRecorder writes Segment and Cluster.
+var unknownSize = []byte{0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+
+// webmLive is a live-recording WebM: the Segment and its Cluster have an
+// unknown size. clusterExtra > 0 instead gives the Cluster a known size
+// that declares that many bytes more than the file holds.
+func webmLive(clusterExtra int) []byte {
+	head := ebml(idEBML, ebml(idDocType, []byte("webm")))
+	info := ebml(idInfo, ebml(idTimecodeScale, []byte{0x0f, 0x42, 0x40}))
+	tracks := ebml(idTracks, ebml(idTrackEntry, ebml(idVideo, ebml(idPixelWidth, []byte{0x02, 0x80}), ebml(idPixelHeight, []byte{0x01, 0xe0}))))
+	body := append(ebml(0xe7, []byte{0}), ebml(0xa3, []byte{0x81, 0, 0, 0x80, 'f', 'r', 'a', 'm', 'e'})...)
+	cluster := []byte{0x1f, 0x43, 0xb6, 0x75}
+	if clusterExtra > 0 {
+		size := binary.BigEndian.AppendUint64(nil, uint64(len(body)+clusterExtra))
+		size[0] = 0x01
+		cluster = append(cluster, size...)
+	} else {
+		cluster = append(cluster, unknownSize...)
+	}
+	cluster = append(cluster, body...)
+	seg := append([]byte{0x18, 0x53, 0x80, 0x67}, unknownSize...)
+	seg = append(append(append(seg, info...), tracks...), cluster...)
+	return append(head, seg...)
+}
+
+// pngChunk is one PNG chunk with its CRC.
+func pngChunk(typ string, data []byte) []byte {
+	b := binary.BigEndian.AppendUint32(nil, uint32(len(data)))
+	b = append(append(b, typ...), data...)
+	return binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(b[4:]))
 }

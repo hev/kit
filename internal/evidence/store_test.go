@@ -323,19 +323,86 @@ func TestRedactionBeforeDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	open, _ := s.Create(Meta{Title: "open"})
-	s.AddItem(open.ID, ItemInput{Data: []byte("key=" + aws), Name: "stdin.txt", Caption: secret})
+	open, err := s.Create(Meta{Title: "open", Order: "order-" + secret, Session: secret, Gate: aws, Repo: "https://user:" + secret + "@x.test/r",
+		Branch: "b-" + secret, Commit: aws, Host: secret, Author: aws})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Secrets in item names (given and derived from a path) and metadata
+	// keys and values.
+	named := writeFile(t, in, "shot-"+secret+".png", pngOf(t, 4, 4))
+	for _, in := range []ItemInput{
+		{Data: []byte("key=" + aws), Name: "stdin.txt", Caption: secret},
+		{Data: []byte("x"), Name: secret + ".txt", Metadata: map[string]string{secret: "v", "aws-" + aws: aws}},
+		{Data: []byte("x"), Name: "API_KEY=" + "q8Zr2Lw9Xv4Tn7Bp1Hc6Jd3Fk" + ".log"},
+		{Path: named},
+	} {
+		if _, _, err := s.AddItem(open.ID, in); err != nil {
+			t.Fatal(err)
+		}
+	}
 	s.AddClaim(open.ID, ClaimInput{Text: secret, Criterion: aws})
+	// A secret in a refused name or key is not repeated in the error.
+	for _, in := range []ItemInput{
+		{Data: []byte("x"), Name: "../" + secret},
+		{Data: []byte("x"), Name: "ok.txt", Metadata: map[string]string{strings.Repeat("k", 65) + secret: "v"}},
+		{Data: []byte{0xff, 0xfe, 0}, Name: secret + ".bin"},
+	} {
+		if _, _, err := s.AddItem(open.ID, in); err == nil || strings.Contains(err.Error(), secret) {
+			t.Fatalf("AddItem error %v", err)
+		}
+	}
+	if _, err := s.Create(Meta{Title: "t", Tags: []string{"ok", secret}}); !errors.Is(err, ErrInvalid) || strings.Contains(err.Error(), secret) {
+		t.Fatalf("secret tag: %v", err)
+	}
+	if _, err := s.Create(Meta{Title: "t", Source: secret}); err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("secret source: %v", err)
+	}
+	hiEntropy := "q8Zr2Lw9Xv4Tn7Bp1Hc6Jd3Fk"
 	filepath.WalkDir(s.Root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		b, _ := os.ReadFile(path)
-		if strings.Contains(string(b), secret) || strings.Contains(string(b), aws) {
-			t.Errorf("%s holds a secret:\n%s", path, b)
+		for _, leak := range []string{secret, aws, hiEntropy} {
+			if strings.Contains(string(b), leak) || strings.Contains(path, leak) {
+				t.Errorf("%s holds a secret:\n%s", path, b)
+			}
 		}
 		return nil
 	})
+	// Ordinary names are kept; redacted ones still name their file.
+	op, err := s.Load(open.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, it := range op.Items {
+		names = append(names, it.Name)
+		if _, err := os.Stat(filepath.Join(s.Root, open.ID, it.Name)); err != nil {
+			t.Errorf("item %s: %v", it.Name, err)
+		}
+	}
+	if names[0] != "001-stdin.txt" || !strings.HasPrefix(names[1], "002-REDACTED-") || !strings.HasSuffix(names[1], ".txt") ||
+		!strings.HasPrefix(names[2], "003-API_KEY-REDACTED-") || !strings.HasPrefix(names[3], "004-shot--REDACTED-") {
+		t.Errorf("item names %v", names)
+	}
+	if len(op.Items[1].Metadata) != 2 || op.Items[1].Metadata["aws-"+aws] != "" {
+		t.Errorf("metadata %v", op.Items[1].Metadata)
+	}
+	if op.Order != "order-[REDACTED:"+strings.SplitN(op.Order, "[REDACTED:", 2)[1] {
+		t.Errorf("order %q", op.Order)
+	}
+	// Ordinary tags, names and metadata are untouched.
+	plain, err := s.Put(Meta{Title: "plain", Tags: []string{"Checkout", "mobile"}, Order: "kit-evidence", Branch: "d/x"},
+		[]ItemInput{{Data: []byte("ok\n"), Name: "Screen Shot 1.txt", Metadata: map[string]string{"viewport": "390x844"}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Items[0].Name != "001-Screen-Shot-1.txt" || plain.Items[0].Metadata["viewport"] != "390x844" ||
+		strings.Join(plain.Tags, ",") != "checkout,mobile" || plain.Order != "kit-evidence" || plain.Branch != "d/x" {
+		t.Errorf("plain package changed: %+v", plain)
+	}
 	manifest, _ := os.ReadFile(filepath.Join(s.Root, p.ID, ManifestName))
 	for _, keep := range []string{"leak [REDACTED:", "status ok", "caption [REDACTED:", "claim [REDACTED:"} {
 		if !strings.Contains(string(manifest), keep) {

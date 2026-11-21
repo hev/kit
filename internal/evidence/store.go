@@ -155,25 +155,35 @@ func (s *Store) applyMeta(p *Package, m Meta) error {
 		}
 	}
 	if m.Source != "" && !oneOf(m.Source, Sources) {
-		return invalid("source %q is not one of %s", m.Source, strings.Join(Sources, ", "))
+		return invalid("source %q is not one of %s", s.scrub(m.Source), strings.Join(Sources, ", "))
 	}
 	if m.Role != "" && !oneOf(m.Role, Roles) {
-		return invalid("role %q is not agent or human", m.Role)
+		return invalid("role %q is not agent or human", s.scrub(m.Role))
+	}
+	// A tag is matched exactly by filters, so one that holds a secret is
+	// refused rather than stored as a redaction marker. Scrub before
+	// NormalizeTags lowercases: some secret patterns are case-sensitive.
+	for _, t := range m.Tags {
+		if s.scrub(t) != t {
+			return invalid("a tag looks like a secret; tags are stored and indexed in clear")
+		}
 	}
 	tags, err := NormalizeTags(m.Tags)
 	if err != nil {
 		return err
 	}
+	// Every free-text string is scrubbed before it can reach the manifest
+	// or a hook event.
 	p.Title, p.Summary = s.scrub(m.Title), s.scrub(m.Summary)
-	p.Source, p.Order, p.Session, p.Gate, p.Repo = m.Source, m.Order, m.Session, m.Gate, m.Repo
-	p.Branch, p.Commit, p.Host, p.Author, p.Role, p.Tags = m.Branch, m.Commit, m.Host, m.Author, m.Role, tags
+	p.Source, p.Order, p.Session, p.Gate, p.Repo = m.Source, s.scrub(m.Order), s.scrub(m.Session), s.scrub(m.Gate), s.scrub(m.Repo)
+	p.Branch, p.Commit, p.Host, p.Author, p.Role, p.Tags = s.scrub(m.Branch), s.scrub(m.Commit), s.scrub(m.Host), s.scrub(m.Author), m.Role, tags
 	return nil
 }
 
 // SafeName checks a caller's item name and returns its stored form without
 // the sequence prefix. A name with a path separator, a ".." segment, or a
 // control character is refused; other characters outside [A-Za-z0-9._-]
-// become '-'.
+// become '-'. Its errors never repeat the name, which may hold a secret.
 func SafeName(name string) (string, error) {
 	if name == "" {
 		return "", invalid("an item name is required")
@@ -185,21 +195,40 @@ func SafeName(name string) (string, error) {
 		return "", invalid("item name is not valid UTF-8")
 	}
 	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." || strings.Contains(name, "..") {
-		return "", invalid("item name %q must be a plain file name: no path separators or \"..\"", name)
+		return "", invalid("item name must be a plain file name: no path separators or \"..\"")
 	}
 	for _, r := range name {
 		if unicode.IsControl(r) {
-			return "", invalid("item name %q has a control character", name)
+			return "", invalid("item name has a control character")
 		}
 	}
 	if filepath.VolumeName(name) != "" || strings.Contains(name, ":") {
-		return "", invalid("item name %q must be a plain file name", name)
+		return "", invalid("item name must be a plain file name")
 	}
+	return sanitizeName(name), nil
+}
+
+func sanitizeName(name string) string {
 	clean := unsafeNameChars.ReplaceAllString(name, "-")
 	clean = strings.TrimLeft(clean, ".-_")
 	clean = strings.TrimRight(clean, ".")
 	if clean == "" {
 		clean = "item"
+	}
+	return clean
+}
+
+// itemName is SafeName with secrets redacted: the caller's name is checked
+// as given, then scrubbed both before and after sanitizing (sanitizing can
+// turn "KEY=value" into "KEY-value", which a different rule matches), so a
+// secret never reaches the stored file name, the manifest or a hook event.
+func (s *Store) itemName(name string) (string, error) {
+	if _, err := SafeName(name); err != nil {
+		return "", err
+	}
+	clean := sanitizeName(s.scrub(name))
+	if v := s.scrub(clean); v != clean {
+		clean = sanitizeName(v)
 	}
 	return clean, nil
 }
@@ -256,9 +285,10 @@ func (s *Store) prepare(in ItemInput, seq int) (prepared, error) {
 		}
 		data = b
 	}
-	clean, err := SafeName(name)
+	shown := s.scrub(name)
+	clean, err := s.itemName(name)
 	if err != nil {
-		return prepared{}, err
+		return prepared{}, fmt.Errorf("%q: %w", shown, err)
 	}
 	for _, f := range []struct {
 		name, v string
@@ -274,7 +304,7 @@ func (s *Store) prepare(in ItemInput, seq int) (prepared, error) {
 	var meta map[string]string
 	for k, v := range in.Metadata {
 		if k == "" || len(k) > 64 || !utf8.ValidString(k) {
-			return prepared{}, invalid("metadata key %q must be 1-64 bytes of UTF-8", k)
+			return prepared{}, invalid("metadata key %q must be 1-64 bytes of UTF-8", s.scrub(k))
 		}
 		if err := checkLen("metadata value", v, MaxMetadataValue); err != nil {
 			return prepared{}, err
@@ -282,11 +312,11 @@ func (s *Store) prepare(in ItemInput, seq int) (prepared, error) {
 		if meta == nil {
 			meta = map[string]string{}
 		}
-		meta[k] = s.scrub(v)
+		meta[s.scrub(k)] = s.scrub(v)
 	}
 	m, err := Inspect(data, s.Limits)
 	if err != nil {
-		return prepared{}, fmt.Errorf("%s: %w", name, err)
+		return prepared{}, fmt.Errorf("%s: %w", shown, err)
 	}
 	it := Item{ID: newID("evi_"), Seq: seq, Modality: m.Modality, Name: fmt.Sprintf("%03d-%s", seq, clean),
 		Caption: s.scrub(in.Caption), MIME: m.MIME, URL: s.scrub(in.URL), App: s.scrub(in.App), Step: s.scrub(in.Step),
@@ -323,7 +353,7 @@ func (s *Store) prepareClaim(p *Package, c ClaimInput, pending []Item) (Claim, e
 		return Claim{}, err
 	}
 	if c.Verdict != "" && !oneOf(c.Verdict, Verdicts) {
-		return Claim{}, invalid("verdict %q is not one of %s", c.Verdict, strings.Join(Verdicts, ", "))
+		return Claim{}, invalid("verdict %q is not one of %s", s.scrub(c.Verdict), strings.Join(Verdicts, ", "))
 	}
 	known := map[string]bool{}
 	for _, it := range append(append([]Item(nil), p.Items...), pending...) {
@@ -331,7 +361,7 @@ func (s *Store) prepareClaim(p *Package, c ClaimInput, pending []Item) (Claim, e
 	}
 	for _, id := range c.ItemIDs {
 		if !itemIDPattern.MatchString(id) || !known[id] {
-			return Claim{}, invalid("claim item %q is not an item of %s", id, p.ID)
+			return Claim{}, invalid("claim item %q is not an item of %s", s.scrub(id), p.ID)
 		}
 	}
 	return Claim{ID: newID("clm_"), Criterion: s.scrub(c.Criterion), Text: s.scrub(c.Text), Verdict: c.Verdict, ItemIDs: c.ItemIDs}, nil
