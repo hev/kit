@@ -75,6 +75,11 @@ kbd{font-family:var(--mono);font-size:.75em;border:1px solid var(--rule-2);borde
 .tabs{display:flex;gap:2px}
 .tabs button{border:none;padding:4px 10px;border-radius:4px;color:var(--muted)}
 .tabs button.on{background:var(--paper-warm);color:var(--ink)}
+.top [hidden]{display:none!important}
+.tabs a.tab{padding:4px 10px;border-radius:4px;color:var(--muted);text-decoration:none}
+.tabs a.tab:hover{color:var(--ink)}
+.tabs.sub{padding-left:14px;border-left:1px solid var(--rule)}
+.tabs.sub button{font-size:.88em}
 .spacer{flex:1}
 .range{display:flex;gap:2px;align-items:center;font-size:.85em;color:var(--muted)}
 .range button{border:none;padding:3px 9px;border-radius:4px;color:var(--muted)}
@@ -389,143 +394,64 @@ main>.status{padding:12px 24px}
 .tool-legend{font-size:12px;color:var(--muted)}
 svg .gapband{fill:var(--paper-warm);fill-opacity:.7}
 svg .gapmark{stroke:var(--muted-2);stroke-width:1.2;fill:none}
-/* ---------- asks: ask-rooted traces ---------- */
-#v-asks,#v-ask{flex-direction:column;overflow:auto;padding:18px}
-.ask-bar,.ask-orders{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;font-size:.85em}
-.ask-bar .k,.ask-orders .k{color:var(--muted);font-family:var(--mono)}
-.ask-bar select,.ask-bar input{font:inherit;padding:3px 8px;border:1px solid var(--rule-2);border-radius:6px;background:var(--paper);color:var(--ink);min-width:0;max-width:100%}
-.ask-bar label.f{display:inline-flex;gap:6px;align-items:center;min-width:0;max-width:100%}
-.ask-bar label.f .k{flex:none}
-.ask-bar label.f select{flex:0 1 auto}
-.ask-bar label.f input[type=checkbox]{margin:0;padding:0}
-.ask-bar input[type=search]{flex:1 1 12em}
-.ask-bar button.clear{font:inherit;border:0;background:none;color:var(--signal-dark);cursor:pointer;padding:0 2px}
-.ask-orders .chip{border:1px solid var(--rule-2);border-radius:999px;padding:1px 10px;color:var(--ink);background:var(--paper-warm);text-decoration:none;font-family:var(--mono);font-size:.95em}
-.ask-orders .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-table.grid.asks .sub{color:var(--muted);font-family:var(--mono);font-size:.82em;margin-top:2px}
-table.grid.asks td.ask-cell{max-width:560px}
-table.grid tr.untraced td{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--warn) 7%,transparent) 6px 12px)}
-.pill.warn{border-color:var(--warn);color:var(--warn)}
-/* Runs from before tracing are history, not a fault: neutral and dashed. */
-.pill.hist{border-style:dashed;color:var(--muted)}
-table.grid tr.pretrace td{color:var(--ink-soft)}
-.ask-hosts{overflow-wrap:anywhere}
-.ask-hosts .from{color:var(--c-user)}
-.ask-hosts .arr{color:var(--muted);white-space:pre}
-.ask-reason{color:var(--warn);font-size:.85em;margin-top:2px;overflow-wrap:anywhere}
-.runstate{font-family:var(--mono);font-size:.8em;padding:0 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap;flex:none}
-.st-done,.st-pass{color:#2e7d32}.st-closed{color:var(--muted)}.st-running,.st-queued{color:var(--c-tool)}.st-failed,.st-fail,.st-died,.st-timeout{color:var(--danger)}.st-needs-review,.st-blocked,.st-launch-unconfirmed{color:var(--warn)}
-.ask-head .crumb{font-size:.85em;color:var(--muted);overflow-wrap:anywhere}
-.ask-head .crumb a{text-decoration:none}
-.ask-head h1{font-size:1.1rem;font-weight:600;margin:2px 0 4px;max-width:1100px}
-.ask-head .meta{color:var(--muted);font-size:.85em;font-family:var(--mono);display:flex;gap:4px 14px;flex-wrap:wrap;margin:2px 0 10px}
-.ask-head .meta b{color:var(--ink);font-weight:500}
-.ask-empty{color:var(--muted);padding:14px}
-.wf-legend{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;font:11px var(--mono);color:var(--muted);margin:0 0 8px}
-.wf-legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
-.wf-legend i{display:inline-block;position:relative;width:16px;height:9px;border-radius:2px}
-.wf-legend i.dia{width:8px;height:8px;border-radius:0;transform:rotate(45deg);margin:0 3px}
-.ask-body{display:flex;gap:14px;align-items:flex-start;min-width:0}
-.wf{border:1px solid var(--rule-2);border-radius:8px;background:var(--panel);flex:1;min-width:0;overflow:hidden}
-.wf-row,.wf-axis{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr)}
-.ask-body.detail-open .wf-row,.ask-body.detail-open .wf-axis{grid-template-columns:minmax(0,320px) minmax(0,1fr)}
-.wf-axis{border-bottom:1px solid var(--rule-2);font:11px var(--mono);color:var(--muted);height:24px}
-.wf-axis .lab{border-right:1px solid var(--rule)}
-.wf-axis .track{position:relative;margin:0 64px 0 16px}
-.wf-axis .tick{position:absolute;top:5px;transform:translateX(-50%);white-space:nowrap}
-.wf-axis .tick:first-child{transform:none}.wf-axis .tick:last-child{transform:translateX(-100%)}
-.wf-row{min-height:28px;border-bottom:1px solid color-mix(in srgb,var(--rule) 70%,transparent)}
-.wf-row:hover{background:color-mix(in srgb,var(--pale) 55%,transparent)}
-.wf-row.pick{cursor:pointer}
-.wf-row.sel{background:color-mix(in srgb,var(--signal) 9%,transparent);box-shadow:inset 3px 0 0 var(--signal)}
-.wf-row .lab{padding:5px 10px;display:flex;gap:7px;align-items:center;min-width:0;overflow:hidden;font-size:.85em;border-right:1px solid var(--rule)}
-.wf-row .lab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:3em;flex:0 1 auto}
-.wf-row .lab .h{margin-left:auto;font:11px var(--mono);color:var(--muted);flex:0 100 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wf-row .track{position:relative;margin:0 64px 0 16px;min-height:22px}
-.wf-row.ask{background:var(--paper-warm);min-height:46px}
-.wf-row.ask .lab{flex-direction:column;align-items:stretch;gap:2px}
-.wf-row.ask .lab .t{white-space:normal}
-.wf-row.ask .q{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
-.wf-row.ask .who{font:11px var(--mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wf-row.order .lab{font:500 12px var(--mono);padding-left:22px}
-.wf-row.order .lab .t,.wf-row.run .lab .t,.wf-row.validation .lab .t{flex-shrink:0;max-width:62%}
-.wf-row.run .lab,.wf-row.validation .lab{padding-left:36px;font-family:var(--mono);font-size:12px}
-.wf-row.session .lab{padding-left:50px}
-.wf-row.turn .lab{padding-left:66px;color:var(--ink-soft)}
-.wf-row.tool .lab{padding-left:82px;color:var(--muted);font:11px var(--mono)}
-.wfb{position:absolute;top:8px;height:12px;border-radius:3px;min-width:3px}
-.wfb.order{background:color-mix(in srgb,var(--signal) 16%,transparent);border:1px solid color-mix(in srgb,var(--signal) 55%,transparent);height:10px;top:9px}
-.wfb.order.cont{border:1px dashed color-mix(in srgb,var(--c-user) 70%,transparent);background:color-mix(in srgb,var(--c-user) 8%,transparent)}
-.wfb.run{background:var(--signal)}
-.wfb.validation{background:var(--c-agent)}
-.wfb.st-failed,.wfb.st-fail,.wfb.st-died,.wfb.st-timeout{background:var(--danger)}
-.wfb.run.st-closed{background:var(--muted)}
-.wfb.st-running{background:repeating-linear-gradient(135deg,var(--c-tool) 0 5px,color-mix(in srgb,var(--c-tool) 45%,transparent) 5px 9px)}
-.wfb.session{background:var(--c-tool);height:8px;top:10px}
-.wfb.session.missing{background:none;border:1px dashed var(--c-tool)}
-.wfb.turn{background:var(--c-model);opacity:.75;height:7px;top:10px}
-.wfb.tool{background:var(--c-tool);opacity:.6;height:5px;top:11px}
-.wfb .dur{position:absolute;left:calc(100% + 6px);top:-2px;font:10.5px var(--mono);color:var(--muted);white-space:nowrap}
-.wfb.end .dur{left:auto;right:calc(100% + 6px)}
-.wf-dia{position:absolute;top:50%;width:10px;height:10px;transform:translate(-50%,-50%) rotate(45deg);background:var(--c-user)}
-.wf-dia.root{background:var(--signal-dark)}
-.wf-row button.caret{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 2px;font:inherit;flex:none}
-.wf-row .via{font:11px var(--mono);color:var(--c-user);flex:none;text-decoration:none}
-.wf-row a.open{font:11px var(--mono);flex:none}
-.wf-row.flash{animation:wfflash 1.6s}
-@keyframes wfflash{from{background:var(--hl)}}
-.ask-detail{width:380px;flex:none;position:sticky;top:0;max-height:calc(100vh - 110px);overflow:auto;border:1px solid var(--rule-2);border-radius:8px;background:var(--panel);padding:12px 14px;font-size:.88em}
-.ask-detail[hidden]{display:none}
-.ask-detail .dh{display:flex;gap:8px;align-items:flex-start}
-.ask-detail .dh .crumb{font:11px var(--mono);color:var(--muted);flex:1;min-width:0}
-.ask-detail .dh button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:1.1em;padding:0 2px}
-.ask-detail h2{font-size:1rem;font-weight:600;margin:2px 0 8px;overflow-wrap:anywhere}
-.ask-detail dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 12px;margin:0 0 10px;font-family:var(--mono);font-size:.92em}
-.ask-detail dt{color:var(--muted)}
-.ask-detail dd{margin:0;overflow-wrap:anywhere}
-.ask-detail h3{font-size:.78em;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 0 4px}
-.ask-detail .dtext{white-space:pre-wrap;background:var(--paper-warm);border-radius:6px;padding:8px 10px;overflow-wrap:anywhere}
-.ask-detail .md{background:var(--paper-warm);border-radius:6px;padding:4px 10px;overflow-wrap:anywhere}
-.ask-detail .md h1,.ask-detail .md h2,.ask-detail .md h3{font-size:.95em;margin:6px 0 4px;text-transform:none;letter-spacing:0;color:var(--ink)}
-.ask-detail .md pre{white-space:pre-wrap}
-.ask-detail ul{margin:0;padding-left:18px}
-.ask-detail li{margin:2px 0}
-.ask-detail .vitem{display:flex;gap:6px;align-items:baseline;margin:4px 0}
-.ask-detail .vitem .note{color:var(--muted);font-size:.92em}
-.ask-detail .note.remote{color:var(--muted);font-size:.92em;margin:6px 0}
-.ask-detail .actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
-.ask-detail .actions a{border:1px solid var(--rule-2);border-radius:6px;padding:3px 10px;text-decoration:none;color:var(--ink)}
-@media (max-width:1100px){
-  .ask-detail{position:fixed;top:auto;left:0;right:0;bottom:0;width:auto;max-height:55vh;z-index:30;border-radius:12px 12px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.18)}
-  .ask-body.detail-open .wf-row,.ask-body.detail-open .wf-axis{grid-template-columns:minmax(0,400px) minmax(0,1fr)}
-  /* Room to scroll every row above the open sheet. */
-  #v-ask.detail-open{padding-bottom:calc(55vh + 18px)}
-}
-/* Narrow screens: the asks list as stacked rows, the waterfall with each
-   label above its own full-width time bar. */
+/* ---------- board: the team board, read-only ---------- */
+.boardview{flex-direction:row;min-height:0}
+.bd-side{width:240px;flex:none;overflow:auto;padding:18px 14px 24px 22px;border-right:1px solid var(--rule);font-size:.9em}
+.bd-side h3{font-size:.72em;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:500;margin:16px 0 6px}
+.bd-side h3:first-of-type{margin-top:4px}
+.bd-side a.bd-b{display:flex;gap:8px;align-items:baseline;padding:3px 8px;border-radius:4px;text-decoration:none;color:var(--ink-soft)}
+.bd-side a.bd-b:hover{background:var(--paper-warm)}
+.bd-side a.bd-b.on{background:var(--paper-warm);color:var(--ink);font-weight:500}
+.bd-side a.bd-b .n{margin-left:auto;font-family:var(--mono);font-size:.85em;color:var(--muted);font-variant-numeric:tabular-nums}
+.bd-side .bd-note{color:var(--muted);font-size:.85em;margin-top:18px;line-height:1.45}
+.bd-tags{display:flex;flex-wrap:wrap;gap:4px}
+.bd-tag{display:inline-block;border:1px solid var(--rule-2);border-radius:999px;padding:0 8px;font-size:.8em;font-family:var(--mono);color:var(--muted);text-decoration:none;white-space:nowrap;background:none;cursor:pointer}
+.bd-tag:hover{color:var(--ink);border-color:var(--muted)}
+.bd-tag.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.bd-main{flex:1;min-width:0;overflow:auto;padding:18px 26px 40px}
+.bd-search{display:flex;gap:8px;align-items:center;margin:0 0 14px;max-width:880px}
+.bd-search input{flex:1;min-width:0;font:inherit;padding:5px 10px;border:1px solid var(--rule-2);border-radius:6px;background:var(--paper);color:var(--ink)}
+.bd-search input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.bd-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:.85em;color:var(--muted);margin:0 0 10px}
+.bd-filters button.clear{border:0;color:var(--signal-dark);padding:0 2px}
+.bd-list{max-width:880px}
+a.bd-row{display:block;padding:10px 10px 11px;border-bottom:1px solid var(--rule);text-decoration:none;color:var(--ink);border-radius:4px}
+a.bd-row:hover{background:var(--paper-warm)}
+.bd-row .t{font-weight:500;overflow-wrap:anywhere}
+.bd-row .t .pin{color:var(--signal);margin-right:4px}
+.bd-row .m{color:var(--muted);font-size:.82em;font-family:var(--mono);display:flex;flex-wrap:wrap;gap:2px 12px;margin-top:2px}
+.bd-row .x{color:var(--ink-soft);font-size:.88em;margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.bd-row .x mark,.bd-post mark{background:color-mix(in srgb,var(--hl) 70%,transparent);color:inherit;border-radius:2px;padding:0 1px}
+.bd-row .tags{display:inline-flex;gap:4px;flex-wrap:wrap}
+.bd-empty{color:var(--muted);padding:18px 4px;max-width:640px}
+.bd-thread{max-width:880px}
+.bd-thread .crumb{font-size:.85em;color:var(--muted)}
+.bd-thread .crumb a{text-decoration:none}
+.bd-thread .crumb a:hover{color:var(--signal)}
+.bd-thread h1{font-size:1.25rem;font-weight:600;letter-spacing:-.01em;margin:4px 0 6px;overflow-wrap:anywhere}
+.bd-thread .meta{color:var(--muted);font-size:.85em;font-family:var(--mono);display:flex;flex-wrap:wrap;gap:4px 14px;margin:0 0 6px}
+.bd-thread .tags{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 14px}
+.bd-post{border:1px solid var(--rule);border-radius:8px;background:var(--panel);margin:0 0 12px;overflow:hidden}
+.bd-post>header{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;padding:7px 14px;border-bottom:1px solid var(--rule);background:var(--paper-warm);font-size:.82em;font-family:var(--mono);color:var(--muted)}
+.bd-post>header b{color:var(--ink);font-weight:500}
+.bd-post>header .n{color:var(--signal-dark)}
+.bd-post>header time{margin-left:auto}
+.bd-post .body{padding:10px 14px 12px;font-size:.93em;line-height:1.55;overflow-wrap:anywhere}
+.bd-post .body h1,.bd-post .body h2,.bd-post .body h3{font-size:1em;margin:10px 0 4px}
+.bd-post .body ul{padding-left:20px;margin:4px 0}
+.bd-post .body code{font-family:var(--mono);font-size:.9em;background:var(--paper-warm);padding:0 4px;border-radius:3px}
+.bd-post .body pre{font-family:var(--mono);font-size:.85em;background:var(--paper-warm);padding:8px 10px;border-radius:6px;overflow:auto;white-space:pre;margin:6px 0}
+.bd-post .body table.mdt{border-collapse:collapse;margin:6px 0;font-size:.95em}
+.bd-post .body table.mdt th,.bd-post .body table.mdt td{text-align:left;padding:2px 12px 2px 0;border-bottom:1px solid var(--rule)}
+.bd-imgs{display:flex;flex-wrap:wrap;gap:10px;padding:0 14px 12px}
+.bd-imgs a{display:block;border:1px solid var(--rule);border-radius:6px;overflow:hidden;background:var(--paper-warm);line-height:0}
+.bd-imgs img{display:block;max-width:min(100%,420px);max-height:320px;width:auto;height:auto}
+.bd-imgs .gone{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--rule-2);border-radius:6px;padding:8px 12px;color:var(--muted);font-size:.82em;font-family:var(--mono);line-height:1.3}
 @media (max-width:720px){
-  #v-asks,#v-ask{padding:12px 10px}
-  table.grid.asks,table.grid.asks tbody,table.grid.asks tr,table.grid.asks td{display:block}
-  table.grid.asks{width:100%;min-width:0}
-  table.grid.asks thead{display:none}
-  table.grid.asks tr.row{padding:8px 4px;border-bottom:1px solid var(--rule)}
-  table.grid.asks td{border:0;padding:1px 0;white-space:normal;text-align:left}
-  table.grid.asks td.ask-cell{max-width:none;overflow-wrap:anywhere}
-  table.grid.asks td.sm{display:inline-block;margin-right:12px;font-size:.85em;color:var(--muted)}
-  table.grid.asks td.sm[data-k]::before{content:attr(data-k) ' ';color:var(--muted-2)}
-  .wf-row,.wf-axis,.ask-body.detail-open .wf-row,.ask-body.detail-open .wf-axis{grid-template-columns:minmax(0,1fr)}
-  .wf-axis{height:auto}
-  .wf-axis .lab{display:none}
-  .wf-axis .track{height:22px}
-  .wf-axis .tick:nth-child(2n){display:none}
-  .wf-row .lab{border-right:0;padding:4px 8px 0}
-  .wf-row .track{margin:0 52px 2px 12px;min-height:20px}
-  .wf-row.ask{min-height:0}
-  .wf-row.order .lab{padding-left:12px}
-  .wf-row.run .lab,.wf-row.validation .lab{padding-left:20px}
-  .wf-row.session .lab{padding-left:28px}
-  .wf-row.turn .lab{padding-left:36px}
-  .wf-row.tool .lab{padding-left:44px}
+  .boardview{flex-direction:column;overflow:auto}
+  .bd-side{width:auto;border-right:0;border-bottom:1px solid var(--rule);padding:12px 14px;overflow:visible}
+  .bd-side .bd-boards{display:flex;flex-wrap:wrap;gap:2px}
+  .bd-main{overflow:visible;padding:14px}
 }
 </style>
 </head>
@@ -533,10 +459,14 @@ table.grid tr.pretrace td{color:var(--ink-soft)}
 <div class="top">
   <span class="wordmark">hev<i>_</i> kit</span>
   <a class="ghmark" href="https://github.com/hev/kit" target="_blank" rel="noopener" title="hev/kit on GitHub" aria-label="hev/kit on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
-  <div class="tabs" id="tabs">
-    <button data-v="stats">Stats</button>
+  <nav class="tabs" id="tabs" aria-label="Sections">
     <button data-v="traces">Traces</button>
-    <button data-v="asks" title="Ask-rooted traces: the work each ask started">Asks</button>
+    <button data-v="board" hidden>Board</button>
+    <!--__TABS__-->
+  </nav>
+  <div class="tabs sub" id="trace-tabs" aria-label="Traces views">
+    <button data-v="traces">List</button>
+    <button data-v="stats">Stats</button>
   </div>
   <div class="spacer"></div>
   <div class="range" id="range"><span>window</span></div>
@@ -555,8 +485,7 @@ table.grid tr.pretrace td{color:var(--ink-soft)}
   <div id="archive-status" class="status" role="status">Loading…</div>
   <section class="view statsview" id="v-stats"></section>
   <section class="view" id="v-traces"></section>
-  <section class="view" id="v-asks"></section>
-  <section class="view" id="v-ask"></section>
+  <section class="view boardview" id="v-board"></section>
   <section class="view" id="v-transcript"><div class="term" id="term"></div><div class="spine" id="spine"></div><div class="statusline" id="statusline"></div></section>
   <section class="view" id="v-timeline">
     <div class="tl-left">
@@ -612,7 +541,6 @@ let searchTruncated = false;
 let searchRows = null, refreshID = 0, archivePending = false, archiveController = null;
 let built={}; let currentView='v-stats';
 const DRILL = new Set(['transcript','timeline','sstats']);
-const ASKS = new Set(['asks','ask']);
 const STATS_REUSE_MS=30000;
 function statsReusable(){const age=Date.now()-DATA.statsReceivedAt;return !!DATA.stats&&age>=0&&age<=STATS_REUSE_MS;}
 // Held by reference: views rebuild with innerHTML='', which detaches it until placeStatus puts it back.
@@ -630,7 +558,7 @@ function rangeBar(){
  const r=$('#range');r.replaceChildren(el('span',{},'window'));
  const custom=params.has('since')||params.has('until');
  for(const [l,d] of WINDOWS)r.append(el('button',{class:!custom&&d===windowDays?'on':'',onclick:()=>{
-  windowDays=d;customOpen=false;params.set('window',l);params.delete('since');params.delete('until');saveFilters();rangeBar();if(ASKS.has(currentView.slice(2))){built.asks=false;built.stats=false;built.traces=false;show(currentView.slice(2));}else refreshArchive();
+  windowDays=d;customOpen=false;params.set('window',l);params.delete('since');params.delete('until');saveFilters();rangeBar();refreshArchive();
  }},l));
  const label=day=>new Date(day+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'});
  const since=dateValue('since'),until=dateValue('until');
@@ -892,20 +820,6 @@ function traceURL(row){const q=new URLSearchParams(params);q.set('session',row.i
 function header(){
   const h = $('#shead'); h.innerHTML='';
   const crumb = el('div',{class:'crumb'}); const back = el('a',{href:'#traces', onclick:e=>{e.preventDefault(); show('traces');}}, 'Traces');
-  // A dispatch worker session leads back to its trace, launching ask and order.
-  const c = S.trace_context;
-  if (c){
-    const q=new URLSearchParams(params); q.delete('session'); const base='?'+q;
-    crumb.append(el('a',{href:base+'#asks'},'Asks'),' / ',el('a',{href:base+askHref(c.trace),title:c.ask||''},(c.ask||c.trace).slice(0,70)+((c.ask||'').length>70?'…':'')));
-    if (c.pretrace) crumb.append(' ',el('span',{class:'pill hist',title:PRETRACE_TITLE},'before tracing'));
-    else if (c.untraced) crumb.append(' ',el('span',{class:'pill warn'},'untraced'));
-    // Each part navigates: the launching ask and the run open the trace
-    // scrolled to and highlighting that row; the order applies its filter.
-    if (c.launch) crumb.append(' / ',el('a',{href:base+askHref(c.trace,'',c.launch_span),title:c.launch_text||''},c.launch+' ask'));
-    if (c.order) crumb.append(' / ',el('a',{href:base+askHref(c.trace,c.order),title:'Only this order in the trace'},c.order));
-    if (c.run) crumb.append(' / ',el('a',{href:base+askHref(c.trace,'',c.run_span),title:c.kind==='validation'?'validation run '+c.run:c.run+' attempt '+c.attempt},c.kind==='validation'?c.run:'attempt '+c.attempt));
-    crumb.append(' · ');
-  }
   crumb.append(back, ' / '+S.project); h.append(crumb);
   h.append(el('h1',{}, S.summary || S.summary_reason || S.title || S.id));
   const m = el('div',{class:'meta'});
@@ -1557,321 +1471,158 @@ function sessionStatsView(){
   });
 }
 
-// ---------------------------------------------------------------- asks: ask-rooted traces
-// An ask that started work is a trace root; the orders, attempts, validation
-// runs and worker sessions it led to are spans under it. /api/asks derives
-// them at read time from dispatch records and session rows.
-const askState={trace:'',order:'',span:'',find:''};
-// The Asks list filters live in the page URL so a filtered list can be
-// linked. They are prefixed: host and project already filter sessions on
-// the other tabs, with a different meaning.
-const ASK_FILTERS=[['user','ask_user','users'],['host','ask_host','hosts'],['project','ask_project','projects']];
-const PRETRACE_TITLE='Recorded before hev traced asks (or by a hev older than 0.7): the run has no trace and no ask, which is expected for history.';
-// Every dispatch worker's first prompt starts with this brief; it says nothing
-// about the run, so it never labels a session or turn.
-const DISPATCH_BRIEF='Read ../order.md (the full order)';
-function askWindow(){return params.has('since')||params.has('until')?'all':(params.get('window')||'30d');}
-function askHref(id,order,span){return '#ask/'+encodeURIComponent(id)+(order?'/order/'+encodeURIComponent(order):'')+(span?'/span/'+encodeURIComponent(span):'');}
-function askSessionHref(id){const q=new URLSearchParams(params);q.set('session',id);return '?'+q+'#transcript';}
-function stateClass(s){return 'st-'+String(s||'unknown').replace(/[^a-z-]/g,'');}
-function callerLabel(c){if(!c)return '';return [c.session,c.harness&&(c.harness+(c.harness_session?' '+c.harness_session.slice(0,8):'')),c.host].filter(Boolean).join(' · ');}
-function runState(s){return el('span',{class:'runstate '+stateClass(s)},s||'unknown');}
-function harnessModel(s){return [s.harness,shortModel(s.model)].filter(Boolean).join('/');}
-function turnLabel(p){p=String(p||'').replace(/\s+/g,' ').trim();return p.startsWith(DISPATCH_BRIEF)?'dispatch brief':p.slice(0,120);}
-// A user as the run record names it (local:hev, or a teammate's name),
-// shown without the local: prefix.
-function userLabel(u){return String(u||'').replace(/^local:/,'');}
-// Where a trace was asked from, then where its work ran: laptop → oven, mini.
-function askHosts(t){
- const from=t.ask_hosts||[],to=t.hosts||[],e=el('span',{class:'ask-hosts'});
- if(from.length)e.append(el('span',{class:'from',title:'asked on'},from.join(', ')),el('span',{class:'arr','aria-label':'ran on'},' → '));
- e.append(el('span',{class:'to',title:'ran on'},to.join(', ')||(from.length?'—':'')));
- return e;
+// ---------------------------------------------------------------- board: the team board, read-only
+// /api/board/* answers from the board's own JSON API: this host's files
+// (~/.hev/board), the Layer namespace when a key is set, or the board server
+// board.url names. The page only reads; nothing here posts or counts a view.
+const BOARD={board:'',tag:'',q:'',thread:0,boards:null,boardsAt:0,storage:null,seq:0};
+const BOARD_MODES={filesystem:'Kept in files on this host. Search matches every word you type.',layer:'Kept in Layer. Search is by meaning and by words.',remote:'Read from the board server this host is set up to use.'};
+function boardHash(){
+ if(BOARD.thread)return '#board/'+BOARD.thread;
+ const q=new URLSearchParams();for(const k of ['board','tag','q'])if(BOARD[k])q.set(k,BOARD[k]);
+ const t=q.toString();return '#board'+(t?'?'+t:'');
 }
-// How a trace without trace context is labelled: history from before
-// tracing, or untraced on purpose with its reason, which is always shown.
-function untracedLabel(t,long){
- if(t.pretrace)return el('span',{class:'pill hist',title:PRETRACE_TITLE},'before tracing');
- const why=t.reason||'no reason was recorded';
- return el('span',{class:'pill warn',title:why},long?'untraced: '+why:'untraced');
+function parseBoardHash(h){
+ const m=h.match(/^board\/(\d{1,18})$/);
+ if(m){BOARD.thread=Number(m[1]);return;}
+ BOARD.thread=0;const q=new URLSearchParams(h.replace(/^board\??/,''));
+ for(const k of ['board','tag','q'])BOARD[k]=(q.get(k)||'').trim();
 }
-function setAskFilter(param,value){
- if(value)params.set(param,value);else params.delete(param);
- saveFilters();built.asks=false;show('asks');
+// Navigation only moves the hash; hashchange parses it into BOARD and renders.
+function boardGo(patch){location.hash=boardHref(patch);}
+function boardHref(patch){const save={board:BOARD.board,tag:BOARD.tag,q:BOARD.q,thread:BOARD.thread};Object.assign(BOARD,{thread:0},patch);const h=boardHash();Object.assign(BOARD,save);return h;}
+function boardName(slug){return (BOARD.boards||[]).find(b=>b.slug===slug)?.name||slug;}
+function boardWho(p){return (p.author||'someone')+(p.host?'@'+p.host:'')+(p.role?' ('+p.role+')':'');}
+function boardTag(t){return el('a',{class:'bd-tag'+(BOARD.tag===t?' on':''),href:boardHref({tag:BOARD.tag===t?'':t}),title:BOARD.tag===t?'Clear the tag filter':'Only threads tagged '+t},t);}
+function boardSnippet(s){return esc(s).replace(/\[([^\[\]\n]{1,80})\]/g,'<mark>$1</mark>');}
+function boardEmpty(text){return el('div',{class:'bd-empty'},text);}
+async function boardJSON(path,seq){
+ const data=await getJSON('api/board/'+path);
+ if(seq!==BOARD.seq)throw Object.assign(Error('superseded'),{superseded:true});
+ return data;
 }
-async function asksView(){
- const v=$('#v-asks');v.innerHTML='';
- const status=el('div',{class:'status'},'Loading asks…');v.append(status);
- const q=new URLSearchParams({window:askWindow()});
- for(const [key,param] of ASK_FILTERS)if(params.get(param))q.set(key,params.get(param));
- const pretrace=params.get('ask_pretrace')==='1';
- if(pretrace)q.set('pretrace','1');
- let data;try{data=await getJSON('/api/asks?'+q);}catch(e){status.textContent='Could not load asks: '+e.message;return;}
- const bar=el('div',{class:'ask-bar'});
- for(const [key,param,list] of ASK_FILTERS){
-  const sel=el('select',{'aria-label':key+' filter',onchange:()=>setAskFilter(param,sel.value)});
-  sel.append(el('option',{value:''},'any '+key));
-  for(const f of data[list]||[]){const op=el('option',{value:f.value},(key==='user'?userLabel(f.value):f.value)+' ('+fmtN(f.count)+')');if(f.value===params.get(param))op.selected=true;sel.append(op);}
-  bar.append(el('label',{class:'f'},el('span',{class:'k'},key),sel));
+async function boardView(){
+ document.body.classList.remove('loading');statusLine.hidden=true;
+ const v=$('#v-board');const seq=++BOARD.seq;
+ if(!v.firstChild)v.append(el('aside',{class:'bd-side',id:'bd-side','aria-label':'Boards'}),el('div',{class:'bd-main',id:'bd-main'}));
+ const main=$('#bd-main');
+ try{
+  if(!BOARD.boards||Date.now()-BOARD.boardsAt>30000){BOARD.boards=await boardJSON('boards',seq);BOARD.boardsAt=Date.now();}
+  if(!BOARD.storage)BOARD.storage=await boardJSON('storage',seq).catch(e=>{if(e.superseded)throw e;return {};});
+  boardSide([]);
+  if(BOARD.thread)await boardThread(main,seq);else await boardList(main,seq);
+ }catch(e){
+  if(e.superseded)return;
+  boardSide([]);
+  main.replaceChildren(boardEmpty(e.message==='not found'?'No such thread on this board.':'The board could not be read: '+e.message+'.'));
  }
- const hidden=data.pretrace_hidden||0;
- const box=el('input',{type:'checkbox',onchange:()=>setAskFilter('ask_pretrace',box.checked?'1':'')});
- box.checked=pretrace;
- bar.append(el('label',{class:'f',title:PRETRACE_TITLE},box,'before tracing'+(hidden?' ('+fmtN(hidden)+' hidden)':'')));
- const find=el('input',{type:'search',placeholder:'Filter asks','aria-label':'Filter asks',value:askState.find,oninput:()=>{askState.find=find.value;draw();}});
- bar.append(find);
- const active=ASK_FILTERS.some(([,param])=>params.get(param));
- if(active)bar.append(el('button',{type:'button',class:'clear',onclick:()=>{for(const [,param] of ASK_FILTERS)params.delete(param);saveFilters();built.asks=false;show('asks');}},'clear filters'));
- v.append(bar);
- const table=el('table',{class:'grid asks'}),body=el('tbody');
- table.append(el('thead',{},el('tr',{html:'<th>Ask</th><th>Time</th><th>User</th><th>Hosts</th><th>Project</th><th>Orders</th><th class="num">Asks</th><th class="num">Runs</th><th>State</th><th class="num">Cost</th><th class="num">Duration</th>'})),body);v.append(table);
- function draw(){
-  body.innerHTML='';const f=askState.find.toLowerCase();let n=0,cost=0;
-  for(const t of data.traces){
-   if(f&&!(t.ask+' '+t.orders.join(' ')+' '+t.id).toLowerCase().includes(f))continue;
-   n++;cost+=t.cost;
-   const href=askHref(t.id);
-   const tr=el('tr',{class:'row'+(t.pretrace?' pretrace':t.untraced?' untraced':''),onclick:()=>{location.hash=href;}});
-   const ask=el('td',{class:'ask-cell'},el('a',{href,title:t.ask||t.id},t.ask||t.id));
-   if(t.untraced)ask.append(' ',untracedLabel(t));
-   else if(!t.root_here)ask.append(' ',el('span',{class:'pill',title:'The root ask was recorded on another host'},'continued'));
-   if(t.untraced&&!t.pretrace)ask.append(el('div',{class:'ask-reason'},'untraced: '+(t.reason||'no reason was recorded')));
-   ask.append(el('div',{class:'sub'},callerLabel(t.caller)||(t.untraced?t.id.replace(/^run:/,'run '):'')));
-   // Small cells carry a label so the narrow layout can stack them.
-   const sm=(k,cls,...kids)=>el('td',{class:'sm '+cls,'data-k':k},...kids);
-   const users=t.users||[];
-   tr.append(ask,sm('','nw',t.start?fmtDate(t.start):''),sm('user','',el('span',{title:users.join(', ')},users.map(userLabel).join(', '))),sm('hosts','',askHosts(t)),sm('project','',(t.projects||[]).join(', ')),sm('','',...t.orders.map(o=>el('span',{class:'pill'},o))),sm('asks','num',fmtN(t.asks)),sm('runs','num',fmtN(t.runs)),sm('','',runState(t.state)),sm('','num',fmtUsd(t.cost)),sm('','num',fmtMs(t.duration_ms)));
-   body.append(tr);
-  }
-  const by=ASK_FILTERS.filter(([,param])=>params.get(param)).map(([key,param])=>key+' '+(key==='user'?userLabel(params.get(param)):params.get(param)));
-  status.textContent=`${fmtN(n)} asks · ${fmtUsd(cost)} · window ${data.window}${by.length?' · '+by.join(' · '):''}${hidden?' · '+fmtN(hidden)+' from before tracing hidden':''}`;
-  if(!n){
-   const cell=el('td',{colspan:'11',class:'ask-empty'},active||f?'No asks match these filters.':'No asks in this window. Runs dispatched by this version of hev appear here once they start.');
-   if(hidden)cell.append(' ',el('button',{type:'button',class:'clear',onclick:()=>setAskFilter('ask_pretrace','1')},'Show '+fmtN(hidden)+' from before tracing'));
-   body.append(el('tr',{},cell));
-  }
- }
- draw();
 }
-function askLegend(){
- const item=(cls,style,label)=>el('span',{},el('i',{class:cls,style}),label);
- return el('div',{class:'wf-legend','aria-label':'Legend'},
-  item('dia','background:var(--signal-dark)','first ask'),
-  item('dia','background:var(--c-user)','follow-up ask'),
-  item('','background:color-mix(in srgb,var(--signal) 16%,transparent);border:1px solid color-mix(in srgb,var(--signal) 55%,transparent)','order'),
-  item('','border:1px dashed var(--c-user)','order work this ask caused'),
-  item('','background:var(--signal)','attempt'),
-  item('','background:var(--c-agent)','validation'),
-  item('','background:var(--danger)','failed'),
-  item('','background:repeating-linear-gradient(135deg,var(--c-tool) 0 4px,transparent 4px 7px)','running'),
-  item('','background:var(--c-tool);height:6px','worker session'),
-  item('','background:var(--c-model);opacity:.75;height:6px','turn'),
-  item('','background:var(--c-tool);opacity:.6;height:4px','tool'));
+function boardSide(tags){
+ const side=$('#bd-side');side.replaceChildren();
+ const list=el('div',{class:'bd-boards'});
+ const total=(BOARD.boards||[]).reduce((a,b)=>a+(b.threads||0),0);
+ list.append(el('a',{class:'bd-b'+(!BOARD.board&&!BOARD.thread?' on':''),href:boardHref({board:''})},'All boards',el('span',{class:'n'},fmtN(total))));
+ for(const b of BOARD.boards||[])list.append(el('a',{class:'bd-b'+(BOARD.board===b.slug?' on':''),href:boardHref({board:b.slug}),title:b.blurb||''},b.name||b.slug,el('span',{class:'n'},fmtN(b.threads||0))));
+ side.append(el('h3',{},'Boards'),list);
+ if(tags.length){const box=el('div',{class:'bd-tags'});for(const t of tags)box.append(boardTag(t));side.append(el('h3',{},'Tags'),box);}
+ const mode=BOARD.storage?.store==='layer'||BOARD.storage?.mode==='layer'?'layer':BOARD.storage?.mode;
+ const note=BOARD_MODES[mode];
+ if(note)side.append(el('p',{class:'bd-note'},note));
 }
-async function askView(){
- const v=$('#v-ask');v.innerHTML='';v.classList.remove('detail-open');
- const status=el('div',{class:'status'},'Loading trace…');v.append(status);
- let data;try{data=await getJSON('/api/asks/'+encodeURIComponent(askState.trace));}catch(e){status.textContent='Could not load trace: '+e.message;return;}
- status.remove();
- const t=data.trace,spans=data.spans,byId=Object.fromEntries(spans.map(s=>[s.id,s])),sel=askState.order;
- const head=el('div',{class:'ask-head'});
- head.append(el('div',{class:'crumb'},el('a',{href:'#asks'},'Asks'),' / '+(t.pretrace?'before tracing, '+t.id.replace(/^run:/,'run '):t.untraced?'untraced '+t.id.replace(/^run:/,'run '):'trace '+t.id)));
- head.append(el('h1',{},t.ask||t.id));
- const meta=el('div',{class:'meta'});
- if(t.untraced)meta.append(untracedLabel(t,true));
- if(t.caller)meta.append(el('span',{},'asked by ',el('b',{},callerLabel(t.caller))));
- if(t.users&&t.users.length)meta.append(el('span',{title:t.users.join(', ')},'user ',el('b',{},t.users.map(userLabel).join(', '))));
- if(t.projects&&t.projects.length)meta.append(el('span',{},'project ',el('b',{},t.projects.join(', '))));
- meta.append(el('span',{html:`${t.start?fmtDate(t.start):''} · <b>${fmtMs(t.duration_ms)}</b>`}),el('span',{html:`<b>${fmtUsd(t.cost)}</b> · ${t.asks} asks · ${t.orders.length} orders · ${t.runs} runs · ${t.sessions} sessions`}),el('span',{},'hosts ',askHosts(t)),runState(t.state));
- head.append(meta);
- const chips=el('div',{class:'ask-orders'},el('span',{class:'k'},'order'));
- const chip=(o,l)=>el('a',{class:'chip'+(sel===o?' on':''),href:askHref(t.id,o)},l);
- chips.append(chip('','all'),...t.orders.map(o=>chip(o,o)));
- head.append(chips,askLegend());v.append(head);
- // Time axis over every span in the trace, unfiltered, so a filter keeps positions.
- let T0=Infinity,T1=-Infinity;
- for(const s of spans){if(s.start){T0=Math.min(T0,s.start);T1=Math.max(T1,s.end||s.start);}}
- if(!isFinite(T0)){T0=Date.now();T1=T0+1;}
- const running=spans.some(s=>(s.kind==='run'||s.kind==='validation')&&!s.end&&s.state==='running');
- if(running)T1=Math.max(T1,Date.now());
- if(T1<=T0)T1=T0+60000;
- const pct=x=>Math.max(0,Math.min(100,(x-T0)/(T1-T0)*100));
- const body=el('div',{class:'ask-body'}),wf=el('div',{class:'wf'}),inner=el('div',{class:'wf-inner'}),panel=el('aside',{class:'ask-detail','aria-label':'Span detail',hidden:''});
- wf.append(inner);body.append(wf,panel);v.append(body);
- const axis=el('div',{class:'wf-axis'},el('div',{class:'lab'}),el('div',{class:'track'}));
- for(let i=0;i<=4;i++){const x=T0+(T1-T0)*i/4;axis.lastChild.append(el('span',{class:'tick',style:`left:${i*25}%`},(T1-T0)>864e5?fmtDate(x):fmtClock(x)));}
- inner.append(axis);
- const rowsBySpan={};
- function row(kind,label,start,end,bar,dur,span){
-  const r=el('div',{class:'wf-row '+kind}),lab=el('div',{class:'lab'}),track=el('div',{class:'track'});
-  lab.append(...label);r.append(lab,track);
-  // Truncated labels keep their full text on hover.
-  for(const x of lab.children)if(x.classList&&x.classList.contains('t')&&!x.getAttribute('title'))x.setAttribute('title',x.textContent);
-  if(bar==='dia'){if(start)track.append(el('span',{class:'wf-dia'+(kind==='ask root'?' root':''),style:`left:${pct(start)}%`}));}
-  else if(start){const e=end||(bar.includes('st-running')?T1:start);const b=el('span',{class:'wfb '+bar+(pct(e)>80?' end':''),style:`left:${pct(start)}%;width:${Math.max(.25,pct(e)-pct(start))}%`});if(dur&&end)b.append(el('span',{class:'dur'},fmtMs(end-start)));track.append(b);}
-  if(span){
-   r.classList.add('pick');r.setAttribute('data-span',span.id);(rowsBySpan[span.id]??=[]).push(r);
-   r.addEventListener('click',e=>{if(e&&e.target&&e.target.closest&&e.target.closest('a,button'))return;select(span.id);});
-  }
-  return r;
+function boardSearchBar(){
+ const input=el('input',{type:'search',placeholder:'Search the board',value:BOARD.q,'aria-label':'Search the board'});
+ return el('form',{class:'bd-search',role:'search',onsubmit:e=>{e.preventDefault();boardGo({q:input.value.trim()});}},input,el('button',{type:'submit'},'Search'));
+}
+function boardFilters(){
+ const f=el('div',{class:'bd-filters'});const parts=[];
+ if(BOARD.board)parts.push(['board',boardName(BOARD.board)]);
+ if(BOARD.tag)parts.push(['tag',BOARD.tag]);
+ if(BOARD.q)parts.push(['matching','“'+BOARD.q+'”']);
+ if(!parts.length)return null;
+ for(const [k,val] of parts)f.append(el('span',{},k+' ',el('b',{},val)));
+ f.append(el('button',{type:'button',class:'clear',onclick:()=>boardGo({board:'',tag:'',q:''})},'clear'));
+ return f;
+}
+function boardRow(t,snippet){
+ const m=el('div',{class:'m'},el('span',{},boardName(t.board)),el('span',{},'by '+boardWho(t)),el('span',{},t.replies+(t.replies===1?' reply':' replies')));
+ if(t.image_count)m.append(el('span',{},t.image_count+(t.image_count===1?' image':' images')));
+ if(t.updated)m.append(el('span',{title:new Date(t.updated).toISOString()},ago(new Date(t.updated).getTime())));
+ const title=el('div',{class:'t'});if(t.pinned)title.append(el('span',{class:'pin',title:'pinned'},'▲'));title.append(t.title||'(untitled)');
+ const row=el('a',{class:'bd-row',href:'#board/'+t.id},title,m);
+ if((t.tags||[]).length){const tg=el('span',{class:'tags'});for(const x of t.tags)tg.append(el('span',{class:'bd-tag'+(BOARD.tag===x?' on':'')},x));m.append(tg);}
+ if(snippet)row.append(el('div',{class:'x',html:boardSnippet(snippet)}));
+ else if(t.excerpt)row.append(el('div',{class:'x'},t.excerpt.replace(/\*\*|__|`+|^#+\s*/gm,'')));
+ return row;
+}
+async function boardList(main,seq){
+ const q=new URLSearchParams();if(BOARD.board)q.set('board',BOARD.board);if(BOARD.tag)q.set('tag',BOARD.tag);
+ let rows;
+ if(BOARD.q){q.set('q',BOARD.q);q.set('top','50');rows=(await boardJSON('search?'+q,seq)||[]).map(h=>({t:h.thread,s:h.snippet}));}
+ else{q.set('limit','200');rows=(await boardJSON('threads?'+q,seq)||[]).map(t=>({t}));}
+ const counts={};for(const {t} of rows)for(const x of t.tags||[])counts[x]=(counts[x]||0)+1;
+ const tags=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]||a.localeCompare(b)).slice(0,40);
+ if(BOARD.tag&&!tags.includes(BOARD.tag))tags.unshift(BOARD.tag);
+ boardSide(tags);
+ const list=el('div',{class:'bd-list'});
+ for(const {t,s} of rows)list.append(boardRow(t,s));
+ const filters=boardFilters();
+ main.replaceChildren(boardSearchBar(),...(filters?[filters]:[]),rows.length?list:boardEmpty(BOARD.q?'Nothing on the board matches that search.':BOARD.board||BOARD.tag?'No threads here yet.':'The board is empty. Agents post to it with hev board post.'));
+}
+function boardImages(list){
+ const box=el('div',{class:'bd-imgs'});
+ for(const im of list||[]){
+  if(!/^[0-9a-f]{64}$/.test(im.sha256||''))continue;
+  const url='api/board/blob/'+im.sha256;const name=im.name||'image';
+  const img=el('img',{src:url,loading:'lazy',alt:name,title:`${name} · ${im.width}×${im.height}`});
+  if(im.width&&im.height){img.setAttribute('width',String(im.width));img.setAttribute('height',String(im.height));}
+  const a=el('a',{href:url,target:'_blank',rel:'noopener'},img);
+  img.addEventListener('error',()=>a.replaceWith(el('span',{class:'gone',title:'sha256 '+im.sha256},'▧ '+name+' · not on this host')));
+  box.append(a);
  }
- const asks=spans.filter(s=>s.kind==='ask').sort((a,b)=>a.start-b.start);
- const runs=spans.filter(s=>s.kind==='run'||s.kind==='validation');
- const orders=Object.fromEntries(spans.filter(s=>s.kind==='order').map(s=>[s.name,s]));
- const sessionsOf=id=>spans.filter(s=>s.kind==='session'&&s.parent===id).sort((a,b)=>a.start-b.start);
- const groups=new Map(asks.map(a=>[a.id,{ask:a,runs:[]}]));
- const loose={ask:null,runs:[]};
- for(const r of runs){
-  if(sel&&r.order!==sel)continue;
-  let g=groups.get(r.launched_by);
-  if(!g)g=groups.get(orders[r.order]?.parent)||loose;
-  g.runs.push(r);
+ return box.childElementCount?box:null;
+}
+async function boardThread(main,seq){
+ const data=await boardJSON('threads/'+BOARD.thread,seq);
+ const t=data.thread||{},posts=data.posts||[];
+ const crumb=el('div',{class:'crumb'},el('a',{href:boardHref({board:''})},'Board'),' / ',el('a',{href:boardHref({board:t.board,tag:'',q:''})},boardName(t.board)),' / #'+t.id);
+ const meta=el('div',{class:'meta'},el('span',{},'opened by '+boardWho(t)),el('span',{},posts.length+(posts.length===1?' post':' posts')));
+ if(t.views)meta.append(el('span',{},t.views+' views'));if(t.useful)meta.append(el('span',{},'+'+t.useful+' useful'));
+ if(t.pinned)meta.append(el('span',{},'pinned'));if(t.locked)meta.append(el('span',{},'locked'));
+ const tags=el('div',{class:'tags'});for(const x of t.tags||[])tags.append(boardTag(x));
+ const wrap=el('div',{class:'bd-thread'},crumb,el('h1',{},t.title||'(untitled)'),meta,tags);
+ for(const p of posts){
+  const when=p.created?new Date(p.created):null;
+  const head=el('header',{},el('span',{class:'n'},'#'+p.n),el('b',{},p.author||'someone'),p.role?el('span',{},p.role):'',p.host?el('span',{},'@'+p.host):'');
+  if(when)head.append(el('time',{datetime:when.toISOString(),title:when.toISOString()},fmtDate(when)+' · '+ago(when.getTime())));
+  const post=el('article',{class:'bd-post',id:'post-'+p.n},head,el('div',{class:'body',html:md(p.body||'')}));
+  const imgs=boardImages(p.images);if(imgs)post.append(imgs);
+  wrap.append(post);
  }
- // Sessions no attempt claims sit under their order, or loose.
- const orphan=spans.filter(s=>s.kind==='session'&&!['run','validation'].includes(byId[s.parent]?.kind)&&(!sel||s.order===sel));
- const rootID=asks.find(a=>a.action==='dispatch')?.id;
- function renderGroup(g){
-  if(g.ask){
-   const a=g.ask,root=a.id===rootID;
-   const lab=[el('span',{class:'t',title:a.text||''},el('span',{class:'pill'},a.action),' ',el('span',{class:'q'},a.text||'(no text recorded)')),el('span',{class:'who'},[callerLabel(a.caller),fmtDate(a.start)].filter(Boolean).join(' · '))];
-   inner.append(row(root?'ask root':'ask',lab,a.start,0,'dia',false,a));
-  }else if(g.runs.length||orphan.length){
-   inner.append(row('ask',[el('span',{class:'t'},t.pretrace?'Before tracing: this run was recorded before hev traced asks':t.untraced?'Untraced: '+(t.reason||'no reason was recorded'):'Launched outside an ask recorded on this host')],0,0,'dia'));
-  }
-  let current='';
-  const groupRuns=g.runs.sort((a,b)=>a.start-b.start);
-  for(const r of groupRuns){
-   const o=orders[r.order];
-   if(r.order!==current){
-    current=r.order;
-    if(o){
-     const own=g.ask&&o.parent===g.ask.id||!g.ask;
-     if(own)inner.append(row('order',[el('span',{class:'t',title:o.name+(o.text?' — '+o.text:'')},o.name),runState(o.state),el('span',{class:'h'},'order')],o.start,o.end,'order '+stateClass(o.state),false,o));
-     else{
-      // A follow-up ask shows only the part of the order it caused.
-      const mine=groupRuns.filter(x=>x.order===r.order);
-      const s0=Math.min(...mine.map(x=>x.start||Infinity)),s1=Math.max(...mine.map(x=>x.end||(x.state==='running'?T1:x.start||0)));
-      inner.append(row('order cont',[el('span',{class:'t',title:o.name+': continued by this ask (the order started earlier)'},'↳ '+o.name),el('span',{class:'h'},'continued here')],isFinite(s0)?s0:0,s1,'order cont',false,o));
-     }
-    }
-   }
-   const via=byId[r.launched_by];
-   const name=r.kind==='validation'?r.name:'attempt '+r.attempt;
-   const lab=[el('span',{class:'t',title:r.kind==='validation'?'validation run '+r.name:r.name+' attempt '+r.attempt},name),runState(r.state),el('span',{class:'h'},[r.host,harnessModel(r),r.context_digest?'context '+r.context_digest.slice(0,8):''].filter(Boolean).join(' · '))];
-   if(via&&g.ask&&via.id!==g.ask.id)lab.splice(2,0,el('a',{class:'via',href:askHref(t.id,sel,via.id),onclick:e=>{e.preventDefault();focusSpan(via.id);}},'via '+via.action));
-   if(r.pr)lab.push(el('a',{class:'open',href:r.pr,target:'_blank',rel:'noopener'},'PR ↗'));
-   inner.append(row(r.kind,lab,r.start,r.end,r.kind+' '+stateClass(r.state),true,r));
-   for(const s of sessionsOf(r.id))inner.append(sessionRow(s,r));
-  }
- }
- // A worker session is named by what tells it apart: its summary when kit
- // has one, else its order and attempt; never the dispatch brief.
- function sessionLabel(s,run){
-  const where=run?(run.kind==='validation'?'validation '+run.name:run.name+' · attempt '+run.attempt):(s.order||'session');
-  return {text:s.summary||where,title:[where,harnessModel(run||s),s.summary,s.session_id].filter(Boolean).join(' · ')};
- }
- function sessionRow(s,run){
-  const caret=el('button',{class:'caret','aria-expanded':'false',title:s.indexed?'Show turns':'Not indexed yet'},s.indexed?'▸':'·');
-  const l=sessionLabel(s,run);
-  const lab=[caret,el('span',{class:'t',title:l.title},l.text),el('a',{class:'open',href:askSessionHref(s.session_id),title:'Open the session view'},'open ↗'),el('span',{class:'h'},[harnessModel(s.harness?s:(run||{})),s.cost?fmtUsd(s.cost):'',s.indexed?'':'not indexed'].filter(Boolean).join(' · '))];
-  const r=row('session',lab,s.start,s.end,'session'+(s.indexed?'':' missing'),true);
-  if(s.indexed)caret.onclick=()=>toggleTurns(r,caret,s);
-  return r;
- }
- async function toggleTurns(r,caret,s){
-  if(r._open){r._open.forEach(x=>x.remove());r._open=null;caret.textContent='▸';caret.setAttribute('aria-expanded','false');return;}
-  caret.textContent='…';
-  let d;try{d=await getJSON('/api/session/'+encodeURIComponent(s.session_id));}catch(e){caret.textContent='▸';toast('Could not load turns: '+e.message);return;}
-  const rows=[];
-  (d.turns||[]).forEach((tn,i)=>{
-   rows.push(row('turn',[el('span',{class:'t',title:tn.prompt||''},`turn ${i+1} · `+turnLabel(tn.prompt)),el('span',{class:'h'},fmtUsd(tn.cost||0))],tn.ts,tn.end||tn.ts,'turn',true));
-   for(const it of (tn.items||[]).filter(x=>x.kind==='tool').slice(0,40))rows.push(row('tool',[el('span',{class:'t'},it.name+' '+String(it.summary||'').slice(0,100))],it.start,it.end||it.start,'tool'));
-  });
-  if(!rows.length)rows.push(row('turn',[el('span',{class:'t'},'No turns recorded')],0,0,'turn'));
-  let at=r;for(const x of rows){at.after(x);at=x;}
-  r._open=rows;caret.textContent='▾';caret.setAttribute('aria-expanded','true');
- }
- // ---- detail panel: what a row is, why it ran and what came of it
- const dl=pairs=>{const d=el('dl');for(const [k,x] of pairs)if(x!==undefined&&x!==null&&x!=='')d.append(el('dt',{},k),el('dd',{},x));return d;};
- const when=(a,b)=>[a?fmtDate(a):'',b?'→ '+fmtClock(b):'',a&&b?'('+fmtMs(b-a)+')':''].filter(Boolean).join(' ');
- const mdBlock=s=>el('div',{class:'md',html:md(s)});
- function detail(sp){
-  const kids=[];const crumb=[];
-  if(sp.kind==='ask'){
-   const c=sp.caller||{};
-   crumb.push(sp.id===rootID?'first ask':'follow-up ask',sp.action);
-   kids.push(el('h2',{},sp.id===rootID?'The ask that started this trace':sp.action+' ask'));
-   kids.push(dl([['when',sp.start?fmtDate(sp.start):''],['caller',c.session],['harness',c.harness],['harness session',c.harness_session],['host',c.host],['sender',c.sender],['on run',c.run],['span',sp.id]]));
-   kids.push(el('h3',{},'Ask'),el('div',{class:'dtext'},sp.text||'(no text recorded)'));
-   const launched=runs.filter(r=>r.launched_by===sp.id);
-   if(launched.length)kids.push(el('h3',{},'Launched'),el('ul',{},...launched.map(r=>el('li',{},r.kind==='validation'?'validation '+r.name:r.name+' attempt '+r.attempt,' ',runState(r.state)))));
-  }else if(sp.kind==='order'){
-   crumb.push('order',sp.state);
-   kids.push(el('h2',{},sp.name));
-   kids.push(dl([['state',runState(sp.state)],['repo',sp.repo],['branch',sp.branch],['revisions',sp.revisions?String(sp.revisions):''],['time',when(sp.start,sp.end)]]));
-   kids.push(el('h3',{},'Intent'),sp.intent?mdBlock(sp.intent):el('div',{class:'dtext'},sp.text||'(no order text recorded)'));
-   if(sp.remote)kids.push(el('div',{class:'note remote'},`Read from the archive, published by ${sp.remote}. The order body and Acceptance stay on that host's run record.`));
-   if((sp.acceptance||[]).length)kids.push(el('h3',{},'Acceptance'),el('ul',{},...sp.acceptance.map(a=>el('li',{},a))));
-   kids.push(el('div',{class:'actions'},el('a',{href:askHref(t.id,sp.name)},'Only this order')));
-  }else{
-   const val=sp.kind==='validation';
-   crumb.push(val?'validation':'attempt '+sp.attempt,sp.order);
-   kids.push(el('h2',{},val?'Validation '+sp.name:sp.name+' · attempt '+sp.attempt));
-   const launch=byId[sp.launched_by];
-   kids.push(dl([['state',runState(sp.state)],['outcome',sp.outcome],['launched by',launch?launch.action+' ask':''],['where',[sp.host,harnessModel(sp)].filter(Boolean).join(' · ')],['queued',sp.queued?fmtDate(sp.queued):''],['ran',when(sp.start,sp.end)],['branch',sp.branch],['head',sp.head?sp.head.slice(0,12):''],['PR',sp.pr?el('a',{href:sp.pr,target:'_blank',rel:'noopener'},sp.pr.replace(/^https?:\/\/(www\.)?github\.com\//,'')+' ↗'):''],['exit',sp.exit_code?String(sp.exit_code):''],['reason',sp.reason],['error',sp.error],['session',sp.session_id],['context',sp.context_digest?el('span',{title:'hev context review --run '+sp.order},[sp.context_digest.slice(0,12),sp.context_recipe].filter(Boolean).join(' · ')):'']]));
-   if(val){
-    const v=sp.verdict;
-    kids.push(el('h3',{},'Verdict'));
-    if(v){kids.push(el('div',{},runState(v.verdict)));for(const it of v.items||[])kids.push(el('div',{class:'vitem'},runState(it.result),el('span',{},it.item,it.note?el('div',{class:'note'},it.note):'')));}
-    else kids.push(el('div',{class:'dtext'},sp.state==='pass'||sp.state==='fail'?sp.state+' (no itemised verdict recorded)':'No verdict recorded yet.'));
-    if(sp.evidence)kids.push(dl([['evidence',sp.evidence]]));
-   }
-   kids.push(el('h3',{},val?'Validator report':'Worker report'),sp.report?mdBlock(sp.report):el('div',{class:'dtext'},sp.remote?`The report stays on ${sp.remote}; this attempt was read from the archive.`:'No report recorded for this attempt.'));
-   if(sp.session_id)kids.push(el('div',{class:'actions'},el('a',{href:askSessionHref(sp.session_id)},'Open session in kit ↗')));
-  }
-  const close=el('button',{title:'Close','aria-label':'Close detail',onclick:()=>select('')},'×');
-  panel.replaceChildren(el('div',{class:'dh'},el('div',{class:'crumb'},crumb.filter(Boolean).join(' › ')),close),...kids);
- }
- function select(id){
-  for(const rs of Object.values(rowsBySpan))for(const r of rs)r.classList.remove('sel');
-  const sp=byId[id];
-  askState.span=sp?id:'';
-  if(typeof history!=='undefined'&&history.replaceState)history.replaceState(null,'',location.search+askHref(t.id,sel,askState.span));
-  v.classList.toggle('detail-open',!!sp);
-  if(!sp){panel.setAttribute('hidden','');body.classList.remove('detail-open');return;}
-  for(const r of rowsBySpan[id]||[])r.classList.add('sel');
-  detail(sp);panel.removeAttribute('hidden');body.classList.add('detail-open');
- }
- // Scroll to a span's row, flash it and open its detail.
- function focusSpan(id){
-  const r=(rowsBySpan[id]||[])[0];
-  if(r){r.scrollIntoView({block:'center'});r.classList.remove('flash');void r.offsetWidth;r.classList.add('flash');}
-  select(id);
- }
- const shown=sel?asks.filter(a=>a.id===rootID||groups.get(a.id).runs.length):asks;
- for(const a of shown)renderGroup(groups.get(a.id));
- renderGroup(loose);
- if(orphan.length){for(const s of orphan)inner.append(sessionRow(s,null));}
- askState.focus=focusSpan;
- if(askState.span&&byId[askState.span])focusSpan(askState.span);
+ main.replaceChildren(wrap);main.scrollTop=0;
 }
 
 // ---------------------------------------------------------------- nav
 function show(name){
   currentView='v-'+name;
+  const board=name==='board';
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on', v.id==='v-'+name));
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.v===name || (DRILL.has(name) && b.dataset.v==='traces') || (name==='ask' && b.dataset.v==='asks')));
-  $('#shead').hidden = !DRILL.has(name);$('#archive-filters').hidden=DRILL.has(name)||ASKS.has(name);
-  if (ASKS.has(name)){ document.body.classList.remove('loading'); statusLine.hidden=true; }
+  // Two sections: Traces (its list, stats and a session's drill views) and Board.
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.v===(board?'board':'traces')));
+  $('#trace-tabs').hidden=board;$('#range').hidden=board;
+  document.querySelectorAll('#trace-tabs button').forEach(b=>b.classList.toggle('on', b.dataset.v===name || (DRILL.has(name) && b.dataset.v==='traces')));
+  $('#shead').hidden = !DRILL.has(name);$('#archive-filters').hidden=DRILL.has(name)||board;
   document.querySelectorAll('.subnav button').forEach(b=>b.classList.toggle('on', b.dataset.v===name));
-  if (!built[name] || name==='ask'){ built[name]=true; ({stats:statsView, traces:tracesView, asks:asksView, ask:askView, transcript:transcriptView, timeline:()=>{drawTimeline(); timelineRight();}, sstats:sessionStatsView})[name](); }
+  if (!built[name] || board){ built[name]=true; ({stats:statsView, traces:tracesView, board:boardView, transcript:transcriptView, timeline:()=>{drawTimeline(); timelineRight();}, sstats:sessionStatsView})[name](); }
   else if (name==='timeline') drawTimeline();
+  if (board){ if (location.hash!==boardHash()) history.replaceState(null,'',location.pathname+location.search+boardHash()); return; }
+  if (name==='traces' && !archivePending && statusLine.hidden) setLoading(false);
   placeStatus();
   if (name==='transcript') requestAnimationFrame(()=>{ anchors=null; drawSpine(); onTermScroll(); });
-  location.hash = name==='transcript' && location.hash.startsWith('#t-') ? location.hash : name==='ask' ? askHref(askState.trace, askState.order, askState.span) : '#'+name;
+  location.hash = name==='transcript' && location.hash.startsWith('#t-') ? location.hash : '#'+name;
   if(!archivePending&&((name==='traces'&&!DATA.listTiming)||(name==='stats'&&!statsReusable())))refreshArchive(name);
 }
-document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+document.querySelectorAll('#tabs button,#trace-tabs button').forEach(b=>b.onclick=()=>{ if (b.dataset.v==='board') boardGo({}); else show(b.dataset.v); });
+if (DATA.board?.enabled) $('#tabs button[data-v=board]').hidden=false;
 document.addEventListener('keydown', e=>{
   if (e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
   if (currentView==='v-transcript'){
@@ -1903,8 +1654,14 @@ $('#theme').onclick=()=>{
 darkMQ.addEventListener?.('change', ()=>{ if (themeNow==='auto') applyTheme('auto'); });
 applyTheme(themeNow);
 header(); rangeBar();renderFilterBar();
-function route(){ const h=location.hash.slice(1); const ask=h.match(/^ask\/([^/]+)(?:\/order\/([^/]+))?(?:\/span\/([^/]+))?$/); if (ask){ const trace=decodeURIComponent(ask[1]), order=ask[2]?decodeURIComponent(ask[2]):'', span=ask[3]?decodeURIComponent(ask[3]):''; if (currentView==='v-ask' && trace===askState.trace && order===askState.order && askState.focus){ askState.span=span; askState.focus(span); return; } askState.trace=trace; askState.order=order; askState.span=span; show('ask'); } else if (h.startsWith('t-')){ show('transcript'); requestAnimationFrame(()=>jumpTo(h.slice(2))); } else if (h==='eval') show('transcript'); else show(['stats','traces','asks','transcript','timeline','sstats'].includes(h)?h:'stats'); }
-window.addEventListener('hashchange', ()=>{ if ('#'+currentView.slice(2)!==location.hash && !(currentView==='v-ask' && location.hash===askHref(askState.trace, askState.order, askState.span))) route(); });
+function route(){
+  const h=location.hash.slice(1);
+  if ((h==='board'||h.startsWith('board?')||h.startsWith('board/')) && DATA.board?.enabled){ parseBoardHash(h); show('board'); }
+  else if (h.startsWith('t-')){ show('transcript'); requestAnimationFrame(()=>jumpTo(h.slice(2))); }
+  else if (h==='eval') show('transcript');
+  else show(['stats','traces','transcript','timeline','sstats'].includes(h)?h:'stats');
+}
+window.addEventListener('hashchange', ()=>{ if (currentView==='v-board' ? location.hash!==boardHash() : '#'+currentView.slice(2)!==location.hash) route(); });
 route();
 window.addEventListener('popstate',()=>{if(new URLSearchParams(location.search).toString()!==params.toString())location.reload();});
 })();

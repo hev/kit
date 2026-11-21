@@ -2,7 +2,16 @@
 
 A private Go service can import `github.com/hev/kit/pkg/dashboard` and mount
 `NewHosted(Config, Resolver)` as an `http.Handler`. It serves the same embedded
-UI and read APIs as local `hev serve`. The local command is unchanged.
+UI and read APIs as local `hev serve`, except the Board tab: the hosted
+dashboard serves no board of its own, so its navigation shows **Traces** only
+and `/api/board/*` answers 404.
+
+A wrapper adds its own pages to the navigation with `Config.Tabs`, a list of
+`{Label, Href}` entries shown after Traces. The wrapper serves those paths
+itself, for example by routing them before this handler, so a Pro UI mounts
+more tabs without forking `internal/serve`. Only relative paths (`/pro/keys`)
+and `http(s)` URLs are shown; anything else is dropped, and labels are
+escaped.
 
 ```go
 handler, err := dashboard.NewHosted(dashboard.Config{

@@ -50,7 +50,7 @@ const pickFilter=async(page,key,value)=>{
   assert.equal(await page.locator('#v-traces .grid').evaluate(e=>getComputedStyle(e).opacity),'0.4');
   await page.waitForFunction(()=>!document.body.classList.contains('loading'));
   assert.ok(await page.locator('#v-traces tbody tr').count());
-  await page.locator('#tabs [data-v="stats"]').click();
+  await page.locator('#trace-tabs [data-v="stats"]').click();
   await page.waitForFunction(()=>!document.body.classList.contains('loading'));
   assert.match(await page.locator('#v-stats h2').innerText(),/Layer [\d.]+ s, \d+ quer/);
   await page.locator('.heat button').first().waitFor({state:'visible'});

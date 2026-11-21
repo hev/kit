@@ -266,3 +266,32 @@ func TestGatewayInheritsRequestCancellation(t *testing.T) {
 		t.Fatal("cancellation not exercised")
 	}
 }
+
+// Rule: the hosted dashboard serves Traces, adds the wrapper's tabs, and
+// mounts neither Asks nor a board of its own; unsafe tab links are dropped.
+func TestHostedNavigation(t *testing.T) {
+	h, err := dashboard.NewHosted(dashboard.Config{Endpoint: "http://127.0.0.1:1", Tabs: []dashboard.Tab{
+		{Label: "Orders", Href: "/pro/orders"}, {Label: "Bad", Href: "javascript:alert(1)"},
+	}}, func(*http.Request) (dashboard.Credentials, error) {
+		return dashboard.Credentials{Key: "scoped", Namespace: "kit-a"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, `data-v="traces">Traces<`) || !strings.Contains(body, `<a class="tab" href="/pro/orders">Orders</a>`) {
+		t.Fatalf("hosted page = %d, missing Traces or wrapper tab", w.Code)
+	}
+	if strings.Contains(body, "javascript:") || !strings.Contains(body, `"board":{"enabled":false}`) {
+		t.Error("hosted page shows an unsafe tab or enables a board it does not serve")
+	}
+	for _, path := range []string{"/api/asks", "/api/asks/x", "/api/board/boards", "/api/board/threads/1"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, w.Code)
+		}
+	}
+}
