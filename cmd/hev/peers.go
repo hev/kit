@@ -54,7 +54,20 @@ func newPeersCommand(pinned bool) *cobra.Command {
 				return c.Help()
 			}
 		}
-		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && !pinned && !(len(args) > 0 && (args[0] == "inbox-hook" || args[0] == "runtime")) {
+		args, err := workspaceRawArgs(args)
+		if err != nil {
+			return err
+		}
+		selected, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
+		scope, err := peersWorkspaceScope(selected)
+		if err != nil {
+			return err
+		}
+		listing := len(args) == 0 || strings.HasPrefix(args[0], "-") || args[0] == "ls" || args[0] == "list"
+		if backend := os.Getenv("HEV_PEERS_BACKEND"); backend != "" && !pinned && !(listing && scope.Enabled) && !(len(args) > 0 && (args[0] == "inbox-hook" || args[0] == "runtime")) {
 			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 				args = append([]string{"ls"}, args...)
 			} else if args[0] == "list" {
@@ -66,18 +79,18 @@ func newPeersCommand(pinned bool) *cobra.Command {
 			child.Stdin, child.Stdout, child.Stderr = c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr()
 			return child.Run()
 		}
-		if nativePeersEngine(args) {
+		if nativePeersEngine(args) && !(listing && scope.Enabled) {
 			return peers.New().Run(c.Context(), args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr())
 		}
 		if len(args) > 0 && (args[0] == "list" || args[0] == "show") {
 			args = append([]string{map[string]string{"list": "ls", "show": "read"}[args[0]]}, args[1:]...)
 		}
-		if code := compat.Main(args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr(), func(m compat.Message) {
+		if code := compat.MainScoped(args, c.InOrStdin(), c.OutOrStdout(), c.ErrOrStderr(), func(m compat.Message) {
 			hooks.ObservePeerMessage(c.Context(), hooks.PeerMessage{
 				Activity: hooks.Activity{Host: m.Host, ID: m.ID, Cwd: m.Cwd},
 				From:     m.From, To: m.To, Chat: m.Chat, Kind: m.Kind, ReplyTo: m.ReplyTo,
 			}, m.Text)
-		}); code != 0 {
+		}, scope); code != 0 {
 			return &commandExit{code}
 		}
 		return nil

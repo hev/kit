@@ -74,6 +74,7 @@ func newDispatchClose(load func() (dispatch.Config, error), host *string, asJSON
 // whose inventory lists the run when hostName is empty. It returns the host
 // it closed the run on.
 func closeDispatchRun(ctx context.Context, cfg dispatch.Config, hostName, name, reason, supersededBy string) (dispatch.Response, string, error) {
+	ctx = dispatch.WorkspaceContext(ctx, cfg.SelectedWorkspace)
 	hostName, h, err := locateDispatchRun(cfg, hostName, name)
 	if err != nil {
 		return dispatch.Response{}, hostName, err
@@ -89,6 +90,9 @@ func closeDispatchRun(ctx context.Context, cfg dispatch.Config, hostName, name, 
 // one host whose inventory lists the run.
 func locateDispatchRun(cfg dispatch.Config, hostName, name string) (string, dispatch.Host, error) {
 	if hostName != "" {
+		if err := cfg.SelectedWorkspace.RequireHost(hostName); err != nil {
+			return hostName, dispatch.Host{}, err
+		}
 		h, ok := cfg.Hosts[hostName]
 		if !ok {
 			return hostName, h, fmt.Errorf("unknown host %s", hostName)
