@@ -19,6 +19,7 @@ repos each host accepts. Add headless machines locally or in the cloud.
   hev d / s     Start capture or check daemon status
   hev dispatch  Send an order and follow its run
   hev swarm     Put an orchestrator and workers on a problem
+  hev subs      Check agent plan usage before sending work
   hev watch     Watch sources with deterministic instructions
   hev peers     Coordinate agent sessions
   hev board     Keep shared findings and decisions
@@ -101,7 +102,7 @@ func groupFactoryCommands(root *cobra.Command) {
 	root.SetCompletionCommandGroupID("other")
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
-		case "up", "d", "s", "dispatch", "swarm", "peers", "board", "traces", "watch":
+		case "up", "d", "s", "dispatch", "swarm", "subscriptions", "peers", "board", "traces", "watch":
 			cmd.GroupID = "factory"
 		default:
 			cmd.GroupID = "other"

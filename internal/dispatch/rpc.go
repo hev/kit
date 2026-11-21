@@ -179,6 +179,9 @@ type Response struct {
 	Review *ReviewFetch `json:"review,omitempty"`
 	// Adopt answers adopt.
 	Adopt *AdoptResult `json:"adopt,omitempty"`
+	// Subscriptions answers a subscriptions read: the hev.subscriptions
+	// list, or one subscription's detail when the request named one.
+	Subscriptions json.RawMessage `json:"subscriptions,omitempty"`
 }
 
 // OrchestratorShowFiles are the state files orchestrate show prints, locally
