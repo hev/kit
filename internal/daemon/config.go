@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"github.com/hev/kit/internal/layerenv"
@@ -334,8 +333,13 @@ func SetActiveBucket(name string) (string, error) {
 		return "", err
 	}
 
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	// Validate bucket definitions using the usual typed config.
 	var fc fileConfig
-	if _, err := toml.DecodeFile(path, &fc); err != nil {
+	if _, err := toml.Decode(string(raw), &fc); err != nil {
 		return "", fmt.Errorf("read config %s: %w", path, err)
 	}
 	found := false
@@ -348,13 +352,18 @@ func SetActiveBucket(name string) (string, error) {
 	if !found {
 		return "", fmt.Errorf("bucket %q not found in %s", name, path)
 	}
-	fc.ActiveBucket = name
-
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(fc); err != nil {
-		return "", fmt.Errorf("encode config: %w", err)
+	// Update the full document so independently loaded settings such as jobs,
+	// cluster and notifications survive a bucket change.
+	var doc map[string]any
+	if _, err := toml.Decode(string(raw), &doc); err != nil {
+		return "", fmt.Errorf("read bucket configuration: %w", err)
 	}
-	if err := platformops.WriteFileAtomic(path, buf.Bytes(), 0o600); err != nil {
+	doc["active_bucket"] = name
+	data, err := tomlBytes(doc)
+	if err != nil {
+		return "", err
+	}
+	if err := platformops.WriteFileAtomic(path, data, 0o600); err != nil {
 		return "", err
 	}
 	return path, nil

@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"github.com/hev/kit/internal/cluster"
+	"github.com/hev/kit/internal/jobs"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/update"
 	"os"
@@ -91,5 +93,54 @@ func TestSetActiveBucketPreservesUpdateSettings(t *testing.T) {
 	cfg, e := update.LoadConfig(path)
 	if e != nil || cfg.Channel != "edge" || !cfg.Auto || cfg.Interval != "2h" || len(cfg.PostUpdate) != 1 {
 		t.Fatalf("lost [update]: %+v %v", cfg, e)
+	}
+}
+
+func TestSetActiveBucketPreservesScheduledJobs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	t.Setenv("HEV_CONFIG", path)
+	text := `
+active_bucket = "old"
+
+[[buckets]]
+name = "example"
+
+[[jobs]]
+name = "placed"
+at = "09:30"
+tz = "America/New_York"
+cmd = ["job", "argument"]
+enabled = false
+placement = ["node-a", "node-b"]
+env_refs = { TOKEN = "op://test/item/field" }
+
+[cluster]
+bind = "127.0.0.1:0"
+name = "node-a"
+key_ref = "op://test/item/cluster"
+`
+	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetActiveBucket("example"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil || cfg.ActiveBucket != "example" {
+		t.Fatal("expected bucket selection to change")
+	}
+	schedules, err := jobs.Load(path)
+	if err != nil || len(schedules) != 1 {
+		t.Fatal("bucket selection lost the scheduled job")
+	}
+	j := schedules[0]
+	if j.Name != "placed" || j.At != "09:30" || j.TZ != "America/New_York" ||
+		j.Enabled == nil || *j.Enabled || len(j.Placement) != 2 || len(j.Cmd) != 2 ||
+		j.EnvRefs["TOKEN"] != "op://test/item/field" {
+		t.Fatal("bucket selection modified a scheduled job")
+	}
+	membership, err := cluster.LoadConfig(path)
+	if err != nil || membership == nil || membership.Name != "node-a" {
+		t.Fatal("bucket selection must preserve SWIM settings for placed jobs")
 	}
 }
