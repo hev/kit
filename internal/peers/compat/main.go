@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// Usage is the reference's module docstring, plus the two helpers this
-// implementation folds in as subcommands.
+// Usage is the reference's module docstring, plus the helpers this
+// implementation folds in.
 const Usage = `peers: see and talk to the other coding agents running in tmux.
 
   peers [ls] [-a] [--everywhere] [--json]
@@ -35,6 +35,7 @@ const Usage = `peers: see and talk to the other coding agents running in tmux.
   peers beacon                     push this machine's sessions to $PEERS_HOSTS and
                                    deliver what they queued for it (launchd, every minute)
   peers inbox-hook                 UserPromptSubmit hook: inject the bound inbox (peers-inbox-hook)
+  peers inbox --wait [--timeout D] Stop hook: block until new bound inbox items, then exit 2
   peers runtime codex|claude|pi [ARGS...]
                                    launch a harness owning a receipt capability (peers-runtime)
 

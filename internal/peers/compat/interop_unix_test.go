@@ -4,6 +4,7 @@ package compat
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/peers"
 )
 
 // Interop qualification against the Python reference (hev/skills
@@ -29,6 +32,13 @@ func TestMain(m *testing.M) {
 			args = args[1:]
 		}
 		os.Exit(Main(args, os.Stdin, os.Stdout, os.Stderr))
+	}
+	if os.Getenv("PEERS_NATIVE_MAIN") == "1" { // the engine dispatch notifications send through
+		if err := peers.New().Run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -80,7 +90,7 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 		skip("tmux required")
 	}
 	python, err := exec.Command("python3", "-c", "import sys;print(sys.executable)").Output()
-	if err != nil {
+	if err != nil && withReference {
 		skip("python3 required")
 	}
 	root, err := os.MkdirTemp("/tmp", "peers-interop-") // short: tmux socket paths are limited
@@ -90,7 +100,9 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 	c := &cluster{t: t, root: root, reference: reference, python: strings.TrimSpace(string(python)), hosts: map[string]*host{}}
 	c.shared = filepath.Join(root, "shared")
 	must(t, os.MkdirAll(c.shared, 0o755))
-	must(t, os.Symlink(c.python, filepath.Join(c.shared, "python3")))
+	if c.python != "" {
+		must(t, os.Symlink(c.python, filepath.Join(c.shared, "python3")))
+	}
 	// ssh [-o OPT]... HOST CMD runs CMD as HOST; ssh -G prints no aliases.
 	ssh := `#!/bin/sh
 config=
@@ -696,9 +708,9 @@ func TestInteropWaitPasteAndErrors(t *testing.T) {
 	}
 	// Without a pane the sender comes from process ancestry (or is refused), identically.
 	h.same("", norm, "send", "bravo", "who am I")
-	// Help is the reference text plus the two folded-in helpers.
+	// Help is the reference text plus the folded-in helpers.
 	py, goHelp := h.ok(pyImpl, "", "", "--help"), h.ok(goImpl, "", "", "--help")
-	if strings.Replace(goHelp, "  peers inbox-hook                 UserPromptSubmit hook: inject the bound inbox (peers-inbox-hook)\n  peers runtime codex|claude|pi [ARGS...]\n                                   launch a harness owning a receipt capability (peers-runtime)\n", "", 1) != py {
+	if strings.Replace(goHelp, "  peers inbox-hook                 UserPromptSubmit hook: inject the bound inbox (peers-inbox-hook)\n  peers inbox --wait [--timeout D] Stop hook: block until new bound inbox items, then exit 2\n  peers runtime codex|claude|pi [ARGS...]\n                                   launch a harness owning a receipt capability (peers-runtime)\n", "", 1) != py {
 		t.Fatalf("help drifted\npython: %s\ngo: %s", py, goHelp)
 	}
 }
