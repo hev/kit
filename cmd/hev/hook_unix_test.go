@@ -364,7 +364,7 @@ func TestHookRecordsAndDeliversEveryPickupWithSlowObserver(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(os.Getenv("HEV_CONFIG")), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(os.Getenv("HEV_CONFIG"), []byte("[hooks]\ntimeout = \"2s\"\n"), 0600); err != nil {
+	if err := os.WriteFile(os.Getenv("HEV_CONFIG"), []byte("[hooks]\ntimeout = \"10s\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	store := steer.Store{Dir: os.Getenv(steer.EnvDir), Target: os.Getenv(steer.EnvTarget)}
@@ -379,11 +379,17 @@ func TestHookRecordsAndDeliversEveryPickupWithSlowObserver(t *testing.T) {
 	bin := filepath.SplitList(os.Getenv("PATH"))[0]
 	t.Setenv("PICKUP_CAPTURE", filepath.Join(home, "observer.jsonl"))
 	t.Setenv("SLOW_PICKUP", first.ID)
+	t.Setenv("PICKUP_RELEASE", filepath.Join(home, "second-delivered"))
+	// The first handler cannot finish until the second reaches its observer.
+	// A serial implementation runs out of budget before delivering both.
 	script := `#!/bin/sh
 [ "$1" = steer-acked ] || exit 0
 payload=$(/bin/cat)
 printf '%s\n' "$payload" >> "$PICKUP_CAPTURE"
-case "$payload" in *"$SLOW_PICKUP"*) exec /bin/sleep 60;; esac
+case "$payload" in
+  *"$SLOW_PICKUP"*) while [ ! -f "$PICKUP_RELEASE" ]; do /bin/sleep 0.02; done;;
+  *) : > "$PICKUP_RELEASE";;
+esac
 `
 	if err := os.WriteFile(filepath.Join(bin, "hev-hook-record-pickup"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
