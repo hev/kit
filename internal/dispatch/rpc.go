@@ -26,6 +26,9 @@ var validationNotificationLauncher = launchValidationNotification
 
 var runLauncher = launch
 
+// SubscriptionsHandler answers a local subscriptions RPC when wired by cmd/hev.
+var SubscriptionsHandler func(ctx context.Context, q Request) (json.RawMessage, error)
+
 type Request struct {
 	ScopeOwner      *Host `json:"scope_owner,omitempty"`
 	excludeFinished string
@@ -179,6 +182,9 @@ type Response struct {
 	Review *ReviewFetch `json:"review,omitempty"`
 	// Adopt answers adopt.
 	Adopt *AdoptResult `json:"adopt,omitempty"`
+	// Subscriptions answers a subscriptions read: the hev.subscriptions
+	// list, or one subscription's detail when the request named one.
+	Subscriptions json.RawMessage `json:"subscriptions,omitempty"`
 }
 
 // OrchestratorShowFiles are the state files orchestrate show prints, locally
@@ -367,6 +373,14 @@ func Handle(q Request) (r Response, handleErr error) {
 	case "secrets-summary":
 		r.SecretSummary, handleErr = secrets.Summary(time.Now())
 		r.SecretMeter = secrets.SavedMeter(time.Now())
+		return r, handleErr
+	case "subscriptions":
+		if SubscriptionsHandler == nil {
+			return r, fmt.Errorf("unknown action")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		r.Subscriptions, handleErr = SubscriptionsHandler(ctx, q)
 		return r, handleErr
 	case "update":
 		// Owner only: restricted keys arrive via HandleGrant, which refuses it.

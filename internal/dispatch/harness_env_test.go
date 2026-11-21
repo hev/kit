@@ -77,6 +77,7 @@ local = true
 
 [harnesses.agy]
 model_provider = "gemini"
+plan = "ultra"
 
 [harnesses.agy.env_refs]
 GEMINI_API_KEY = "`+testGeminiRef+`"
@@ -93,7 +94,7 @@ env_refs = { ANTHROPIC_API_KEY = "op://example/anthropic/credential" }
 			t.Fatalf("%s: %v", name, err)
 		}
 		agy := c.Harnesses["agy"]
-		if agy.ModelProvider != "gemini" || agy.EnvRefs["GEMINI_API_KEY"] != testGeminiRef {
+		if agy.ModelProvider != "gemini" || agy.Plan != "ultra" || agy.EnvRefs["GEMINI_API_KEY"] != testGeminiRef {
 			t.Fatalf("%s: agy settings %+v", name, agy)
 		}
 		if c.Harnesses["claude"].EnvRefs["ANTHROPIC_API_KEY"] != "op://example/anthropic/credential" {
@@ -133,6 +134,7 @@ func TestHarnessConfigRejectsInvalid(t *testing.T) {
 		"[harnesses.gpt]\nmodel_provider = \"gemini\"\n":                   "harnesses.gpt",
 		"[harnesses.claude]\nmodel_provider = \"gemini\"\n":                "only agy",
 		"[harnesses.agy]\nmodel_provider = \"bad provider\"\n":             "invalid provider",
+		"[harnesses.agy]\nplan = \"bad/plan\"\n":                           "invalid plan",
 		"[harnesses.agy]\nmodel = \"x\"\n":                                 "unknown config key",
 		"[harnesses.agy.env_refs]\n\"1BAD\" = \"" + testGeminiRef + "\"\n": "invalid environment name",
 		"[harnesses.agy.env_refs]\nGEMINI_API_KEY = \"plain-value\"\n":     "not a secret reference",

@@ -26,6 +26,7 @@ func addDirectSurface() {
 	addRemovedVerbs()
 	rootCmd.AddCommand(newNodesCommand())
 	rootCmd.AddCommand(newAdmissionCommand())
+	rootCmd.AddCommand(newSubscriptionsCommand())
 	rootCmd.AddCommand(newPeersCommand(false))
 	traces := &cobra.Command{Use: "traces", Short: "List, inspect and search captured traces", Long: tracesLong, Args: cobra.MaximumNArgs(1), RunE: runLs}
 	traces.Flags().AddFlagSet(lsCmd.Flags())

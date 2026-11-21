@@ -70,6 +70,7 @@ type Rate struct {
 }
 type Plan struct {
 	Tier        string   `toml:"tier" json:"tier"`
+	PlanLabel   string   `toml:"plan,omitempty" json:"plan,omitempty"`
 	ResetMinute int      `toml:"reset_minute" json:"reset_minute"`
 	ResetSecond int      `toml:"reset_second" json:"reset_second"`
 	ResetHour   int      `toml:"reset_hour" json:"reset_hour"`
