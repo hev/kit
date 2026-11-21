@@ -20,7 +20,7 @@ func newNodesCommand() *cobra.Command {
 	var ttl time.Duration
 	var administrators, asJSON bool
 	var allow []string
-	root := &cobra.Command{Use: "nodes", Short: "Invite teammates and manage SSH dispatch access"}
+	root := &cobra.Command{Use: "nodes", Hidden: true, Short: "Invite teammates and manage SSH dispatch access"}
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
 	var long bool
 	authorized := func() (string, string, error) {
@@ -61,14 +61,14 @@ func newNodesCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
-		join := "hev nodes join " + r.User + "@" + r.Address + " " + r.Code()
+		join := "hev cluster join " + r.User + "@" + r.Address + " " + r.Code()
 		if asJSON {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"name": r.Name, "code": r.Code(), "join": join, "expires": r.Expires})
 		}
 		out := cmd.OutOrStdout()
 		fmt.Fprintf(out, "Invite code for %s: %s (single use, expires %s, locks after %d wrong tries)\n", r.Name, r.Code(), r.Expires.Local().Format("2006-01-02 15:04 MST"), nodes.MaxAttempts)
 		fmt.Fprintf(out, "On %s's machine: %s\n", r.Name, join)
-		fmt.Fprintf(out, "Then check the fingerprint with them and approve: hev nodes accept %s\n", r.Name)
+		fmt.Fprintf(out, "Then check the fingerprint with them and approve: hev cluster accept %s\n", r.Name)
 		return nil
 	}}
 	invite.Flags().StringVar(&address, "address", "", "Host's reachable SSH address (required)")
@@ -94,7 +94,7 @@ func newNodesCommand() *cobra.Command {
 				return e
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), request)
-			fmt.Fprintln(cmd.ErrOrStderr(), "Send this request to the owner for: hev nodes accept REQUEST")
+			fmt.Fprintln(cmd.ErrOrStderr(), "Send this request to the owner for: hev cluster accept REQUEST")
 			// Join never edits harness homes: setup is a separate, consenting step.
 			fmt.Fprintln(cmd.ErrOrStderr(), "Then teach your agents to dispatch here: hev skills setup")
 			return nil
@@ -105,7 +105,7 @@ func newNodesCommand() *cobra.Command {
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Joined %s as %s (host key %s). Waiting for the owner to approve.\n", j.Address, j.Name, j.Fingerprint)
 		fmt.Fprintf(cmd.OutOrStdout(), "Your key: %s\n", keyFingerprint(home, j.Name))
-		fmt.Fprintf(cmd.OutOrStdout(), "Read your key fingerprint to the owner; once they run hev nodes accept, dispatch with --host %s\n", j.Name)
+		fmt.Fprintf(cmd.OutOrStdout(), "Read your key fingerprint to the owner; once they run hev cluster accept, dispatch with --host %s\n", j.Name)
 		// Join never edits harness homes: setup is a separate, consenting step.
 		fmt.Fprintln(cmd.ErrOrStderr(), "Then teach your agents to dispatch here: hev skills setup")
 		return nil
@@ -198,6 +198,7 @@ func newNodesCommand() *cobra.Command {
 		printInvitations(cmd, invites)
 		return nil
 	}}
+	ls.Short = "List SSH dispatch access and invitations"
 	root.AddCommand(ls, &cobra.Command{Use: "remove NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return nodes.Default().Remove(args[0]) }})
 	return root
 }
@@ -249,7 +250,7 @@ func printInvitations(cmd *cobra.Command, invites []invitationEntry) {
 		}
 		line := fmt.Sprintf("%s invite=%s expires=%s", x.Name, x.State, x.Expires.Format(time.RFC3339))
 		if x.Fingerprint != "" {
-			line += " key=" + x.Fingerprint + " (accept: hev nodes accept " + x.Name + ")"
+			line += " key=" + x.Fingerprint + " (accept: hev cluster accept " + x.Name + ")"
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), line)
 	}

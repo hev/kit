@@ -5,10 +5,10 @@ metadata:
   audience: member
 ---
 
-A joined host (`hev-node-*` in `hev nodes ls` and `hev dispatch hosts`) runs agents as its owner's account. Your key can start runs and list, show, logs, say and stop only runs bearing your sender name. Pass the host explicitly; never guess routing.
+A joined host (`hev-node-*` in `hev cluster ls --ssh` and `hev dispatch hosts`) runs agents as its owner's account. Your key can start runs and list, show, logs, say and stop only runs bearing your sender name. Pass the host explicitly; never guess routing.
 
 ```sh
-hev nodes ls
+hev cluster ls --ssh
 hev dispatch hosts
 hev dispatch run example-repo "Fix the failing parser test" --host hev-node-EXAMPLE --accept "go test ./... passes"
 hev dispatch order.md --host hev-node-EXAMPLE

@@ -13,6 +13,7 @@ import (
 
 	"github.com/hev/kit/internal/cluster"
 	"github.com/hev/kit/internal/testenv"
+	"github.com/spf13/cobra"
 )
 
 func clusterWait(t *testing.T, what string, check func() bool) {
@@ -107,7 +108,10 @@ func TestClusterCLIThreeMembers(t *testing.T) {
 	}
 	defer stop()
 	config := filepath.Join(dir, "config.toml")
-	if e = os.WriteFile(config, []byte("[cluster]\nbind = \"127.0.0.1:0\"\nkey_ref = \"secret://fixture\"\n"), 0600); e != nil {
+	if e = os.WriteFile(config, []byte(`[cluster]
+bind = "127.0.0.1:0"
+key_ref = "secret://fixture"
+`), 0600); e != nil {
 		t.Fatal(e)
 	}
 	t.Setenv("HEV_CONFIG", config)
@@ -182,7 +186,7 @@ func TestClusterCLIDisabledHint(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "missing.toml")
 	t.Setenv("HEV_CONFIG", p)
 	t.Setenv(cluster.EndpointEnv, "invalid-must-not-contact")
-	for _, args := range [][]string{{"ls"}, {"ls", "--json"}, {"status"}, {"status", "--json"}, {"join", "192.0.2.1:7946"}, {"leave"}} {
+	for _, args := range [][]string{{"status"}, {"status", "--json"}, {"join", "192.0.2.1:7946"}, {"leave"}} {
 		cmd := newClusterCommand()
 		var out bytes.Buffer
 		cmd.SetOut(&out)
@@ -194,5 +198,58 @@ func TestClusterCLIDisabledHint(t *testing.T) {
 		if strings.TrimSpace(out.String()) != clusterHint {
 			t.Fatalf("unexpected disabled output %q", out.String())
 		}
+	}
+}
+
+func TestClusterSSHSurface(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "missing.toml"))
+	t.Setenv(cluster.EndpointEnv, "invalid-must-not-contact")
+
+	run := func(args ...string) string {
+		t.Helper()
+		root := &cobra.Command{Use: "hev"}
+		root.AddCommand(newClusterCommand(), newNodesCommand())
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+
+	if help := run("--help"); !strings.Contains(help, "cluster ") || strings.Contains(help, "  nodes ") {
+		t.Fatalf("root help: %s", help)
+	}
+	help := run("cluster", "--help")
+	for _, name := range []string{"invite", "join", "accept", "pending", "ls", "status", "leave"} {
+		if !strings.Contains(help, "\n  "+name+" ") {
+			t.Fatalf("cluster help missing %s:\n%s", name, help)
+		}
+	}
+	if strings.Contains(help, "\n  enroll ") {
+		t.Fatalf("cluster help exposed forced command: %s", help)
+	}
+	want := run("nodes", "ls", "--json")
+	if !strings.Contains(want, `"invites":[]`) {
+		t.Fatalf("legacy SSH listing: %s", want)
+	}
+	if got := run("cluster", "ls", "--json"); got != want {
+		t.Fatalf("default SSH listing: got %s, want %s", got, want)
+	}
+	config := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(config, []byte(`[cluster]
+bind = "127.0.0.1:0"
+key_ref = "secret://fixture"
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_CONFIG", config)
+	if got := run("cluster", "ls", "--ssh", "--json"); got != want {
+		t.Fatalf("explicit SSH listing: got %s, want %s", got, want)
 	}
 }

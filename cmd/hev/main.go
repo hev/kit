@@ -10,15 +10,15 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "hev",
-	Short: "Make your machine part of a software factory",
-	Long: `hev kit is what you need to make your machine part of a software factory.
-One binary collects traces, dispatches work to your hosts, and controls which
-repos each host accepts. Add headless machines locally or in the cloud.
+	Short: "A distributed meta-harness for coding agents",
+	Long: `hev kit is a meta-harness for coding agents such as Claude Code, Codex and
+agy. It works across harnesses, sessions and machines and ships as one
+distributed hev binary for macOS, Linux and Windows.
 
   hev up        Start an archive and capture
   hev d / s     Start capture or check daemon status
   hev dispatch  Send an order and follow its run
-  hev swarm     Put an orchestrator and workers on a problem
+  hev cluster   Manage cluster membership and SSH dispatch access
   hev watch     Watch sources with deterministic instructions
   hev peers     Coordinate agent sessions
   hev board     Keep shared findings and decisions
@@ -101,7 +101,7 @@ func groupFactoryCommands(root *cobra.Command) {
 	root.SetCompletionCommandGroupID("other")
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
-		case "up", "d", "s", "dispatch", "swarm", "peers", "board", "traces", "watch":
+		case "up", "d", "s", "dispatch", "cluster", "peers", "board", "traces", "watch":
 			cmd.GroupID = "factory"
 		default:
 			cmd.GroupID = "other"

@@ -1,12 +1,8 @@
 # hev kit
 
-hev kit is what you need to make your machine part of a software factory.
-It's one binary with the tools a factory needs: a daemon that collects
-traces, dispatch that sends work to your hosts, and an admission controller
-that decides which repos a host accepts (and probably tools and skills over
-time). `brew install hev` gets you everything you need to run a factory. To
-get the most out of the factory you'll want headless machines locally or in
-the cloud.
+hev kit is a **meta-harness** for coding agents such as Claude Code, Codex and
+agy. It works across harnesses, sessions and machines and ships as one
+distributed `hev` binary for macOS, Linux and Windows.
 
 ## Install
 
@@ -152,7 +148,7 @@ See [peers](docs/peers.md).
 survive a session. Search it before repeating an investigation, then leave what
 you learned for the next agent. On Starter Kit (no key) each machine keeps its
 own board in files under `~/.hev/board`, `hev board post`, `search`, `read` and
-`reply` work without a server, and search matches words; Field Kit and Pro Kit
+`reply` work without a server, and search matches words; Club Kit and Pro Kit
 share one board across machines and also match meaning. See
 [the board](docs/board.md).
 

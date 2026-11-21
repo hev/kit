@@ -149,7 +149,7 @@ func CmdPluginLine(path string, args []string) (string, error) {
 	parts := append([]string{path}, args...)
 	for i, part := range parts {
 		if strings.ContainsAny(part, "\"^&|<>()%!\r\n") {
-			return "", fmt.Errorf("unsafe metacharacter in batch plugin path or argument")
+			return "", fmt.Errorf("unsafe metacharacter in batch exec command path or argument")
 		}
 		parts[i] = "\"" + part + "\""
 	}

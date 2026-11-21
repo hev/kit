@@ -20,15 +20,15 @@ refuses to guess and asks for `--role`. Make an invitation with a
 reachable address and bot account:
 
 ```sh
-hev nodes invite alex --address 100.64.0.10 --user bot --expires 1h
+hev cluster invite alex --address 100.64.0.10 --user bot --expires 1h
 ```
 
 It prints a short code and the command the teammate runs:
 
 ```text
 Invite code for alex: 7K-Q4M2-XPWD (single use, expires 2026-11-09 15:00 UTC, locks after 5 wrong tries)
-On alex's machine: hev nodes join bot@100.64.0.10 7K-Q4M2-XPWD
-Then check the fingerprint with them and approve: hev nodes accept alex
+On alex's machine: hev cluster join bot@100.64.0.10 7K-Q4M2-XPWD
+Then check the fingerprint with them and approve: hev cluster accept alex
 ```
 
 Read or send the code privately. Use `--host-key FILE.pub` when the host's
@@ -36,21 +36,21 @@ ed25519 public key is not at the default path, `--allow repos` to grant the
 capability on accept, and `--expires` up to `24h`. The code is single use:
 it stops working once a teammate's request is recorded, after 5 wrong codes
 (the invitation locks), or at expiry. One invitation per name is open at a
-time; `hev nodes remove alex` withdraws an open, locked or pending one.
+time; `hev cluster remove alex` withdraws an open, locked or pending one.
 
 When the teammate has joined, their request is pending:
 
 ```sh
-hev nodes pending      # also shown by hev nodes ls
-# alex invite=pending expires=... key=SHA256:... (accept: hev nodes accept alex)
+hev cluster pending      # also shown by hev cluster ls --ssh
+# alex invite=pending expires=... key=SHA256:... (accept: hev cluster accept alex)
 ```
 
-Compare the `key=` fingerprint with the one `hev nodes join` printed on their
+Compare the `key=` fingerprint with the one `hev cluster join` printed on their
 machine (by voice or chat), then approve by name:
 
 ```sh
-hev nodes accept alex
-hev nodes ls
+hev cluster accept alex
+hev cluster ls --ssh
 ```
 
 Accept installs exactly the key the teammate proved with the code, with the
@@ -58,14 +58,14 @@ same forced command as before. A pending request must be accepted before the
 invitation expires. See [How short codes work](#how-short-codes-work) for the
 security design.
 
-`hev nodes invite --long` still prints the older pasted code (a base64url
+`hev cluster invite --long` still prints the older pasted code (a base64url
 invitation carrying the endpoint, pinned host key and a one-use token). The
-teammate runs `hev nodes join CODE` and sends back a request, which the owner
-pastes into `hev nodes accept REQUEST`. Use it where the enrollment key below
+teammate runs `hev cluster join CODE` and sends back a request, which the owner
+pastes into `hev cluster accept REQUEST`. Use it where the enrollment key below
 is unwanted.
 
 On Windows, run as the SSH account. Administrator accounts must use
-`--administrators` on both `hev nodes invite` and `hev nodes accept`, which chooses
+`--administrators` on both `hev cluster invite` and `hev cluster accept`, which chooses
 `C:\ProgramData\ssh\administrators_authorized_keys` and restricts its ACL to
 SYSTEM and Administrators. Standard users use `%USERPROFILE%\.ssh\authorized_keys`
 with SYSTEM and their own account. Unix uses `~/.ssh/authorized_keys` with mode
@@ -78,20 +78,20 @@ repositories themselves (see [Teammate-added repositories](#teammate-added-repos
 accept with `--allow repos`, or change it later without re-inviting:
 
 ```sh
-hev nodes accept alex --allow repos
-hev nodes allow alex repos
-hev nodes deny alex repos
+hev cluster accept alex --allow repos
+hev cluster allow alex repos
+hev cluster deny alex repos
 ```
 
 `allow`/`deny` rewrite only the host-owned grant record; the SSH key line is
-untouched and the change applies to the teammate's next RPC. `hev nodes ls`
+untouched and the change applies to the teammate's next RPC. `hev cluster ls --ssh`
 shows `allow=repos` (or `allow=-`). Grants made before this option existed
 carry no capabilities.
 
 Revoke a teammate with:
 
 ```sh
-hev nodes remove alex
+hev cluster remove alex
 ```
 
 This revokes their host-owned grant and removes exactly its managed key line.
@@ -110,7 +110,7 @@ commit it.
 Run the command the owner gave you:
 
 ```sh
-hev nodes join bot@100.64.0.10 7K-Q4M2-XPWD
+hev cluster join bot@100.64.0.10 7K-Q4M2-XPWD
 ```
 
 The host part can be an address or an SSH host name your SSH configuration
@@ -126,8 +126,8 @@ Join creates a dedicated SSH key, a pinned known-hosts file and SSH alias in
 `~/.ssh`, and appends a host to `~/.config/hev/dispatch.toml`. Use
 `--config FILE` for another dispatch configuration. Dispatch becomes
 available after the owner accepts. (For a `--long` code, run
-`hev nodes join CODE` and send the printed request back to the owner.) Find
-the host alias with `hev nodes ls`, then:
+`hev cluster join CODE` and send the printed request back to the owner.) Find
+the host alias with `hev cluster ls --ssh`, then:
 
 ```sh
 hev dispatch run project task --host hev-node-EXAMPLE
@@ -161,7 +161,7 @@ Then give your agents the member skills (any time; it is idempotent):
 hev skills setup
 ```
 
-`hev nodes join` prints this step but does not run it: join edits SSH and
+`hev cluster join` prints this step but does not run it: join edits SSH and
 dispatch configuration, and setup writes into your harness homes
 (`~/.claude/skills`, `~/.codex/skills`, and `~/.agents/skills` for pi and
 OpenCode), which join should not do without asking. Setup starts no daemon or
@@ -216,7 +216,7 @@ instead and acknowledged. A delivery failure leaves the notice queued for the
 next pull.
 
 The laptop treats pulled notices as host data. Each one arrives from
-`ALIAS/d-RUN`, where `ALIAS` is the local host alias from `hev nodes ls`, so a
+`ALIAS/d-RUN`, where `ALIAS` is the local host alias from `hev cluster ls --ssh`, so a
 host cannot pose as a local address. The reply must be a plain local session
 name: a notice addressed to `HOST/NAME`, a pane or anything else is printed
 instead. Notices with a malformed ID or empty text are reported as rejected and
@@ -354,7 +354,7 @@ that expects to linger as a cache daemon starts afresh on the next clone.
 
 ## Compatibility and website follow-up
 
-`hev nodes` replaces the old coordination-backed node registry CLI. `hev orders`
+`hev nodes` is a hidden compatibility command for managing SSH dispatch access. `hev orders`
 and `hev runs` have been removed. Consumers
 of the former `nodes list/show` registry shape need to call their backend or
 migrate; `nodes list` now aliases access listing and has a different shape.
@@ -366,12 +366,12 @@ aliases and ownership restrictions. No website sources change here.
 
 Short invite codes change these website pages (not edited here):
 
-- share-a-host: `hev nodes invite NAME --address A --user U [--allow repos]
-  [--administrators]` prints a short code and join line; `hev nodes pending`
+- share-a-host: `hev cluster invite NAME --address A --user U [--allow repos]
+  [--administrators]` prints a short code and join line; `hev cluster pending`
   (or `ls`) shows the teammate's key fingerprint; approve with
-  `hev nodes accept NAME`; the enrollment key exists only while an invitation
+  `hev cluster accept NAME`; the enrollment key exists only while an invitation
   is open; `--long` keeps the pasted flow.
-- join-a-host: `hev nodes join USER@HOST CODE`; read the printed key
+- join-a-host: `hev cluster join USER@HOST CODE`; read the printed key
   fingerprint to the owner; no request to paste back; the "could not prove"
   error means a wrong code or an impostor.
 - invited: replace the long code and request exchange with the code and the
@@ -380,7 +380,7 @@ Short invite codes change these website pages (not edited here):
 ## How short codes work
 
 The teammate has no key yet, so the exchange cannot ride a teammate's
-forced-command key, and the host should not open a port. `hev nodes invite`
+forced-command key, and the host should not open a port. `hev cluster invite`
 instead appends one more line to the owner's `authorized_keys`:
 
 ```text
@@ -388,12 +388,12 @@ restrict,command="\"/path/to/hev\" nodes enroll" ssh-ed25519 AAAA... hev-nodes-e
 ```
 
 The key on that line is the same in every `hev` build and its private half is
-public: `hev nodes join` uses it to open an SSH session that can only run
-`hev nodes enroll` (no shell, PTY or forwarding). Anyone who can reach the
+public: `hev cluster join` uses it to open an SSH session that can only run
+`hev cluster enroll` (no shell, PTY or forwarding). Anyone who can reach the
 host's sshd can therefore start an enrollment while an invitation is open,
 which is why everything rests on the code. The line is removed as soon as no
 invitation is open (request recorded, locked, withdrawn), and on the next
-`hev nodes` command after the last one expires; enrollment refuses expired
+`hev cluster` command after the last one expires; enrollment refuses expired
 invitations in any case. It works wherever SSH already reaches the host,
 including Windows OpenSSH, with no listener, firewall rule or daemon.
 
@@ -420,7 +420,7 @@ Every change to an invitation record (the attempt count, the pending
 request, consumption) is written to a sibling file, fsynced, renamed over the
 record and followed by a directory sync before the host sends anything, so a
 crash or power loss after an offer cannot forget the attempt. A record that
-does not parse fails closed for that invitation only: `hev nodes ls` shows it
+does not parse fails closed for that invitation only: `hev cluster ls --ssh` shows it
 as `unreadable` with its file, it matches no code, and the owner deletes the
 file. The member's bootstrap SSH session has a two-minute total deadline,
 after which ssh is killed; only the first 8 KiB of its error output is kept;
@@ -434,7 +434,7 @@ is removed last takes the newline out again, so the file returns to its
 original bytes however invitations and grants overlap.
 
 The pending request lives in the invitation's record (name, expiry, access
-ID) with the member's key and fingerprint; `hev nodes accept NAME` installs
+ID) with the member's key and fingerprint; `hev cluster accept NAME` installs
 exactly that key with the usual `dispatch rpc --node ID` forced command, and
 only before the invitation expires. Invitation records hold the code; protect
 the nodes directory as before.
