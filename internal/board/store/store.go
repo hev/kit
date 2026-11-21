@@ -351,36 +351,41 @@ func (s *layerStore) threadRows(ctx context.Context, filter any) ([]layer.Row, e
 }
 
 func (s *layerStore) Boards(ctx context.Context) ([]Board, error) {
-	rows, err := s.threadRows(ctx, nil)
+	out := append([]Board{}, Boards...)
+	err := s.scanThreads(ctx, nil, func(rows []layer.Row) (bool, error) {
+		for _, row := range rows {
+			countBoardThread(out, threadOf(row))
+		}
+		return false, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	threads := make([]Thread, len(rows))
-	for i, r := range rows {
-		threads[i] = threadOf(r)
-	}
-	return boardsOf(threads), nil
+	return out, nil
 }
 
 // boardsOf counts threads and posts per board.
 func boardsOf(threads []Thread) []Board {
 	out := append([]Board{}, Boards...)
-	idx := map[string]int{}
-	for i, b := range out {
-		idx[b.Slug] = i
-	}
 	for _, t := range threads {
-		i, ok := idx[t.Board]
-		if !ok {
-			continue
-		}
-		out[i].Threads++
-		out[i].Posts += t.Replies + 1
-		if t.Last != nil && (out[i].Last == nil || t.Last.Created.After(out[i].Last.Created)) {
-			out[i].Last = t.Last
-		}
+		countBoardThread(out, t)
 	}
 	return out
+}
+
+func countBoardThread(boards []Board, t Thread) {
+	for i := range boards {
+		b := &boards[i]
+		if b.Slug != t.Board {
+			continue
+		}
+		b.Threads++
+		b.Posts += t.Replies + 1
+		if t.Last != nil && (b.Last == nil || t.Last.Created.After(b.Last.Created)) {
+			b.Last = t.Last
+		}
+		return
+	}
 }
 
 func (s *Store) Board(ctx context.Context, slug string) (*Board, error) {
@@ -550,17 +555,32 @@ func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 }
 
 func (s *layerStore) Posts(ctx context.Context, threadID int64) ([]Post, error) {
-	rows, err := s.query(ctx, []any{"thread_id", "Eq", threadID}, []any{"n", "asc"}, all, s.withAuthorName(append(append([]string{}, postAttrs...), "body")))
-	if err != nil {
-		return nil, err
+	attrs := s.withAuthorName(append(append([]string{}, postAttrs...), "body"))
+	thread := []any{"thread_id", "Eq", threadID}
+	out := []Post{}
+	var lastN int64
+	var after any
+	for {
+		rows, err := s.query(ctx, and(thread, after), []any{"n", "asc"}, all, attrs)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			n := num(row, "n")
+			if after != nil && n <= lastN {
+				return nil, errors.New("board messages did not advance")
+			}
+			out = append(out, postOf(row))
+		}
+		if len(rows) < all {
+			sort.SliceStable(out, func(i, j int) bool { return out[i].N < out[j].N })
+			return out, nil
+		}
+		lastN = num(rows[len(rows)-1], "n")
+		after = []any{"n", "Gt", lastN}
 	}
-	out := make([]Post, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, postOf(r))
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].N < out[j].N })
-	return out, nil
 }
+
 func (s *layerStore) View(ctx context.Context, id int64) error {
 	t, err := s.Thread(ctx, id)
 	if err != nil {
