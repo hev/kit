@@ -41,6 +41,8 @@ type Request struct {
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
 	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
+	APILocalOnly     bool             `json:"api_local_only,omitempty"`
+	APILogLimit      int              `json:"api_log_limit,omitempty"`
 	Offset           int64            `json:"offset,omitempty"`
 	Action           string           `json:"action"`
 	Name             string           `json:"name"`
@@ -534,6 +536,9 @@ func Handle(q Request) (r Response, handleErr error) {
 				continue
 			}
 			if m.Forward != nil {
+				if q.APILocalOnly {
+					continue
+				}
 				ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 				remote, err := routeRPC(ctx, *m.Forward, Request{Action: "show", Name: m.Name})
 				cancel()
@@ -591,6 +596,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		return r, nil
 	}
 	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
+		if q.APILocalOnly {
+			return r, fmt.Errorf("order not found")
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
@@ -636,6 +644,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		// Resolve the owner again before choosing the inbox to append to.
 		if readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
 			unlock()
+			if q.APILocalOnly {
+				return r, fmt.Errorf("order not found")
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			return routeRPC(ctx, *m.Forward, q)
@@ -729,6 +740,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.Action == "rework" && readJSON(filepath.Join(dir, "meta.json"), &m) == nil && m.Forward != nil {
 			unlock()
 			locked = false
+			if q.APILocalOnly {
+				return r, fmt.Errorf("order not found")
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
 			if originalAction == "retry" {
@@ -1168,6 +1182,10 @@ func Handle(q Request) (r Response, handleErr error) {
 		closed, e = closeRun(dir, q)
 		r.Message, r.Files = closed.Message, closed.Files
 	case "logs":
+		if q.APILogLimit != 0 {
+			r.Log, r.Offset, r.Active, e = readAPILog(dir, q, live[q.Name])
+			return r, e
+		}
 		f, err := os.Open(filepath.Join(dir, "log"))
 		if err != nil && !os.IsNotExist(err) {
 			return r, err

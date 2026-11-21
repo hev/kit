@@ -8,6 +8,7 @@ import (
 	"github.com/hev/kit/internal/nodes"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/version"
+	ordersapi "github.com/hev/kit/pkg/orders/v1"
 	"github.com/spf13/cobra"
 	"io"
 	"os"
@@ -448,6 +449,14 @@ func newDispatchCommand() *cobra.Command {
 			// Restricted keys reach peers only through HandleGrant (peer-send to
 			// their own runs); the generic peers RPC is for unrestricted callers.
 			r, e = dispatch.HandleGrant(q, grant.Name, grant.Allow)
+		} else if q.Action == "orders-api" {
+			payload, err := json.Marshal(ordersapi.HandleRPC(cmd.Context(), q.Note))
+			if err != nil {
+				return err
+			}
+			return emit(dispatch.Response{Log: string(payload), Version: version.Version})
+		} else if q.Action == "peers-api" {
+			return emit(peers.HandleAPIRPC(cmd.Context(), q.Note))
 		} else if q.Action == "peers" {
 			r = peers.HandleRPC(cmd.Context(), q.Note)
 			r.Version = version.Version
@@ -462,7 +471,7 @@ func newDispatchCommand() *cobra.Command {
 		return emit(r)
 	}}
 	rpcCmd.Flags().StringVar(&nodeID, "node", "", "Host-owned SSH grant ID")
-	d.AddCommand(rpcCmd)
+	d.AddCommand(rpcCmd, dispatchRelayCommand())
 	return d
 }
 

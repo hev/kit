@@ -104,6 +104,9 @@ func handleSteer(q Request) (Response, error) {
 		return r, fmt.Errorf("order not found: %s", q.Name)
 	}
 	if m.Forward != nil {
+		if q.APILocalOnly {
+			return r, fmt.Errorf("order not found")
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
