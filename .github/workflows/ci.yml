@@ -109,6 +109,8 @@ jobs:
           cache: true
       - name: Updater tests on Windows
         run: go test -count=1 ./internal/update/
+      - name: Cron schedules on Windows
+        run: go test -count=1 ./internal/cron/
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for

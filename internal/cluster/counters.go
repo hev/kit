@@ -13,11 +13,12 @@ const maxWire = 1 << 20
 var ErrBound = errors.New("cluster fact exceeds bounds")
 
 type counterState struct {
-	Usage     map[string]UsagePolicy                  `json:"usage,omitempty"`
-	Version   int                                     `json:"v"`
-	Counts    map[string]map[string]map[string]uint64 `json:"counts"`
-	Registers map[string]time.Time                    `json:"registers"`
-	Meters    map[string]Meter                        `json:"meters"`
+	CronDeadlines map[string]time.Time                    `json:"cron_deadlines,omitempty"`
+	Usage         map[string]UsagePolicy                  `json:"usage,omitempty"`
+	Version       int                                     `json:"v"`
+	Counts        map[string]map[string]map[string]uint64 `json:"counts"`
+	Registers     map[string]time.Time                    `json:"registers"`
+	Meters        map[string]Meter                        `json:"meters"`
 }
 type Counters struct {
 	mu      sync.Mutex
@@ -49,6 +50,11 @@ func validWindow(w string, now time.Time) bool {
 	return e == nil && !t.After(now.UTC().Truncate(time.Minute).Add(time.Minute)) && !t.Before(now.UTC().Truncate(time.Minute).Add(-24*time.Hour-time.Minute))
 }
 func prune(s *counterState, now time.Time) {
+	for key, until := range s.CronDeadlines {
+		if !until.After(now) {
+			delete(s.CronDeadlines, key)
+		}
+	}
 	for node, u := range s.Usage {
 		if u.At.Before(now.Add(-24*time.Hour - usageSkew)) {
 			delete(s.Usage, node)
@@ -216,7 +222,11 @@ func (c *Counters) merge(b []byte) error {
 	raw, _ := json.Marshal(c.state)
 	var next counterState
 	_ = json.Unmarshal(raw, &next)
-	prune(&next, c.now())
+	now := c.now()
+	prune(&next, now)
+	if err := mergeCronDeadlines(&next, incoming.CronDeadlines, now); err != nil {
+		return err
+	}
 	if len(incoming.Usage) > 64 {
 		return ErrBound
 	}

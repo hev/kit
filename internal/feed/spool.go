@@ -23,6 +23,7 @@ const RecordSchema = "hev.feed.record/v1"
 const (
 	ThreadSession      = "session"
 	ThreadRun          = "run"
+	ThreadCron         = "cron"
 	ThreadOrchestrator = "orchestrator"
 	ThreadBoard        = "board"
 	ThreadEvidence     = "evidence"

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/cron"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
 	"github.com/hev/kit/internal/harness"
@@ -98,7 +99,12 @@ func Run(ctx context.Context) error {
 		return ErrRestart
 	}
 
-	defer startSecrets(ctx, logger)()
+	configuredCron, err := cron.Load(DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+	cache, membership, stopSidecars := startSecretSidecars(ctx, logger)
+	defer stopSidecars()
 	licenseCtx, stopLicense := context.WithCancel(ctx)
 	defer stopLicense()
 	go license.Refresh(licenseCtx)
@@ -165,6 +171,16 @@ func Run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	defer startOptionalPeers(ctx, cfg.ConfigPath, logger)()
+	cronRunner := cron.Runner{
+		Home: home, Membership: membership, Logger: logger,
+		Resolve: func(ctx context.Context, refs []secrets.Ref) (map[string]string, error) {
+			return cache.ResolveAs(ctx, "hevd cron", refs)
+		},
+		Notice: func(ctx context.Context, notice attention.Notice) error {
+			return attention.Default().Emit(ctx, notice, "")
+		},
+	}
+	defer cronRunner.Start(ctx, configuredCron)()
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {
@@ -382,12 +398,17 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 
 // The optional secrets sidecar must never prevent trace capture from starting.
 func startSecrets(ctx context.Context, logger *slog.Logger) func() {
+	_, _, stop := startSecretSidecars(ctx, logger)
+	return stop
+}
+
+func startSecretSidecars(ctx context.Context, logger *slog.Logger) (*secrets.Cache, cron.Membership, func()) {
 	cache := secrets.New()
 	closeSecrets, err := secrets.Serve(ctx, cache)
-	closeCluster := StartCluster(ctx, cache, logger)
+	membership, closeCluster := startCluster(ctx, cache, logger)
 	if err != nil {
 		logger.Warn("secrets endpoint unavailable; direct resolution remains available")
-		return closeCluster
+		return cache, membership, closeCluster
 	}
-	return func() { closeCluster(); closeSecrets() }
+	return cache, membership, func() { closeCluster(); closeSecrets() }
 }
