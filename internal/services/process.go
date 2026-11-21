@@ -68,7 +68,9 @@ func startServiceProcess(s Service, home, dir string, values map[string]string) 
 	stderr := &streamWriter{ring: ring, scrub: scrub}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.WaitDelay = 250 * time.Millisecond
+	// Allow in-process redaction writers enough time after fast child exit to
+	// drain the OS pipe buffer under heavy CPU/race load before closing pipes.
+	cmd.WaitDelay = 15 * time.Second
 	// Process group / Job Object termination is managed explicitly below so
 	// stop_timeout can deliver graceful termination before force kill.
 	cmd.Cancel = nil

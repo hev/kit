@@ -506,6 +506,9 @@ func TestRingLogCapAndSecretRedaction(t *testing.T) {
 
 	await(t, 30*time.Second, func() bool {
 		d, err := sup.Inspect(ctx, svc, 5)
+		if err == nil && d.Status == StatusFailed {
+			t.Fatalf("flood unexpectedly failed: %+v", d)
+		}
 		return err == nil && d.Status == StatusStopped && d.LastExit != nil && strings.Contains(d.Logs, "final-marker-line")
 	})
 	stop()
