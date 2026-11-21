@@ -196,7 +196,7 @@ var signalProcessGroup = func(pgid int) error { return syscall.Kill(-pgid, sysca
 // group kill: every signal targets a group number that is still reserved.
 func startSourceChild(c *exec.Cmd, cmdline string) (func(), error) {
 	if cmdline != "" {
-		return nil, fmt.Errorf("batch plugins require Windows")
+		return nil, fmt.Errorf("batch exec commands require Windows")
 	}
 	h, e := startGroupHolder()
 	if e != nil {

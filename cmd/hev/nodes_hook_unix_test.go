@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func TestNodesCommandsEmitOnlyAcceptedMembershipChanges(t *testing.T) {
+func TestClusterCommandsEmitOnlyAcceptedMembershipChanges(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("HEV_CONFIG", filepath.Join(home, "hooks.toml"))
@@ -37,7 +37,7 @@ func TestNodesCommandsEmitOnlyAcceptedMembershipChanges(t *testing.T) {
 	}
 	run := func(wantError bool, args ...string) string {
 		t.Helper()
-		cmd := newNodesCommand()
+		cmd := newClusterCommand()
 		cmd.SilenceErrors, cmd.SilenceUsage = true, true
 		var out bytes.Buffer
 		cmd.SetOut(&out)

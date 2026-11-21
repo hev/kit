@@ -10,7 +10,7 @@ import (
 
 func TestClusterHelpGroups(t *testing.T) {
 	root := &cobra.Command{Use: "hev"}
-	for _, name := range []string{"up", "d", "s", "dispatch", "swarm", "peers", "board", "traces", "version", "watch"} {
+	for _, name := range []string{"up", "d", "s", "dispatch", "cluster", "peers", "board", "traces", "version", "watch"} {
 		root.AddCommand(&cobra.Command{Use: name, Short: name, Run: func(*cobra.Command, []string) {}})
 	}
 	groupClusterCommands(root)

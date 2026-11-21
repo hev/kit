@@ -123,7 +123,7 @@ func (s Store) lock() (func(), error) {
 	}
 	unlock, e := platformops.LockPath(filepath.Join(s.Dir, "nodes.lock"), true)
 	if platformops.IsLockBusy(e) {
-		return nil, fmt.Errorf("nodes busy: another hev nodes command is running")
+		return nil, fmt.Errorf("nodes busy: another hev cluster command is running")
 	}
 	if e != nil {
 		return nil, fmt.Errorf("lock %s: %w", filepath.Join(s.Dir, "nodes.lock"), e)

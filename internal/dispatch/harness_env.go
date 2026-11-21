@@ -122,7 +122,7 @@ func harnessSecretEnv(ctx context.Context, harness string, h HarnessConfig, call
 	for _, n := range names {
 		for _, p := range plugin {
 			if strings.EqualFold(n, p) {
-				return nil, nil, fmt.Errorf("harnesses.%s.env_refs.%s: reserved for a source plugin (source.env %s)", harness, n, p)
+				return nil, nil, fmt.Errorf("harnesses.%s.env_refs.%s: reserved for a source exec command (source.env %s)", harness, n, p)
 			}
 		}
 	}
