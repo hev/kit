@@ -3,20 +3,24 @@
 package cli
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/hev/kit/internal/board/server"
+	"github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/hooks"
 )
 
 func TestBoardPostActivityHook(t *testing.T) {
 	const body = "token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
-	for _, mode := range []string{"capture", "off", "client", "hang", "fail", "rejected", "reply", "reply-client", "pin"} {
+	for _, mode := range []string{"capture", "off", "client", "hang", "fail", "rejected", "reply", "reply-client"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("HOME", dir)
@@ -40,8 +44,6 @@ func TestBoardPostActivityHook(t *testing.T) {
 					http.Error(w, `{"error":"rejected"}`, http.StatusForbidden)
 				case r.Method == "GET" && request == "/api/threads/42?peek=1":
 					_, _ = w.Write([]byte(`{"thread":{"id":42,"board":"watercooler","title":"Recorded title","tags":["test"]}}`))
-				case r.Method == "POST" && r.URL.Path == "/api/threads/42/pin":
-					_, _ = w.Write([]byte(`{"ok":true}`))
 				case r.Method == "POST" && request == "/api/threads/42/posts":
 					_, _ = w.Write([]byte(`{"id":"p:42:2","n":2,"author":"recorded","body":"` + body + `"}`))
 				case r.Method == "POST" && r.URL.Path == "/api/threads":
@@ -80,9 +82,6 @@ func TestBoardPostActivityHook(t *testing.T) {
 				args = []string{"reply", "42", "-m", body, "--json"}
 				entryURL, kind, id = entryURL+"#p2", "reply", "p:42:2"
 			}
-			if mode == "pin" {
-				args = []string{"pin", "42"}
-			}
 			start := time.Now()
 			out, err := run(t, args...)
 			if (err != nil) != (mode == "rejected") || (mode == "hang" && time.Since(start) > 10*time.Second) {
@@ -102,13 +101,10 @@ func TestBoardPostActivityHook(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if reply || mode == "pin" {
+			if reply {
 				var logged hooks.Event
 				decode(t, string(raw), &logged)
 				want := "board-reply"
-				if mode == "pin" {
-					want = "board-pin"
-				}
 				if logged.Event != want || logged.Data["thread_id"] != float64(42) || logged.Data["body"] != nil {
 					t.Fatalf("unexpected hook log: %s", raw)
 				}
@@ -167,5 +163,68 @@ func TestBoardPostActivityHook(t *testing.T) {
 				t.Fatalf("missing or unredacted body: %s", raw)
 			}
 		})
+	}
+}
+
+func TestBoardPinHookOnlyOnPinTransition(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "hooks.toml"))
+	t.Setenv("HEV_HOOKS", "")
+	t.Setenv("PATH", home)
+	st, err := store.NewFiles(filepath.Join(home, "board"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := st.CreateThread(context.Background(), store.NewThread{
+		Board: "watercooler", Title: "Thread to pin", Body: "example", Poster: store.Poster{Author: "test"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	board, err := server.New(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpBoard := httptest.NewServer(board.Handler())
+	defer httpBoard.Close()
+	t.Setenv("FACTORY_BOARD_URL", httpBoard.URL)
+	logPath := filepath.Join(home, ".hev", "hooks", "events.jsonl")
+	id := strconv.FormatInt(thread.ID, 10)
+	for _, tc := range []struct {
+		cmd    string
+		count  int
+		pinned bool
+	}{
+		{"pin", 1, true}, {"pin", 1, true}, {"unpin", 1, false},
+		{"unpin", 1, false}, {"pin", 2, true},
+	} {
+		if _, err := run(t, tc.cmd, id); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.Thread(context.Background(), thread.ID)
+		if err != nil || got.Pinned != tc.pinned {
+			t.Fatalf("%s: %+v (%v)", tc.cmd, got, err)
+		}
+		raw, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		if len(lines) != tc.count {
+			t.Fatalf("%s: expected %d events, got %s", tc.cmd, tc.count, raw)
+		}
+		var event hooks.Event
+		decode(t, lines[len(lines)-1], &event)
+		if event.Event != "board-pin" || event.Data["thread_id"] != float64(thread.ID) {
+			t.Fatalf("unexpected event: %+v", event)
+		}
+	}
+	if _, err := run(t, "pin", "9999"); err == nil {
+		t.Fatal("pin succeeded for nonexistent thread")
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil || strings.Count(string(raw), "\n") != 2 {
+		t.Fatalf("failed pin changed event log: %s (%v)", raw, err)
 	}
 }

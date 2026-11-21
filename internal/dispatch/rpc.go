@@ -38,6 +38,7 @@ type Request struct {
 	// carrying it may release only that reservation, never a later one.
 	ClassToken       string           `json:"class_token,omitempty"`
 	Orchestrator     string           `json:"orchestrator,omitempty"`
+	AmendToken       string           `json:"amend_token,omitempty"`
 	Transfer         []byte           `json:"transfer,omitempty"`
 	FromValidation   bool             `json:"from_validation,omitempty"`
 	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
@@ -124,6 +125,7 @@ type Response struct {
 	SecretMeter     *secrets.MeterReading `json:"secret_meter,omitempty"`
 	SecretSummary   []secrets.SummaryRow  `json:"secret_summary,omitempty"`
 	AttachHost      *Host                 `json:"attach_host,omitempty"`
+	AmendToken      string                `json:"amend_token,omitempty"`
 	ImportRefused   bool                  `json:"import_refused,omitempty"`
 	History         *History              `json:"history,omitempty"`
 	Offset          int64                 `json:"offset,omitempty"`
@@ -760,7 +762,11 @@ func Handle(q Request) (r Response, handleErr error) {
 		if q.excludeFinished != "" {
 			delete(live, q.excludeFinished)
 		}
+		var queuedAdmissionRepo string
 		if q.Action == "start" && q.Meta.Parent == "" {
+			if !q.Dequeue && processRecordLive(queueAdmissionPath(q.Name)) {
+				return r, fmt.Errorf("%w: %s", errRunExists, q.Name)
+			}
 			entries, err := queueEntries()
 			if err != nil {
 				return r, err
@@ -770,6 +776,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					return r, fmt.Errorf("queue head changed")
 				}
 				exclude := q.excludeFinished
+				queuedAdmissionRepo = entries[0].AdmittedRepo
 				q = entries[0].Request
 				q.excludeFinished = exclude
 				q.Dequeue = true
@@ -912,7 +919,14 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 			repo := resolveRepo(m.Repo, workspace)
 			m.ResolvedRepo = repo
-			if e = admitTargetRepo(repo, m, "start"); e != nil {
+			// A persisted queue acceptance already ran external policy for
+			// this repository. Recheck the current allowlist on launch.
+			if queuedAdmissionRepo != "" && queuedAdmissionRepo == repo {
+				e = admitTargetAllowlist(repo, m, "start")
+			} else {
+				e = admitTargetRepo(repo, m, "start")
+			}
+			if e != nil {
 				return r, e
 			}
 			if _, e = command("", "git", "-C", repo, "fetch", "origin"); e != nil {

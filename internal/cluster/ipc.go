@@ -35,10 +35,12 @@ type Request struct {
 	Address   string     `json:"address,omitempty"`
 }
 type Response struct {
-	CronCooling bool     `json:"cron_cooling,omitempty"`
-	Status      *Status  `json:"status,omitempty"`
-	Members     []Member `json:"members,omitempty"`
-	Error       string   `json:"error,omitempty"`
+	MemberName        string   `json:"member_name,omitempty"`
+	MembershipChanged bool     `json:"membership_changed,omitempty"`
+	CronCooling       bool     `json:"cron_cooling,omitempty"`
+	Status            *Status  `json:"status,omitempty"`
+	Members           []Member `json:"members,omitempty"`
+	Error             string   `json:"error,omitempty"`
 }
 
 func Serve(ctx context.Context, s *Service) (func(), error) {
@@ -98,11 +100,14 @@ func serveConn(ctx context.Context, s *Service, c net.Conn) {
 			r.CronCooling, e = s.ReserveCronCooldown(q.CronKey, *q.CronUntil)
 		}
 	case "join":
-		e = s.Join(q.Address)
+		r.MembershipChanged, e = s.join(q.Address)
 	case "leave":
-		e = s.Leave()
+		r.MembershipChanged, e = s.leave()
 	default:
 		e = errors.New("unknown cluster action")
+	}
+	if r.MembershipChanged {
+		r.MemberName = s.cfg.Name
 	}
 	if e != nil {
 		r.Error = e.Error()

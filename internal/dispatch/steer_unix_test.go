@@ -133,6 +133,9 @@ func TestEscalateHaltAfterTimeout(t *testing.T) {
 	if _, ok := escalateHalt(dir); !ok {
 		t.Fatal("not escalated")
 	}
+	if _, ok := escalateHalt(dir); ok {
+		t.Fatal("already escalated halt claimed another hard stop")
+	}
 	got, _ := store.Get(m.ID)
 	if got.Escalated == nil || !strings.Contains(got.Escalated.By, "1ms") {
 		t.Fatalf("%+v", got.Escalated)

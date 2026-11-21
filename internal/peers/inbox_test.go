@@ -197,7 +197,7 @@ func TestInboxConcurrentRetryAndConflict(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := e.hold("desk", "life", Message{"id": "retry", "from": "sender", "message": "one"})
+			_, _, err := e.hold("desk", "life", Message{"id": "retry", "from": "sender", "message": "one"})
 			errs <- err
 		}()
 	}
@@ -212,7 +212,7 @@ func TestInboxConcurrentRetryAndConflict(t *testing.T) {
 	if err != nil || len(ms) != 1 {
 		t.Fatal(ms, err)
 	}
-	if _, err := e.hold("desk", "life", Message{"id": "retry", "from": "sender", "message": "different"}); err == nil {
+	if _, _, err := e.hold("desk", "life", Message{"id": "retry", "from": "sender", "message": "different"}); err == nil {
 		t.Fatal("conflicting retry accepted")
 	}
 }
@@ -239,7 +239,7 @@ func TestInboxUnlimitedDefaultAndUniqueConsumeOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 65; i++ {
-		if _, err := e.hold("desk", p.Identity, Message{"id": fmt.Sprint(i), "from": "sender", "message": "body"}); err != nil {
+		if _, _, err := e.hold("desk", p.Identity, Message{"id": fmt.Sprint(i), "from": "sender", "message": "body"}); err != nil {
 			t.Fatal(err)
 		}
 	}

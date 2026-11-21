@@ -61,8 +61,13 @@ The repository allowlist applies first. When it allows work, an
 `admission-check` handler can deny it by returning `block` or `halt` with a
 `reason`. An empty or `continue` response allows work. Errors, bad output and
 timeouts fail open. Allowlist and handler refusals emit `admission-denied`.
-Every other event ignores handler decisions. Admission is checked again
-when the queue actually launches a run under the node's current policy.
+Every other event ignores handler decisions. At dequeue, the receiver checks
+the current allowlist and capacity. It reuses the external policy decision
+recorded at queue acceptance for the same repository. A cross-host amendment
+uses a single-use target reservation for its revision and checks current
+eligibility and capacity again at import. Encrypted cluster join and leave
+report membership changes. Pinning an already pinned thread leaves it pinned
+without another `board-pin` event.
 
 Existing `peer-message` and `board-post` handlers receive their
 [peer message](../schemas/peer_message_event.schema.json) and

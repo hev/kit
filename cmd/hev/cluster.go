@@ -78,27 +78,24 @@ func runClusterCommand(cmd *cobra.Command, action, address string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), clusterHint)
 		return errors.New("cluster disabled")
 	}
-	if err := queryCluster(cmd, action, address); err != nil {
-		return err
-	}
-	if action == "join" || action == "leave" {
-		event := "cluster-join"
-		if action == "leave" {
-			event = "cluster-remove"
-		}
-		name := cfg.Name
-		if name == "" {
-			name = hostlabel.Self(os.Hostname)
-		}
-		clusterNodeEvent(cmd, event, name, "node")
-	}
-	return nil
+	return queryCluster(cmd, action, address)
 }
 
 func queryCluster(cmd *cobra.Command, action, address string) error {
 	r, err := cluster.Query(cmd.Context(), cluster.Request{Action: action, Address: address})
 	if err != nil {
 		return err
+	}
+	if r.MembershipChanged {
+		event := "cluster-join"
+		if action == "leave" {
+			event = "cluster-remove"
+		}
+		name := r.MemberName
+		if name == "" {
+			name = hostlabel.Self(os.Hostname)
+		}
+		clusterNodeEvent(cmd, event, name, "node")
 	}
 	asJSON, _ := cmd.Flags().GetBool("json")
 	switch action {

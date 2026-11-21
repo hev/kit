@@ -652,8 +652,14 @@ func (f *fileStore) Useful(ctx context.Context, threadID int64, author string) (
 	return n, err
 }
 
-func (f *fileStore) SetPinned(ctx context.Context, id int64, pinned bool) error {
-	return f.patch(id, func(fl *fileFlags) error { fl.Pinned = pinned; return nil })
+func (f *fileStore) SetPinned(ctx context.Context, id int64, pinned bool) (bool, error) {
+	changed := false
+	err := f.patch(id, func(fl *fileFlags) error {
+		changed = fl.Pinned != pinned
+		fl.Pinned = pinned
+		return nil
+	})
+	return changed && err == nil, err
 }
 
 func (f *fileStore) SetLocked(ctx context.Context, id int64, locked bool) error {

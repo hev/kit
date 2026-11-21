@@ -69,7 +69,7 @@ func (e *Engine) inbox(ctx context.Context, ps []Peer, args []string, session, s
 		if strings.TrimSpace(string(b)) == "" {
 			return fmt.Errorf("empty message")
 		}
-		m, err := e.hold(session, identity, Message{"id": id, "from": sender, "header": "[held message from " + sender + "]", "message": strings.TrimRight(string(b), "\n")}, func() error {
+		m, _, err := e.hold(session, identity, Message{"id": id, "from": sender, "header": "[held message from " + sender + "]", "message": strings.TrimRight(string(b), "\n")}, func() error {
 			if p.Run {
 				return nil
 			}

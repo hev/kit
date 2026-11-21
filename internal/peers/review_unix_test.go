@@ -217,7 +217,7 @@ for i in range(50):
 		go func() {
 			var err error
 			for i := 0; i < 50 && err == nil; i++ {
-				_, err = e.hold("desk", identity, Message{"id": fmt.Sprintf("go-%d-%d", w, i), "message": strings.Repeat("y", 3000)})
+				_, _, err = e.hold("desk", identity, Message{"id": fmt.Sprintf("go-%d-%d", w, i), "message": strings.Repeat("y", 3000)})
 			}
 			done <- err
 		}()

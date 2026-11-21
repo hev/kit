@@ -75,7 +75,7 @@ func TestFilesThreadLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetPinned(ctx, th.ID, true); err != nil {
+	if _, err := s.SetPinned(ctx, th.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetLocked(ctx, th.ID, true); err != nil {

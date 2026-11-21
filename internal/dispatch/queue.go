@@ -18,10 +18,15 @@ type queueEntry struct {
 	Enqueued time.Time `json:"enqueued"`
 	// Waiting is why the head last stayed queued (host or class full), shown
 	// in dispatch ls so a wedged FIFO is not silent.
-	Waiting string `json:"waiting,omitempty"`
+	Waiting      string `json:"waiting,omitempty"`
+	AdmittedRepo string `json:"admitted_repo,omitempty"`
 }
 
 func queuePath(name string) string { return filepath.Join(Root(), ".queue", name+".json") }
+func queueAdmissionPath(name string) string {
+	return filepath.Join(Root(), ".queue", name+".admitting")
+}
+
 func queueEntries() ([]queueEntry, error) {
 	entries := []queueEntry{}
 	files, err := os.ReadDir(filepath.Join(Root(), ".queue"))
@@ -63,14 +68,24 @@ func enqueue(q Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	workspace := cfg.Workspace
+	launch, err := loadTarget(q.Meta.ConfigPath, q.Meta.Host)
+	if err != nil && (!os.IsNotExist(err) || q.Meta.ConfigPath != "") {
+		return Response{}, fmt.Errorf("target config: %w", err)
+	}
+	workspace := q.Workspace
 	if workspace == "" {
-		workspace = q.Workspace
+		workspace = launch.Workspace
 	}
 	m := q.Meta
 	m.Order = o
 	m.Host = o.Host
-	if err := admitWork(cfg, resolveRepo(o.Repo, workspace), m, "queue"); err != nil {
+	repo := resolveRepo(o.Repo, workspace)
+	release, err := claimQueueAdmission(q.Name)
+	if err != nil {
+		return Response{}, err
+	}
+	defer release()
+	if err := admitWork(cfg, repo, m, "queue"); err != nil {
 		return Response{}, err
 	}
 	// The order's own skills: refuse two modes or an unknown skill now rather
@@ -79,14 +94,58 @@ func enqueue(q Request) (Response, error) {
 	if _, err := resolveSkills(o.Skills); err != nil {
 		return Response{}, err
 	}
-	response, err := reserveQueueEntry(q, o)
+	response, err := reserveQueueEntry(q, o, repo)
 	if err == nil {
 		orderEvent("order-queued", m, "")
 	}
 	return response, err
 }
 
-func reserveQueueEntry(q Request, o Order) (Response, error) {
+// Claim the name while policy runs without the root lock. A retry can inspect
+// the queue, but cannot start a second admission for this name.
+func claimQueueAdmission(name string) (func(), error) {
+	unlock, err := lockRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	claim := queueAdmissionPath(name)
+	if exists(filepath.Join(Root(), name)) || exists(queuePath(name)) || processRecordLive(claim) {
+		return nil, fmt.Errorf("%w: %s", errRunExists, name)
+	}
+	if err = os.MkdirAll(filepath.Dir(claim), 0700); err != nil {
+		return nil, err
+	}
+	if err = writeProcessRecord(claim, os.Getpid()); err != nil {
+		return nil, err
+	}
+	return func() { _ = os.Remove(claim) }, nil
+}
+
+func pruneQueueAdmissions() error {
+	dir := filepath.Dir(queuePath(""))
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) != ".admitting" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if !processRecordLive(path) {
+			if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func reserveQueueEntry(q Request, o Order, admittedRepo string) (Response, error) {
 	unlock, err := lockRoot()
 	if err != nil {
 		return Response{}, err
@@ -113,7 +172,7 @@ func reserveQueueEntry(q Request, o Order) (Response, error) {
 	if err := os.MkdirAll(filepath.Dir(queuePath(q.Name)), 0700); err != nil {
 		return Response{}, err
 	}
-	if err := WriteJSON(queuePath(q.Name), queueEntry{Request: q, Enqueued: q.Meta.Start}); err != nil {
+	if err := WriteJSON(queuePath(q.Name), queueEntry{Request: q, Enqueued: q.Meta.Start, AdmittedRepo: admittedRepo}); err != nil {
 		return Response{}, err
 	}
 	return Response{Message: fmt.Sprintf("queued %s (position %d)", q.Name, len(entries)+1)}, nil
@@ -172,6 +231,10 @@ func sweepQueue(exclude string) error {
 				}
 				_ = os.Remove(filepath.Join(dir, "harness.json"))
 			}
+		}
+		if err = pruneQueueAdmissions(); err != nil {
+			unlock()
+			return err
 		}
 		entries, err := queueEntries()
 		if err == nil && len(entries) > 0 {

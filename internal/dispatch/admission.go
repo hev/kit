@@ -3,13 +3,13 @@ package dispatch
 import (
 	"context"
 	"fmt"
-	"github.com/hev/kit/internal/hooks"
 	"net/url"
 	"os"
 	"path"
 	"runtime"
 	"strings"
 
+	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -77,8 +77,7 @@ func targetPolicy() (Config, error) {
 func admitWork(cfg Config, repo string, m Meta, action string) error {
 	data := map[string]any{"name": m.Name, "repo": m.Repo, "action": action}
 	ctx := context.Background()
-	if err := admitRepo(cfg.Admission, repo, m.Repo, m.Host); err != nil {
-		hooks.Meta(ctx, "admission-denied", data, err.Error())
+	if err := admitAllowlist(cfg, repo, m, action); err != nil {
 		return err
 	}
 	result := hooks.Meta(ctx, "admission-check", data, "")
@@ -108,4 +107,26 @@ func admitTargetRepo(repo string, m Meta, action string) error {
 		return fmt.Errorf("target admission config: %w", err)
 	}
 	return admitWork(cfg, repo, m, action)
+}
+
+// A previously admitted transition still checks the receiver's current list.
+func admitTargetAllowlist(repo string, m Meta, action string) error {
+	cfg, err := targetPolicy()
+	if err != nil {
+		return fmt.Errorf("target admission config: %w", err)
+	}
+	return admitAllowlist(cfg, repo, m, action)
+}
+
+func admitAllowlist(cfg Config, repo string, m Meta, action string) error {
+	err := admitRepo(cfg.Admission, repo, m.Repo, m.Host)
+	if err != nil {
+		admissionDenied(m, action, err)
+	}
+	return err
+}
+
+func admissionDenied(m Meta, action string, err error) {
+	data := map[string]any{"name": m.Name, "repo": m.Repo, "action": action}
+	hooks.Meta(context.Background(), "admission-denied", data, err.Error())
 }

@@ -4,6 +4,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,8 +165,8 @@ func TestQueuedLaunchHookIsOnceAcrossHarnessFallbacks(t *testing.T) {
 					t.Fatalf("unexpected launch event: %s", line)
 				}
 			}
-			if count != 1 {
-				t.Fatalf("got %d launch events: %s", count, raw)
+			if count != 1 || strings.Count(string(raw), `"event":"admission-check"`) != 1 {
+				t.Fatalf("expected one admission check and one launch: %s", raw)
 			}
 		})
 	}
@@ -187,7 +188,7 @@ func TestQueuedAdmissionInspectionHelper(t *testing.T) {
 func TestQueuedAdmissionCanInspectQueueBeforeDenying(t *testing.T) {
 	queueTestHome(t)
 	resident := queueRequest("already-waiting")
-	if _, err := reserveQueueEntry(resident, resident.Meta.Order); err != nil {
+	if _, err := reserveQueueEntry(resident, resident.Meta.Order, ""); err != nil {
 		t.Fatal(err)
 	}
 	home := os.Getenv("HOME")
@@ -248,8 +249,38 @@ echo '{"decision":"block","reason":"queue inspected"}'
 	}
 }
 
+func TestQueueAdmissionClaimRefusesDuplicateStart(t *testing.T) {
+	queueTestHome(t)
+	home := os.Getenv("HOME")
+	t.Setenv("HEV_HOOKS", "")
+	t.Setenv("HEV_CONFIG", filepath.Join(home, "hooks.toml"))
+	t.Setenv("PATH", home+string(os.PathListSeparator)+os.Getenv("PATH"))
+	q := queueRequest("duplicate")
+	release, err := claimQueueAdmission(q.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	for _, start := range []func(Request) (Response, error){Handle, enqueue} {
+		if _, err = start(q); !errors.Is(err, errRunExists) {
+			t.Fatalf("duplicate crossed the pending queue claim: %v", err)
+		}
+	}
+	if exists(filepath.Join(home, ".hev", "hooks", "events.jsonl")) {
+		t.Fatal("a refused duplicate ran the policy hook")
+	}
+	release()
+	if _, err = enqueue(q); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, ".hev", "hooks", "events.jsonl"))
+	if err != nil || strings.Count(string(raw), `"event":"admission-check"`) != 1 {
+		t.Fatalf("admission after claim release: %s (%v)", raw, err)
+	}
+}
+
 func TestRestartAdmissionCanInspectQueueBeforeDenying(t *testing.T) {
-	for _, action := range []string{"amend", "amend-check", "amend-import", "rework"} {
+	for _, action := range []string{"amend", "amend-check", "rework"} {
 		t.Run(action, func(t *testing.T) {
 			dir, m := amendFixture(t, false)
 			home := os.Getenv("HOME")
@@ -277,7 +308,7 @@ echo '{"decision":"block","reason":"queue inspected"}'
 				}
 			}
 			waiting := queueRequest("already-waiting")
-			if _, err = reserveQueueEntry(waiting, waiting.Meta.Order); err != nil {
+			if _, err = reserveQueueEntry(waiting, waiting.Meta.Order, ""); err != nil {
 				t.Fatal(err)
 			}
 			q := Request{Action: action, Name: m.Name, Order: good + "\nRevised.\n", Note: "Revised."}
@@ -328,11 +359,6 @@ echo '{"decision":"continue"}'
 			}
 			if err = os.Remove(policy); err != nil {
 				t.Fatal(err)
-			}
-			if q.Action == "amend-import" {
-				// The preflight can now succeed. Actual transfer success is
-				// exercised by TestAmendTransferPreservesBranchDirtyFilesAndHistory.
-				q.Action = "amend-check"
 			}
 			oldLaunch := runLauncher
 			t.Cleanup(func() { runLauncher = oldLaunch })

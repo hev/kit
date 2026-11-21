@@ -127,18 +127,18 @@ func (e *Engine) view(session, identity string) ([]Message, error) {
 	}
 	return ms, nil
 }
-func (e *Engine) hold(session, identity string, m Message, verify ...func() error) (Message, error) {
+func (e *Engine) hold(session, identity string, m Message, verify ...func() error) (Message, bool, error) {
 	if identity == "" {
-		return nil, fmt.Errorf("cannot establish recipient incarnation")
+		return nil, false, fmt.Errorf("cannot establish recipient incarnation")
 	}
 	unlock, err := e.lock(session)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer unlock()
 	for _, check := range verify {
 		if err := check(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if m["id"] == nil || m["id"] == "" {
@@ -147,20 +147,21 @@ func (e *Engine) hold(session, identity string, m Message, verify ...func() erro
 	m["recipient_incarnation"], m["recipient_session"], m["transport_state"] = identity, session, "queued"
 	ms, err := e.store().Rows(e.path(session))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, old := range ms {
 		if old["id"] == m["id"] {
 			for _, k := range []string{"recipient_incarnation", "from", "from_agent", "from_cwd", "message", "thread", "order", "run"} {
 				if !reflect.DeepEqual(old[k], m[k]) {
-					return nil, fmt.Errorf("message ID reused with different content or recipient")
+					return nil, false, fmt.Errorf("message ID reused with different content or recipient")
 				}
 			}
-			return old, nil
+			return old, false, nil
 		}
 	}
 	m["ts"] = now()
-	return m, e.store().Append(e.path(session), m)
+	err = e.store().Append(e.path(session), m)
+	return m, err == nil, err
 }
 
 // receipt validates the entire batch before appending a single receipt.

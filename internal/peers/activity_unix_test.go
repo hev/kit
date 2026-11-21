@@ -12,7 +12,7 @@ import (
 
 func TestPeerSendActivityHook(t *testing.T) {
 	const body = "token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
-	for _, mode := range []string{"capture", "off", "disabled", "client", "hang", "fail", "rejected", "ssh"} {
+	for _, mode := range []string{"capture", "off", "disabled", "client", "hang", "fail", "rejected", "ssh", "ssh-retry"} {
 		t.Run(mode, func(t *testing.T) {
 			e, call := fixture(t)
 			dir := t.TempDir()
@@ -42,7 +42,7 @@ func TestPeerSendActivityHook(t *testing.T) {
 				script = "#!/bin/sh\nexit 23\n"
 			case "rejected":
 				target = "missing:0.0"
-			case "ssh":
+			case "ssh", "ssh-retry":
 				e.Transport = &recordingTransport{receipt: "remote/desk: queued in inbox [id stable]; not acknowledged\n"}
 				target, wantTo = "remote/%7", "remote/desk"
 			}
@@ -73,6 +73,18 @@ func TestPeerSendActivityHook(t *testing.T) {
 			record := decode(t, string(raw))
 			if _, ok := record["text"]; ok || record["text_bytes"] != float64(len(body)) {
 				t.Fatalf("unexpected hook log: %s", raw)
+			}
+			if mode == "capture" || mode == "ssh-retry" {
+				if mode == "ssh-retry" {
+					e.Transport.(*recordingTransport).receipt = "remote/desk: queued in inbox [id stable]; not acknowledged; already queued\n"
+				}
+				if _, err := call("", "send", target, body, "--from", "sender", "--id", "stable", "--reply-to", "parent"); err != nil {
+					t.Fatalf("idempotent retry: %v", err)
+				}
+				after, err := os.ReadFile(logPath)
+				if err != nil || string(after) != string(raw) {
+					t.Fatalf("retry added a peer-message event: %s (%v)", after, err)
+				}
 			}
 			if mode == "hang" || mode == "fail" {
 				warning, err := os.ReadFile(filepath.Join(hookDir, "warnings.log"))

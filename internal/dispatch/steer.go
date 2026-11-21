@@ -483,7 +483,7 @@ func superviseOrchestratorRound(orchDir string, wait func() error, kill func()) 
 func escalateHalt(dir string) (steer.Message, bool) {
 	store := steer.Store{Dir: filepath.Join(dir, "steer")}
 	m, ok := store.ActiveHalt()
-	if !ok {
+	if !ok || m.Escalated != nil {
 		return m, false
 	}
 	timeout, err := time.ParseDuration(m.HaltTimeout)
@@ -493,10 +493,14 @@ func escalateHalt(dir string) (steer.Message, bool) {
 	if time.Since(m.QueuedAt) < timeout {
 		return m, false
 	}
-	_, _ = store.Update(m.ID, func(m *steer.Message) {
-		m.Escalated = &steer.Mark{At: time.Now().UTC(), Event: "hard-stop", By: "halt not honoured within " + timeout.String()}
+	claimed := false
+	updated, err := store.Update(m.ID, func(m *steer.Message) {
+		if m.Halting() && m.Escalated == nil {
+			m.Escalated = &steer.Mark{At: time.Now().UTC(), Event: "hard-stop", By: "halt not honoured within " + timeout.String()}
+			claimed = true
+		}
 	})
-	return m, true
+	return updated, err == nil && claimed
 }
 
 // steerCounts summarizes a run's receipts for ls and show.

@@ -55,6 +55,7 @@ type Member struct {
 // and observation. Stock memberlist supplies the protocol; our event table owns display state.
 type membershipTransport interface {
 	LocalNode() *memberlist.Node
+	Members() []*memberlist.Node
 	Join([]string) (int, error)
 	Leave(time.Duration) error
 	Shutdown() error
@@ -81,6 +82,7 @@ type Node struct {
 	done     chan struct{}
 	closed   bool
 	paused   bool
+	left     bool // guarded by life
 	retry    time.Duration
 	next     time.Time
 	lastJoin string
@@ -359,11 +361,14 @@ func (n *Node) Members() []Member {
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
-func (n *Node) Address() string        { n.mu.Lock(); defer n.mu.Unlock(); return n.bound }
-func (n *Node) Join(addr string) error { return n.join(addr, false) }
-func (n *Node) join(addr string, automatic bool) error {
+func (n *Node) Address() string { n.mu.Lock(); defer n.mu.Unlock(); return n.bound }
+func (n *Node) Join(addr string) error {
+	_, err := n.join(addr, false)
+	return err
+}
+func (n *Node) join(addr string, automatic bool) (bool, error) {
 	if _, p, e := address(addr, false); e != nil || p == 0 {
-		return errors.New("invalid cluster join address")
+		return false, errors.New("invalid cluster join address")
 	}
 	n.life.Lock()
 	defer n.life.Unlock()
@@ -371,10 +376,10 @@ func (n *Node) join(addr string, automatic bool) error {
 	closed, paused := n.closed, n.paused
 	n.mu.Unlock()
 	if closed {
-		return errors.New("cluster stopped")
+		return false, errors.New("cluster stopped")
 	}
 	if paused && automatic {
-		return errors.New("cluster explicitly left")
+		return false, errors.New("cluster explicitly left")
 	}
 	if paused {
 		_ = n.ml.Shutdown()
@@ -386,28 +391,38 @@ func (n *Node) join(addr string, automatic bool) error {
 		n.metaMu.Unlock()
 		ml, e := memberlist.Create(n.config)
 		if e != nil {
-			return errors.New("cluster restart failed")
+			return false, errors.New("cluster restart failed")
 		}
 		n.ml = ml
+		n.left = false
 		n.mu.Lock()
 		n.bound = ml.LocalNode().Address()
 		n.paused = false
 		n.mu.Unlock()
 	}
-	count, e := n.ml.Join([]string{addr})
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if e != nil || count == 0 {
-		n.lastJoin = "seed unavailable"
-		return errors.New("cluster join failed (address unreachable or key mismatch)")
+	before := make(map[string]bool)
+	for _, member := range n.ml.Members() {
+		before[member.Name] = true
 	}
+	count, e := n.ml.Join([]string{addr})
+	if e != nil || count == 0 {
+		n.mu.Lock()
+		n.lastJoin = "seed unavailable"
+		n.mu.Unlock()
+		return false, errors.New("cluster join failed (address unreachable or key mismatch)")
+	}
+	n.mu.Lock()
 	n.lastJoin = "joined"
 	n.mu.Unlock()
 	n.Counters.mu.Lock()
 	n.ready = true
 	n.Counters.mu.Unlock()
-	n.mu.Lock()
-	return nil
+	for _, member := range n.ml.Members() {
+		if member.Name != n.cfg.Name && !before[member.Name] {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (n *Node) seedLoop() {
 	defer close(n.done)
@@ -436,7 +451,7 @@ func (n *Node) seedLoop() {
 						return
 					default:
 					}
-					if n.join(s, true) == nil {
+					if _, err := n.join(s, true); err == nil {
 						success = true
 					}
 				}
@@ -455,8 +470,16 @@ func (n *Node) seedLoop() {
 	}
 }
 func (n *Node) Leave() error {
+	_, err := n.leave()
+	return err
+}
+
+func (n *Node) leave() (bool, error) {
 	n.life.Lock()
 	defer n.life.Unlock()
+	if n.left {
+		return false, nil
+	}
 	n.mu.Lock()
 	n.paused = true
 	local := n.members[n.cfg.Name]
@@ -483,9 +506,10 @@ func (n *Node) Leave() error {
 	}
 	sends.Wait()
 	if e := n.ml.Leave(3 * time.Second); e != nil {
-		return errors.New("cluster leave timed out")
+		return false, errors.New("cluster leave timed out")
 	}
-	return nil
+	n.left = true
+	return true, nil
 }
 func (n *Node) Close(graceful bool) error {
 	n.mu.Lock()

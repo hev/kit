@@ -1,10 +1,12 @@
 package layer
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/hev/kit/internal/board/settings"
@@ -73,5 +75,62 @@ func TestReferenceResolverRejectsEmptyKey(t *testing.T) {
 	t.Setenv("HEVLAYER_API_KEY_OP_REF", "op://example/store/key")
 	if _, err := Load(); err == nil {
 		t.Fatal("empty credential accepted")
+	}
+}
+
+func TestPinUsesOneAtomicStoreTransition(t *testing.T) {
+	var mu sync.Mutex
+	var pinned any
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Rows      []Row           `json:"patch_rows"`
+			Condition json.RawMessage `json:"patch_condition"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Rows) != 1 || req.Rows[0]["id"] != "t:42" {
+			t.Errorf("unexpected pin patch: %+v (%v)", req, err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		on := req.Rows[0]["pinned"]
+		want := `["pinned","Eq",true]`
+		if on == true {
+			want = `["Or",[["pinned","Eq",false],["pinned","Eq",null]]]`
+		}
+		if string(req.Condition) != want {
+			t.Errorf("pin condition = %s, want %s", req.Condition, want)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		affected := 0
+		if on != pinned && (on == true || pinned == true) {
+			affected = 1
+			pinned = on
+		}
+		_ = json.NewEncoder(w).Encode(map[string]int{"rows_affected": affected})
+	}))
+	defer api.Close()
+	result := make(chan bool, 2)
+	for range 2 {
+		client := New(api.URL, "test", "test", "")
+		go func() {
+			changed, err := client.SetPinned("t:42", true)
+			if err != nil {
+				t.Error(err)
+			}
+			result <- changed
+		}()
+	}
+	first, second := <-result, <-result
+	if first == second {
+		t.Fatalf("concurrent pins should have one winner: %t, %t", first, second)
+	}
+	client := New(api.URL, "test", "test", "")
+	for _, tc := range []struct{ pinned, changed bool }{{false, true}, {false, false}, {true, true}} {
+		changed, err := client.SetPinned("t:42", tc.pinned)
+		if err != nil || changed != tc.changed {
+			t.Fatalf("set pinned %t: changed=%t (%v)", tc.pinned, changed, err)
+		}
 	}
 }

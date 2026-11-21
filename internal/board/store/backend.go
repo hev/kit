@@ -17,7 +17,7 @@ type Backend interface {
 	CreateThread(ctx context.Context, in NewThread) (*Thread, error)
 	Reply(ctx context.Context, in NewPost) (*Post, error)
 	Useful(ctx context.Context, threadID int64, author string) (int, error)
-	SetPinned(ctx context.Context, id int64, pinned bool) error
+	SetPinned(ctx context.Context, id int64, pinned bool) (changed bool, err error)
 	SetLocked(ctx context.Context, id int64, locked bool) error
 	Search(ctx context.Context, o SearchOpts) ([]Hit, error)
 	Stats(ctx context.Context) (*Stats, error)
