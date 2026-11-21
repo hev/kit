@@ -197,3 +197,15 @@ func TestDottedAndInlineCaptureConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestKitKeyRuleKeepsShortIdentifiers(t *testing.T) {
+	scrubber, err := New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "hk_abCD0123_sample-value"
+	got, counts := scrubber.Text(key + " hk_word")
+	if strings.Contains(got, key) || !strings.Contains(got, "hk_word") || counts["kit-key"] != 1 {
+		t.Fatalf("unexpected key redaction: %q, %v", got, counts)
+	}
+}
