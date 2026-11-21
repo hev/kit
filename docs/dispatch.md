@@ -311,8 +311,9 @@ launch-unconfirmed run (`stop running order before close`) and an unknown one.
 It adds `closed_at`, `closed_by`, `closed_reason` and, when given,
 `superseded_by` to `result.json`, written atomically. The worker's own
 `outcome`, `reason`, PR, branch, head and trace fields stay as they were, and
-nothing is deleted: log, status, report and worktree remain (use `clean` for the
-worktree). An open decision is settled in `decisions.json` with `closed: true`,
+the log, status and report are preserved. On Pro hosts, close also attempts
+to compact the worktree under the [workspace safety rules](pro-workspaces.md).
+An open decision is settled in `decisions.json` with `closed: true`,
 the close reason as its answer and the closer as `resolved_by`; no rework
 starts. Teammates may close their own runs.
 
@@ -929,3 +930,5 @@ stop, steer halt or timeout ends the sequence. Validators retain the existing
 different-model rule unless started with `--allow-same-model`. The log records
 each switch as `dispatch.fallback`. In `result.json`, `fallbacks_tried`
 includes the primary, and `harness` and `model` identify the last candidate.
+
+See [Dispatch workspaces](pro-workspaces.md) for Pro cache slots and compaction.
