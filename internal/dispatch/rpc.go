@@ -961,19 +961,19 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil {
 				return r, err
 			}
+			admissionRepo := filepath.Join(dir, "wt")
 			if m.Compacted {
-				if e = admitTargetRepo(m.ResolvedRepo, m.Repo, m.Host); e != nil {
-					return r, e
-				}
+				admissionRepo = m.ResolvedRepo
+			} else if _, e = os.Stat(admissionRepo); e != nil {
+				return r, fmt.Errorf("worktree was cleaned")
+			}
+			if e = admitTargetRepo(admissionRepo, m, originalAction); e != nil {
+				return r, e
+			}
+			if m.Compacted {
 				if e = restoreWorkspace(dir, &m); e != nil {
 					return r, e
 				}
-			}
-			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
-				return r, fmt.Errorf("worktree was cleaned")
-			}
-			if e = admitTargetRepo(filepath.Join(dir, "wt"), m, originalAction); e != nil {
-				return r, e
 			}
 			m.WorkspaceCap = 0
 			if pro {
