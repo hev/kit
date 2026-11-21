@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -432,44 +433,108 @@ func (s *layerStore) Threads(ctx context.Context, o ListOpts) ([]Thread, error) 
 	if !o.Since.IsZero() {
 		filter = append(filter, []any{"updated", "Gte", o.Since.UTC().Format(tsLayout)})
 	}
-	if o.Author != "" {
-		rows, err := s.query(ctx, []any{"author", "Eq", o.Author}, nil, all, []string{"thread_id"})
+	out := []Thread{}
+	offset := o.Offset
+	pins := []any{nil}
+	if o.PinnedFirst || o.Board != "" {
+		pins = []any{[]any{"pinned", "Eq", true}, []any{"pinned", "NotEq", true}}
+	}
+	for _, pin := range pins {
+		err := s.scanThreads(ctx, and(and(filter...), pin), func(rows []layer.Row) (bool, error) {
+			if s.app {
+				rows = withTags(rows, tags)
+			}
+			if o.Author != "" {
+				var err error
+				rows, err = s.threadsByAuthor(ctx, rows, o.Author)
+				if err != nil {
+					return false, err
+				}
+			}
+			skip := min(offset, len(rows))
+			offset -= skip
+			for _, row := range rows[skip:] {
+				out = append(out, threadOf(row))
+				if len(out) == o.Limit {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
 		if err != nil {
 			return nil, err
 		}
-		ids := []any{}
-		seen := map[int64]bool{}
-		for _, r := range rows {
-			if id := num(r, "thread_id"); !seen[id] {
-				seen[id] = true
-				ids = append(ids, id)
-			}
+		if len(out) == o.Limit {
+			break
 		}
-		if len(ids) == 0 {
-			return []Thread{}, nil
-		}
-		filter = append(filter, []any{"thread_id", "In", ids})
-	}
-	rows, err := s.threadRows(ctx, and(filter...))
-	if err != nil {
-		return nil, err
-	}
-	if s.app {
-		rows = withTags(rows, tags)
-	}
-	out := make([]Thread, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, threadOf(r))
-	}
-	sortThreads(out, o.PinnedFirst || o.Board != "")
-	if o.Offset >= len(out) {
-		return []Thread{}, nil
-	}
-	out = out[o.Offset:]
-	if len(out) > o.Limit {
-		out = out[:o.Limit]
 	}
 	return out, nil
+}
+
+const boardBatch = 200
+
+// scanThreads uses a two-column keyset so a batch can end anywhere inside
+// threads with the same update timestamp.
+func (s *layerStore) scanThreads(ctx context.Context, filter any, visit func([]layer.Row) (bool, error)) error {
+	var after any
+	var previousUpdated string
+	var previousID int64
+	for {
+		rows, err := s.query(ctx, and([]any{"kind", "Eq", "thread"}, filter, after),
+			[][]string{{"updated", "desc"}, {"thread_id", "desc"}}, boardBatch, s.threadAttrs())
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		last := rows[len(rows)-1]
+		updated, id := str(last, "updated"), num(last, "thread_id")
+		if after != nil && (updated > previousUpdated || updated == previousUpdated && id >= previousID) {
+			return errors.New("board list did not advance")
+		}
+		done, err := visit(rows)
+		if done || err != nil || len(rows) < boardBatch {
+			return err
+		}
+		previousUpdated, previousID = updated, id
+		after = []any{"Or", []any{
+			[]any{"updated", "Lt", updated},
+			and([]any{"updated", "Eq", updated}, []any{"thread_id", "Lt", id}),
+		}}
+	}
+}
+
+func (s *layerStore) threadsByAuthor(ctx context.Context, rows []layer.Row, author string) ([]layer.Row, error) {
+	var pending []int64
+	matched := make(map[int64]bool, len(rows))
+	for _, row := range rows {
+		id := num(row, "thread_id")
+		if str(row, "author") == author {
+			matched[id] = true
+		} else {
+			pending = append(pending, id)
+		}
+	}
+	for len(pending) > 0 {
+		replies, err := s.query(ctx, and([]any{"thread_id", "In", pending},
+			[]any{"kind", "Eq", "post"}, []any{"author", "Eq", author}), nil, boardBatch, []string{"thread_id"})
+		if err != nil {
+			return nil, err
+		}
+		if len(replies) == 0 {
+			break
+		}
+		for _, row := range replies {
+			matched[num(row, "thread_id")] = true
+		}
+		remaining := slices.DeleteFunc(pending, func(id int64) bool { return matched[id] })
+		if len(remaining) == len(pending) {
+			return nil, errors.New("board author filter did not advance")
+		}
+		pending = remaining
+		if len(replies) < boardBatch {
+			break
+		}
+	}
+	return slices.DeleteFunc(rows, func(row layer.Row) bool { return !matched[num(row, "thread_id")] }), nil
 }
 
 func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
@@ -477,7 +542,7 @@ func (s *layerStore) Thread(ctx context.Context, id int64) (*Thread, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 || str(rows[0], "kind") == "deleted" {
+	if len(rows) == 0 || str(rows[0], "kind") != "thread" {
 		return nil, ErrNotFound
 	}
 	t := threadOf(rows[0])
@@ -750,35 +815,10 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		o.Limit = 10
 	}
 	clauses := []any{[]any{"kind", "In", []string{"thread", "post"}}}
-	if o.Board != "" || len(o.Tags) > 0 {
-		var tf []any
-		if o.Board != "" {
-			if !s.known(o.Board) {
-				return nil, invalid("no board %q — see `hev board boards`", o.Board)
-			}
-			tf = append(tf, []any{"board", "Eq", o.Board})
-		}
-		if !s.app {
-			for _, t := range cleanTags(o.Tags) {
-				tf = append(tf, []any{"tags", "Contains", t})
-			}
-		}
-		rows, err := s.threadRows(ctx, and(tf...))
-		if err != nil {
-			return nil, err
-		}
-		if s.app {
-			rows = withTags(rows, cleanTags(o.Tags))
-		}
-		if len(rows) == 0 {
-			return []Hit{}, nil
-		}
-		ids := make([]any, len(rows))
-		for i, r := range rows {
-			ids[i] = num(r, "thread_id")
-		}
-		clauses = append(clauses, []any{"thread_id", "In", ids})
+	if o.Board != "" && !s.known(o.Board) {
+		return nil, invalid("no board %q — see `hev board boards`", o.Board)
 	}
+	tags := cleanTags(o.Tags)
 	if o.Author != "" {
 		clauses = append(clauses, []any{"author", "Eq", o.Author})
 	}
@@ -794,57 +834,78 @@ func (s *layerStore) Search(ctx context.Context, o SearchOpts) ([]Hit, error) {
 		}
 		clauses = append(clauses, f)
 	}
-	rows, err := s.cl.WithContext(ctx).Search(search.Query{
-		Phrasings: phrasings, TopK: o.Limit * 3, Filter: and(clauses...),
-		Attrs: s.withAuthorName(append(append([]string{}, postAttrs...), "body")),
-	})
-	if err != nil {
-		return nil, err
-	}
-	order := []int64{}
-	firsts := map[int64]Post{}
-	scores := map[int64]float64{}
-	for rank, r := range rows {
-		id := num(r, "thread_id")
-		if _, seen := firsts[id]; seen {
-			continue
+	// Exclude entire threads after their best message is selected. A single
+	// busy discussion cannot consume the candidate budget on subsequent scans.
+	var excluded []int64
+	seen := map[int64]bool{}
+	out := []Hit{}
+	for {
+		filter := and(clauses...)
+		if len(excluded) > 0 {
+			filter = and(filter, []any{"thread_id", "NotIn", excluded})
 		}
-		p := postOf(r)
-		p.ID = fmt.Sprintf("p:%d:%d", id, p.N)
-		if p.N == 1 {
-			p.ID = fmt.Sprintf("t:%d", id)
+		rows, err := s.cl.WithContext(ctx).Search(search.Query{
+			Phrasings: phrasings, TopK: boardBatch, Filter: filter,
+			Attrs: s.withAuthorName(append(append([]string{}, postAttrs...), "body")),
+		})
+		if err != nil {
+			return nil, err
 		}
-		firsts[id] = p
-		scores[id] = rowScore(r, rank)
-		order = append(order, id)
-		if len(order) >= o.Limit {
+		start := len(excluded)
+		posts := map[int64]Hit{}
+		for rank, row := range rows {
+			id := num(row, "thread_id")
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			excluded = append(excluded, id)
+			p := postOf(row)
+			p.ID = fmt.Sprintf("p:%d:%d", id, p.N)
+			if p.N == 1 {
+				p.ID = fmt.Sprintf("t:%d", id)
+			}
+			posts[id] = Hit{PostN: p.N, Post: p, Snippet: snippet(p.Body, strings.Join(phrasings, " ")), Score: rowScore(row, rank)}
+		}
+		if len(rows) == 0 {
 			break
 		}
-	}
-	if len(order) == 0 {
-		return []Hit{}, nil
-	}
-	ids := make([]any, len(order))
-	for i, id := range order {
-		ids[i] = id
-	}
-	trows, err := s.threadRows(ctx, []any{"thread_id", "In", ids})
-	if err != nil {
-		return nil, err
-	}
-	threads := map[int64]Thread{}
-	for _, r := range trows {
-		t := threadOf(r)
-		threads[t.ID] = t
-	}
-	out := []Hit{}
-	for _, id := range order {
-		t, ok := threads[id]
-		if !ok {
-			continue
+		if start == len(excluded) {
+			return nil, errors.New("board search did not advance")
 		}
-		p := firsts[id]
-		out = append(out, Hit{Thread: t, PostN: p.N, Post: p, Snippet: snippet(p.Body, strings.Join(phrasings, " ")), Score: scores[id]})
+		threads := map[int64]Thread{}
+		for ids := excluded[start:]; len(ids) > 0; {
+			n := min(len(ids), boardBatch)
+			trows, err := s.threadRows(ctx, []any{"thread_id", "In", ids[:n]})
+			if err != nil {
+				return nil, err
+			}
+			for _, row := range trows {
+				t := threadOf(row)
+				if (o.Board == "" || t.Board == o.Board) && hasTags(t.Tags, tags) {
+					threads[t.ID] = t
+				}
+			}
+			ids = ids[n:]
+		}
+		for _, id := range excluded[start:] {
+			if t, ok := threads[id]; ok {
+				hit := posts[id]
+				hit.Thread = t
+				out = append(out, hit)
+				if len(out) == o.Limit {
+					return out, nil
+				}
+			}
+		}
+		if len(rows) < boardBatch {
+			break
+		}
+		// Keep both the in-memory set and the backend filter bounded. Report
+		// an upstream error if the search cannot prove exhaustion in budget.
+		if len(excluded) >= 100000 {
+			return nil, errors.New("board search exceeded scan budget")
+		}
 	}
 	return out, nil
 }

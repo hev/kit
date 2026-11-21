@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -33,6 +34,12 @@ type Authenticate func(*http.Request) (Caller, bool)
 // dedicated data directory per account. The directory holds images and
 // replay records and must be retained across dashboard restarts.
 func Handler(st *store.Store, dir string, auth Authenticate) http.Handler {
+	return HandlerWithLegacy(st, dir, auth, nil)
+}
+
+// HandlerWithLegacy serializes both versions against the same account store.
+// The host must authenticate requests before dispatching to this handler.
+func HandlerWithLegacy(st *store.Store, dir string, auth Authenticate, legacy http.Handler) http.Handler {
 	h := &handler{st: st, blobs: blob.New(filepath.Join(dir, "blobs"), 0), dir: dir, auth: auth}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/board/boards", h.boards)
@@ -48,7 +55,10 @@ func Handler(st *store.Store, dir string, auth Authenticate) http.Handler {
 	mux.HandleFunc("POST /v1/board/blobs", h.upload)
 	mux.HandleFunc("GET /v1/board/blobs/{sha256}", h.download)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
+		isLegacy := legacy != nil && strings.HasPrefix(r.URL.Path, "/api/")
+		if !isLegacy {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		caller, ok := h.auth(r)
 		if !ok || caller.Author == "" {
 			w.Header().Set("WWW-Authenticate", "Bearer")
@@ -56,13 +66,19 @@ func Handler(st *store.Store, dir string, auth Authenticate) http.Handler {
 			return
 		}
 		r = r.WithContext(context.WithValue(r.Context(), callerKey{}, caller))
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		isVersionedRead := strings.HasPrefix(r.URL.Path, "/v1/board/posts/") && r.URL.Query().Get("peek") != "true"
+		isLegacyRead := strings.HasPrefix(r.URL.Path, "/api/threads/") && r.URL.Query().Get("peek") == ""
+		if r.Method != http.MethodGet && r.Method != http.MethodHead || isVersionedRead || isLegacyRead {
 			release, err := lockAccount(r.Context(), dir)
 			if err != nil {
 				fail(w, err)
 				return
 			}
 			defer release()
+		}
+		if isLegacy {
+			legacy.ServeHTTP(w, r)
+			return
 		}
 		mux.ServeHTTP(w, r)
 	})
@@ -127,8 +143,6 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	return true
 }
 
-const maxResults = 10000
-
 type pageRequest struct {
 	offset, limit int
 	since         time.Time
@@ -150,7 +164,7 @@ func pageParams(w http.ResponseWriter, r *http.Request) (pageRequest, bool) {
 	if value := q.Get("cursor"); value != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(value)
 		offset, parseErr := strconv.Atoi(string(raw))
-		if err != nil || parseErr != nil || offset < 1 || offset >= maxResults {
+		if err != nil || parseErr != nil || offset < 1 || offset > math.MaxInt-201 {
 			fail(w, store.ErrInvalid)
 			return p, false
 		}
@@ -176,7 +190,7 @@ func pageParams(w http.ResponseWriter, r *http.Request) (pageRequest, bool) {
 }
 
 func (p pageRequest) cursor(n int) *string {
-	if n <= p.limit || p.offset+p.limit >= maxResults {
+	if n <= p.limit {
 		return nil
 	}
 	cursor := base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(p.offset + p.limit)))
@@ -274,12 +288,6 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Query().Get("peek") != "true" {
-		release, err := lockAccount(r.Context(), h.dir)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		defer release()
 		if err := h.st.View(r.Context(), id); err != nil {
 			fail(w, err)
 			return
@@ -421,7 +429,7 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	hits, err := st.Search(r.Context(), store.SearchOpts{
 		Q: phrase, Also: also, Board: q.Get("board"), Tags: q["tag"], Author: q.Get("author"), Role: q.Get("role"),
-		After: p.since, Limit: min(maxResults, p.offset+p.limit+1),
+		After: p.since, Limit: p.offset + p.limit + 1,
 	})
 	if err != nil {
 		fail(w, err)

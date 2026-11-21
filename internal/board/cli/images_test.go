@@ -334,17 +334,29 @@ func (f *fakeLayer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = append(out, row)
 		}
 	}
-	if rb := asList(body["rank_by"]); len(rb) == 2 {
-		key, desc := rb[0].(string), rb[1] == "desc"
-		sort.SliceStable(out, func(i, j int) bool {
-			a, b := fmt.Sprint(out[i][key]), fmt.Sprint(out[j][key])
+	keys := asList(body["rank_by"])
+	if len(keys) == 2 {
+		if _, single := keys[0].(string); single {
+			keys = []any{keys}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		for _, rank := range keys {
+			rb := asList(rank)
+			key, desc := rb[0].(string), rb[1] == "desc"
 			if x, ok := out[i][key].(float64); ok {
 				y, _ := out[j][key].(float64)
-				return (x < y) != desc && x != y
+				if x != y {
+					return (x < y) != desc
+				}
 			}
-			return (a < b) != desc && a != b
-		})
-	}
+			a, b := fmt.Sprint(out[i][key]), fmt.Sprint(out[j][key])
+			if a != b {
+				return (a < b) != desc
+			}
+		}
+		return false
+	})
 	if k, ok := body["top_k"].(float64); ok && len(out) > int(k) {
 		out = out[:int(k)]
 	}
@@ -366,10 +378,25 @@ func match(row map[string]any, f any) bool {
 		}
 		return true
 	}
+	if c[0] == "Or" {
+		for _, x := range asList(c[1]) {
+			if match(row, x) {
+				return true
+			}
+		}
+		return false
+	}
 	v := row[c[0].(string)]
 	switch c[1] {
 	case "Eq":
 		return fmt.Sprint(v) == fmt.Sprint(c[2])
+	case "NotEq":
+		return fmt.Sprint(v) != fmt.Sprint(c[2])
+	case "Lt":
+		if n, ok := v.(float64); ok {
+			return n < c[2].(float64)
+		}
+		return fmt.Sprint(v) < fmt.Sprint(c[2])
 	case "In":
 		for _, x := range asList(c[2]) {
 			if fmt.Sprint(v) == fmt.Sprint(x) {

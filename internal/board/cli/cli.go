@@ -811,8 +811,8 @@ reader. ls and search mark threads that carry images.
 
 Storage: with no Layer API key (the Starter Kit) the board is files on this
 machine in ~/.hev/board (board.dir, $HEV_BOARD_DIR), and every command but
-open works on them directly, no server needed; search is grep, every word
-must match. With a Layer key, or when board.url / FACTORY_BOARD_URL names a
+open works on them directly, no server needed; search uses Okapi BM25 and
+requires every word in a phrasing. With a Layer key, or when board.url / FACTORY_BOARD_URL names a
 server, commands talk to that board server; hosted search is semantic.
 
 Configure [board] in kit's config.toml. Legacy FACTORY_BOARD_* overrides are supported.

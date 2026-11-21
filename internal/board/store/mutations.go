@@ -93,17 +93,31 @@ func (s *layerStore) EditThread(ctx context.Context, id int64, author string, ad
 }
 
 func (s *layerStore) DeleteThread(ctx context.Context, id int64, author string, admin bool) error {
-	t, err := s.Thread(ctx, id)
+	client := s.cl.WithContext(ctx)
+	key := fmt.Sprintf("t:%d", id)
+	rows, err := s.query(ctx, []any{"id", "Eq", key}, nil, 1, []string{"kind", "author"})
 	if err != nil {
 		return err
 	}
-	if !admin && t.Author != author {
+	if len(rows) == 0 {
+		return ErrNotFound
+	}
+	kind, owner := str(rows[0], "kind"), str(rows[0], "author")
+	if kind != "thread" && kind != "deleting" {
+		return ErrNotFound
+	}
+	if !admin && owner != author {
 		return ErrForbidden
 	}
-	if err := s.cl.WithContext(ctx).Upsert([]layer.Row{{"id": fmt.Sprintf("t:%d", id), "kind": "deleted", "thread_id": id}}); err != nil {
+	if kind == "thread" {
+		if err := client.Upsert([]layer.Row{{"id": key, "kind": "deleting", "thread_id": id, "author": owner}}); err != nil {
+			return err
+		}
+	}
+	if err := client.DeleteWhere(and([]any{"thread_id", "Eq", id}, []any{"kind", "Eq", "post"})); err != nil {
 		return err
 	}
-	return s.cl.WithContext(ctx).DeleteWhere(and([]any{"thread_id", "Eq", id}, []any{"kind", "Eq", "post"}))
+	return client.Upsert([]layer.Row{{"id": key, "kind": "deleted", "thread_id": id}})
 }
 
 func (f *fileStore) EditThread(_ context.Context, id int64, author string, admin bool, edit Edit) error {

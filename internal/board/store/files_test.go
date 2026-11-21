@@ -146,98 +146,71 @@ func TestFilesThreadLifecycle(t *testing.T) {
 	}
 }
 
-// withoutRG runs fn with rg off PATH, so search reads every post itself.
-func withoutRG(t *testing.T, fn func(t *testing.T)) {
-	t.Run("go", func(t *testing.T) {
-		t.Setenv("PATH", t.TempDir())
-		if rgPath() != "" {
-			t.Fatal("rg still on PATH")
-		}
-		fn(t)
-	})
-}
+func TestFilesSearchWithFilters(t *testing.T) {
+	s, _ := files(t)
+	ctx := context.Background()
+	alice := Poster{Author: "alice", Role: "worker"}
+	bob := Poster{Author: "bob", Role: "human"}
+	pg, _ := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Redis port collides in CI", Tags: []string{"ci", "redis"}, Body: "Port 5432 is already allocated when two jobs run.", Poster: alice})
+	s.Reply(ctx, NewPost{ThreadID: pg.ID, Body: "Use a random host port; the collision goes away. Cache nothing.", Poster: bob})
+	cache, _ := s.CreateThread(ctx, NewThread{Board: "learnings", Title: "Go build cache", Tags: []string{"go"}, Body: "Clearing the module cache fixed the flaky build; no port involved.", Poster: bob})
+	s.CreateThread(ctx, NewThread{Board: "watercooler", Title: "Lunch", Body: "Tacos on Friday. Policies say no cache, no port.", Poster: alice})
 
-// bothWays runs a search test with rg narrowing the files (when this host
-// has rg) and without it; the answers must be the same.
-func bothWays(t *testing.T, fn func(t *testing.T)) {
-	t.Run("rg", func(t *testing.T) {
-		if rgPath() == "" {
-			t.Skip("rg is not on PATH")
+	hits, err := s.Search(ctx, SearchOpts{Q: "redis ports"})
+	if err != nil || len(hits) != 1 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 1 {
+		t.Fatalf("plural folding and title: %+v %v", hits, err)
+	}
+	if hits, _ := s.Search(ctx, SearchOpts{Q: "port allocated"}); len(hits) != 1 || !strings.Contains(hits[0].Snippet, "[Port]") {
+		t.Fatalf("snippet marks the words: %+v", hits)
+	}
+	if hits[0].Post.ID != "t:1" || hits[0].Post.Author != "alice" || hits[0].Thread.Title == "" {
+		t.Fatalf("hit shape: %+v", hits[0])
+	}
+	if hits, _ := s.Search(ctx, SearchOpts{Q: "random host"}); len(hits) != 1 || hits[0].PostN != 2 || hits[0].Post.ID != "p:1:2" {
+		t.Fatalf("a reply is a hit: %+v", hits)
+	}
+	if hits, _ := s.Search(ctx, SearchOpts{Q: "POLICIES"}); len(hits) != 1 || hits[0].Thread.Title != "Lunch" {
+		t.Fatalf("a folded word still finds itself as typed: %+v", hits)
+	}
+	if hits, _ := s.Search(ctx, SearchOpts{Q: "port zebra"}); len(hits) != 0 {
+		t.Fatalf("every term must match: %+v", hits)
+	}
+	if hits, _ := s.Search(ctx, SearchOpts{Q: "zebra", Also: []string{"module cache"}}); len(hits) != 1 || hits[0].Thread.ID != cache.ID {
+		t.Fatalf("--also: %+v", hits)
+	}
+	hits, _ = s.Search(ctx, SearchOpts{Q: "port cache", Also: []string{"collision"}})
+	if len(hits) != 3 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 2 {
+		t.Fatalf("reciprocal rank fusion: %+v", hits)
+	}
+	for name, c := range map[string]struct {
+		o    SearchOpts
+		want int
+	}{
+		"board":          {SearchOpts{Q: "port cache", Board: "learnings"}, 1},
+		"tag":            {SearchOpts{Q: "port", Tags: []string{"CI"}}, 1},
+		"every tag":      {SearchOpts{Q: "port", Tags: []string{"ci", "go"}}, 0},
+		"by":             {SearchOpts{Q: "port", Author: "bob"}, 2},
+		"role":           {SearchOpts{Q: "port", Role: "worker"}, 2},
+		"top":            {SearchOpts{Q: "port cache", Limit: 2}, 2},
+		"since":          {SearchOpts{Q: "port", Since: "1h"}, 3},
+		"also widens":    {SearchOpts{Q: "tacos", Also: []string{"module"}}, 2},
+		"empty question": {SearchOpts{Q: "  "}, 0},
+		"only stopwords": {SearchOpts{Q: "the of and"}, 0},
+	} {
+		hits, err := s.Search(ctx, c.o)
+		if err != nil || len(hits) != c.want {
+			t.Errorf("%s: %d hits, want %d (%v)", name, len(hits), c.want, err)
 		}
-		fn(t)
-	})
-	withoutRG(t, fn)
-}
-
-func TestFilesSearchIsGrepWithFilters(t *testing.T) {
-	bothWays(t, func(t *testing.T) {
-		s, _ := files(t)
-		ctx := context.Background()
-		alice := Poster{Author: "alice", Role: "worker"}
-		bob := Poster{Author: "bob", Role: "human"}
-		pg, _ := s.CreateThread(ctx, NewThread{Board: "tooling", Title: "Redis port collides in CI", Tags: []string{"ci", "redis"}, Body: "Port 5432 is already allocated when two jobs run.", Poster: alice})
-		s.Reply(ctx, NewPost{ThreadID: pg.ID, Body: "Use a random host port; the collision goes away. Cache nothing.", Poster: bob})
-		cache, _ := s.CreateThread(ctx, NewThread{Board: "learnings", Title: "Go build cache", Tags: []string{"go"}, Body: "Clearing the module cache fixed the flaky build; no port involved.", Poster: bob})
-		s.CreateThread(ctx, NewThread{Board: "watercooler", Title: "Lunch", Body: "Tacos on Friday. Policies say no cache, no port.", Poster: alice})
-
-		hits, err := s.Search(ctx, SearchOpts{Q: "redis ports"})
-		if err != nil || len(hits) != 1 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 1 {
-			t.Fatalf("plural folding and title: %+v %v", hits, err)
-		}
-		if hits, _ := s.Search(ctx, SearchOpts{Q: "port allocated"}); len(hits) != 1 || !strings.Contains(hits[0].Snippet, "[Port]") {
-			t.Fatalf("snippet marks the words: %+v", hits)
-		}
-		if hits[0].Post.ID != "t:1" || hits[0].Post.Author != "alice" || hits[0].Thread.Title == "" {
-			t.Fatalf("hit shape: %+v", hits[0])
-		}
-		if hits, _ := s.Search(ctx, SearchOpts{Q: "random host"}); len(hits) != 1 || hits[0].PostN != 2 || hits[0].Post.ID != "p:1:2" {
-			t.Fatalf("a reply is a hit: %+v", hits)
-		}
-		if hits, _ := s.Search(ctx, SearchOpts{Q: "POLICIES"}); len(hits) != 1 || hits[0].Thread.Title != "Lunch" {
-			t.Fatalf("a folded word still finds itself as typed: %+v", hits)
-		}
-		if hits, _ := s.Search(ctx, SearchOpts{Q: "port zebra"}); len(hits) != 0 {
-			t.Fatalf("every term must match: %+v", hits)
-		}
-		if hits, _ := s.Search(ctx, SearchOpts{Q: "zebra", Also: []string{"module cache"}}); len(hits) != 1 || hits[0].Thread.ID != cache.ID {
-			t.Fatalf("--also: %+v", hits)
-		}
-		// Three threads hold both "port" and "cache"; one more term ranks
-		// the first above the newer two, then the newest wins.
-		hits, _ = s.Search(ctx, SearchOpts{Q: "port cache", Also: []string{"collision"}})
-		if len(hits) != 3 || hits[0].Thread.ID != pg.ID || hits[0].PostN != 2 || hits[1].Thread.Title != "Lunch" || hits[2].Thread.ID != cache.ID {
-			t.Fatalf("terms hit, then newest: %+v", hits)
-		}
-		for name, c := range map[string]struct {
-			o    SearchOpts
-			want int
-		}{
-			"board":          {SearchOpts{Q: "port cache", Board: "learnings"}, 1},
-			"tag":            {SearchOpts{Q: "port", Tags: []string{"CI"}}, 1},
-			"every tag":      {SearchOpts{Q: "port", Tags: []string{"ci", "go"}}, 0},
-			"by":             {SearchOpts{Q: "port", Author: "bob"}, 2},
-			"role":           {SearchOpts{Q: "port", Role: "worker"}, 2},
-			"top":            {SearchOpts{Q: "port cache", Limit: 2}, 2},
-			"since":          {SearchOpts{Q: "port", Since: "1h"}, 3},
-			"also widens":    {SearchOpts{Q: "tacos", Also: []string{"module"}}, 2},
-			"empty question": {SearchOpts{Q: "  "}, 0},
-			"only stopwords": {SearchOpts{Q: "the of and"}, 0},
-		} {
-			hits, err := s.Search(ctx, c.o)
-			if err != nil || len(hits) != c.want {
-				t.Errorf("%s: %d hits, want %d (%v)", name, len(hits), c.want, err)
-			}
-		}
-		if _, err := s.Search(ctx, SearchOpts{Q: "x", Board: "nope"}); !errors.Is(err, ErrInvalid) {
-			t.Errorf("unknown board: %v", err)
-		}
-		if _, err := s.Search(ctx, SearchOpts{Q: "x", Since: "soon"}); !errors.Is(err, ErrInvalid) {
-			t.Errorf("bad since: %v", err)
-		}
-		if _, err := s.Search(ctx, SearchOpts{Q: "a", Also: strings.Fields("b c d e f g h i")}); !errors.Is(err, ErrInvalid) {
-			t.Errorf("too many phrasings: %v", err)
-		}
-	})
+	}
+	if _, err := s.Search(ctx, SearchOpts{Q: "x", Board: "nope"}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("unknown board: %v", err)
+	}
+	if _, err := s.Search(ctx, SearchOpts{Q: "x", Since: "soon"}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("bad since: %v", err)
+	}
+	if _, err := s.Search(ctx, SearchOpts{Q: "a", Also: strings.Fields("b c d e f g h i")}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("too many phrasings: %v", err)
+	}
 }
 
 // A board an earlier 0.7 build wrote, one file per thread, opens as one file
@@ -574,5 +547,25 @@ func TestOpenRefusesAnUnreadableKey(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("an unreadable key created the board directory: %v", err)
+	}
+}
+
+func TestFilesSearchBM25RanksTitleAndLengthAheadOfRecency(t *testing.T) {
+	s, _ := files(t)
+	ctx := context.Background()
+	create := func(title, body string) *Thread {
+		th, err := s.CreateThread(ctx, NewThread{Board: "tooling", Title: title, Body: body, Poster: Poster{Author: "tester"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return th
+	}
+	older := create("zebra", "short")
+	newer := create("newer", strings.Repeat("filler ", 100)+"zebra")
+	create("unrelated", "gazebras")
+	hits, err := s.Search(ctx, SearchOpts{Q: "zebras"})
+	if err != nil || len(hits) != 2 || hits[0].Thread.ID != older.ID ||
+		hits[1].Thread.ID != newer.ID || hits[0].Score <= hits[1].Score {
+		t.Fatalf("BM25 order = %+v, %v", hits, err)
 	}
 }

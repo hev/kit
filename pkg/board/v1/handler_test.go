@@ -319,3 +319,124 @@ func TestBoardV1LayerRouting(t *testing.T) {
 		})
 	}
 }
+
+func TestBoardV1LayerListBeyondTenThousand(t *testing.T) {
+	f := newBoardTest(t)
+	const lastID = 10002
+	const updated = "2026-11-21T00:00:00.000000Z"
+	post := func(id int, pinned bool) map[string]any {
+		return map[string]any{"id": fmt.Sprintf("t:%d", id), "thread_id": id, "kind": "thread",
+			"board": "tooling", "title": "test", "created": updated, "updated": updated, "pinned": pinned}
+	}
+	var find func(any, string, string) any
+	find = func(value any, field, op string) any {
+		x, ok := value.([]any)
+		if !ok {
+			return nil
+		}
+		if len(x) == 3 && x[0] == field && x[1] == op {
+			return x[2]
+		}
+		for _, child := range x {
+			if match := find(child, field, op); match != nil {
+				return match
+			}
+		}
+		return nil
+	}
+	layerAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var q map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+			t.Error(err)
+			return
+		}
+		limit, _ := q["top_k"].(float64)
+		if limit <= 0 || limit > 200 || fmt.Sprint(q["rank_by"]) != "[[updated desc] [thread_id desc]]" {
+			t.Errorf("listing must use bounded, deterministic queries: %v", q)
+			http.Error(w, "invalid query", 400)
+			return
+		}
+		rows := []map[string]any{}
+		if find(q["filters"], "pinned", "Eq") == true {
+			rows = append(rows, post(1, true))
+		} else {
+			start := lastID
+			if after, ok := find(q["filters"], "thread_id", "Lt").(float64); ok {
+				start = int(after) - 1
+			}
+			for id := start; id >= 2 && len(rows) < int(limit); id-- {
+				rows = append(rows, post(id, false))
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"rows": rows})
+	}))
+	defer layerAPI.Close()
+	f.h = Handler(store.New(layer.New(layerAPI.URL, "key", "test", "")), t.TempDir(),
+		func(*http.Request) (Caller, bool) { return Caller{Author: "tester"}, true })
+
+	first := f.call("GET", "/posts?limit=2", "/posts", "ada", "", nil, 200)
+	firstIDs := first.json["data"].([]any)
+	if firstIDs[0].(map[string]any)["id"] != json.Number("1") || firstIDs[1].(map[string]any)["id"] != json.Number(strconv.Itoa(lastID)) {
+		t.Fatalf("older pin must lead page one: %v", firstIDs)
+	}
+	cursor := pageRequest{offset: 9800, limit: 200}.cursor(201)
+	if cursor == nil {
+		t.Fatal("full page with lookahead must retain its cursor past 10,000")
+	}
+	last := f.call("GET", "/posts?limit=200&cursor="+*cursor, "/posts", "ada", "", nil, 200)
+	data := last.json["data"].([]any)
+	if len(data) != 2 || data[0].(map[string]any)["id"] != json.Number("3") ||
+		data[1].(map[string]any)["id"] != json.Number("2") || last.json["next_cursor"] != nil {
+		t.Fatalf("expected the two remaining posts and exhaustion: %v", last.json)
+	}
+}
+
+func TestBoardV1LayerSearchPagesDistinctThreads(t *testing.T) {
+	f := newBoardTest(t)
+	layerAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/capabilities") {
+			w.WriteHeader(404)
+			return
+		}
+		var q map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+			t.Error(err)
+			return
+		}
+		row := func(id, n int) map[string]any {
+			return map[string]any{"id": fmt.Sprintf("row:%d:%d", id, n), "thread_id": id, "n": n,
+				"kind": "thread", "board": "tooling", "title": "zebra", "text": "matched zebra"}
+		}
+		var rows []map[string]any
+		if queries, ok := q["queries"].([]any); ok {
+			leg := queries[0].(map[string]any)
+			limit := int(leg["top_k"].(float64))
+			if strings.Contains(fmt.Sprint(leg["filters"]), "NotIn [1]") {
+				rows = append(rows, row(2, 1))
+			} else {
+				// Fill the entire first backend page with one discussion.
+				for n := 2; n < limit+2; n++ {
+					rows = append(rows, row(1, n))
+				}
+			}
+		} else if strings.Contains(fmt.Sprint(q["filters"]), "In [1]") {
+			rows = append(rows, row(1, 1))
+		} else if strings.Contains(fmt.Sprint(q["filters"]), "In [2]") {
+			rows = append(rows, row(2, 1))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"rows": rows})
+	}))
+	defer layerAPI.Close()
+	f.h = Handler(store.New(layer.New(layerAPI.URL, "key", "test", "")), t.TempDir(),
+		func(*http.Request) (Caller, bool) { return Caller{Author: "tester"}, true })
+	first := f.call("GET", "/search?q=zebra&limit=1", "/search", "ada", "", nil, 200)
+	cursor, _ := first.json["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatal("a repeated discussion hid the next distinct match")
+	}
+	second := f.call("GET", "/search?q=zebra&limit=1&cursor="+cursor, "/search", "ada", "", nil, 200)
+	data := second.json["data"].([]any)
+	if len(data) != 1 || data[0].(map[string]any)["post"].(map[string]any)["id"] != json.Number("2") || second.json["next_cursor"] != nil {
+		t.Fatalf("expected the second discussion and exhaustion: %v", second.json)
+	}
+}
