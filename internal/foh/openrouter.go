@@ -79,12 +79,6 @@ type Delta struct {
 	ToolName string // set when a tool call starts
 }
 
-// Provider streams chat completions. The OpenRouter client implements it;
-// tests may supply their own.
-type Provider interface {
-	Stream(ctx context.Context, req ChatRequest, onDelta func(Delta)) (ChatResult, error)
-}
-
 const (
 	// DefaultRequestTimeout bounds one streamed completion end to end.
 	DefaultRequestTimeout = 5 * time.Minute
@@ -93,9 +87,12 @@ const (
 	maxResponseBytes      = 32 << 20
 )
 
-// Client is an OpenRouter (OpenAI-compatible) streaming client.
+// Client is an OpenRouter (OpenAI-compatible) streaming client. It is the
+// openrouter Provider.
 type Client struct {
 	BaseURL string
+	// Catalog lists the models; nil uses a default cache-backed Catalog.
+	Catalog *Catalog
 	APIKey  string
 	HTTP    *http.Client
 	// Timeout bounds each request; zero uses DefaultRequestTimeout.
@@ -108,6 +105,27 @@ type Client struct {
 func NewClient(baseURL, key string) *Client {
 	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), APIKey: key, HTTP: &http.Client{},
 		Referer: "https://hevkit.com", Title: "hev foh"}
+}
+
+// ID is ProviderOpenRouter.
+func (c *Client) ID() string { return ProviderOpenRouter }
+
+// Secrets is the API key, for scrubbing.
+func (c *Client) Secrets() []string { return []string{c.APIKey} }
+
+// Models lists the cached OpenRouter catalog, each model stamped openrouter.
+func (c *Client) Models(ctx context.Context, refresh bool) ([]Model, CatalogSource, error) {
+	cat := c.Catalog
+	if cat == nil {
+		cat = &Catalog{Client: c}
+	}
+	models, src, err := cat.Models(ctx, refresh)
+	out := make([]Model, len(models))
+	for i, m := range models {
+		m.Provider = ProviderOpenRouter
+		out[i] = m
+	}
+	return out, src, err
 }
 
 func (c *Client) timeout() time.Duration {

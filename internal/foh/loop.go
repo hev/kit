@@ -83,8 +83,11 @@ func (a *Agent) SetModel(id string) {
 	a.model = id
 	turn := a.turn
 	a.mu.Unlock()
-	a.Session.Write(Record{Type: "model_switch", Turn: turn, Model: id, From: from})
+	a.Session.Write(Record{Type: "model_switch", Turn: turn, Model: id, Provider: a.ProviderFor(id), From: from, FromProvider: a.ProviderFor(from)})
 }
+
+// ProviderFor names the provider that serves model.
+func (a *Agent) ProviderFor(model string) string { return providerFor(a.Provider, model) }
 
 // System is the active system prompt.
 func (a *Agent) System() string {
@@ -169,6 +172,15 @@ func (a *Agent) request() ChatRequest {
 	return req
 }
 
+// syncSecrets hands every provider credential loaded so far (including
+// refreshed tokens) to the session log and the tool scrubber.
+func (a *Agent) syncSecrets() {
+	for _, v := range providerSecrets(a.Provider) {
+		a.Session.AddSecret(v)
+		a.Tools.AddSecret(v)
+	}
+}
+
 func (a *Agent) injectSteers(steers []string, turn int, emit func(Event)) {
 	for _, s := range steers {
 		a.append(Message{Role: "user", Content: SteerPrefix + s})
@@ -187,8 +199,10 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 	a.turn++
 	turn := a.turn
 	a.mu.Unlock()
+	a.syncSecrets()
 	a.append(Message{Role: "user", Content: user})
-	a.Session.Write(Record{Type: "user", Turn: turn, Role: "user", Content: user, Model: a.Model()})
+	cur := a.Model()
+	a.Session.Write(Record{Type: "user", Turn: turn, Role: "user", Content: user, Model: cur, Provider: a.ProviderFor(cur)})
 	steps := a.MaxSteps
 	if steps <= 0 {
 		steps = DefaultMaxSteps
@@ -203,15 +217,17 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 				emit(Event{Kind: EventText, Text: d.Text})
 			}
 		})
+		a.syncSecrets()
 		if err != nil {
 			return a.fail(turn, err, emit)
 		}
 		// Stamp the turn with the model we asked for; the provider's echoed
 		// slug can carry a dated variant.
 		model := req.Model
+		provider := a.ProviderFor(model)
 		a.append(Message{Role: "assistant", Content: res.Content, ToolCalls: res.ToolCalls})
 		usage := res.Usage
-		a.Session.Write(Record{Type: "assistant", Turn: turn, Role: "assistant", Model: model, Content: res.Content, ToolCalls: res.ToolCalls, Usage: &usage})
+		a.Session.Write(Record{Type: "assistant", Turn: turn, Role: "assistant", Model: model, Provider: provider, Content: res.Content, ToolCalls: res.ToolCalls, Usage: &usage})
 		emit(Event{Kind: EventUsage, Usage: usage, Model: model})
 		if len(res.ToolCalls) == 0 {
 			if steers := a.takeSteers(); len(steers) > 0 {
@@ -225,7 +241,7 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 			emit(Event{Kind: EventToolStart, Call: call})
 			result := a.Tools.Run(ctx, call)
 			a.append(Message{Role: "tool", ToolCallID: call.ID, Name: call.Function.Name, Content: result.Content})
-			a.Session.Write(Record{Type: "tool", Turn: turn, Role: "tool", Model: model, ToolCallID: call.ID, ToolName: call.Function.Name, Content: result.Content, IsError: result.IsError})
+			a.Session.Write(Record{Type: "tool", Turn: turn, Role: "tool", Model: model, Provider: provider, ToolCallID: call.ID, ToolName: call.Function.Name, Content: result.Content, IsError: result.IsError})
 			emit(Event{Kind: EventToolResult, Call: call, Result: result})
 			steers := a.takeSteers()
 			if len(steers) == 0 {
@@ -235,7 +251,7 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 			for _, skipped := range res.ToolCalls[i+1:] {
 				msg := "skipped: the user steered before this call ran"
 				a.append(Message{Role: "tool", ToolCallID: skipped.ID, Name: skipped.Function.Name, Content: msg})
-				a.Session.Write(Record{Type: "tool", Turn: turn, Role: "tool", Model: model, ToolCallID: skipped.ID, ToolName: skipped.Function.Name, Content: msg, IsError: true})
+				a.Session.Write(Record{Type: "tool", Turn: turn, Role: "tool", Model: model, Provider: provider, ToolCallID: skipped.ID, ToolName: skipped.Function.Name, Content: msg, IsError: true})
 			}
 			a.injectSteers(steers, turn, emit)
 			break
@@ -245,15 +261,12 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 }
 
 func (a *Agent) fail(turn int, err error, emit func(Event)) error {
-	var secrets []string
-	if c, ok := a.Provider.(*Client); ok {
-		secrets = append(secrets, c.APIKey)
-	}
-	err = scrubErr(err, secrets...)
+	err = scrubErr(err, providerSecrets(a.Provider)...)
 	if errors.Is(err, context.Canceled) {
 		err = fmt.Errorf("turn cancelled: %w", err)
 	}
-	a.Session.Write(Record{Type: "error", Turn: turn, Model: a.Model(), Content: err.Error(), IsError: true})
+	cur := a.Model()
+	a.Session.Write(Record{Type: "error", Turn: turn, Model: cur, Provider: a.ProviderFor(cur), Content: err.Error(), IsError: true})
 	emit(Event{Kind: EventError, Err: err})
 	return err
 }

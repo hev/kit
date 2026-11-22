@@ -404,8 +404,10 @@ func (m *TUI) refilter() {
 		}
 		seen[model.ID] = true
 		s := fuzzyScore(p.query, model.ID)
-		if n := fuzzyScore(p.query, model.Name); n > s {
-			s = n
+		for _, field := range []string{model.Name, model.ProviderID()} {
+			if n := fuzzyScore(p.query, field); n > s {
+				s = n
+			}
 		}
 		if s >= 0 {
 			rows = append(rows, scored{model, s, m.opts.Favorites.Has(model.ID), order})
@@ -414,7 +416,8 @@ func (m *TUI) refilter() {
 	for i, model := range m.catalog() {
 		add(model, i)
 	}
-	// Favorites missing from the catalog still show.
+	// Favorites missing from the catalog still show, under the provider
+	// their ID implies.
 	for i, id := range m.opts.Favorites.IDs {
 		add(Model{ID: id, PromptPrice: -1, CompletionPrice: -1}, len(m.catalog())+i)
 	}
@@ -467,7 +470,11 @@ func (m *TUI) switchModel(id string) {
 		return
 	}
 	m.opts.Agent.SetModel(id)
-	m.entries = append(m.entries, entry{kind: entrySystem, text: "⇄ model " + from + " → " + id})
+	text := "⇄ model " + from + " → " + id
+	if fp, tp := m.opts.Agent.ProviderFor(from), m.opts.Agent.ProviderFor(id); fp != tp {
+		text += " (" + fp + " → " + tp + ")"
+	}
+	m.entries = append(m.entries, entry{kind: entrySystem, text: text})
 }
 
 func (m *TUI) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -550,7 +557,7 @@ func (m *TUI) splash() string {
 		"",
 		"cwd        " + m.opts.Cwd,
 		"workspace  " + ws,
-		"model      " + userStyle.Render(m.opts.Agent.Model()),
+		"model      " + userStyle.Render(m.opts.Agent.Model()) + dimStyle.Render(" via "+m.opts.Agent.ProviderFor(m.opts.Agent.Model())),
 		"",
 		dimStyle.Render("Ctrl+M model picker · /prompt · /help"),
 		dimStyle.Render("YOLO: tools run without approval prompts"),
@@ -563,7 +570,8 @@ func (m *TUI) headerBar() string {
 	if m.busy {
 		state = "working"
 	}
-	return badge.Render("hev foh") + " " + userStyle.Render(m.opts.Agent.Model()) + dimStyle.Render("  "+state+" · "+m.opts.Cwd)
+	model := m.opts.Agent.Model()
+	return badge.Render("hev foh") + " " + userStyle.Render(model) + dimStyle.Render(" ["+m.opts.Agent.ProviderFor(model)+"]  "+state+" · "+m.opts.Cwd)
 }
 
 func (m *TUI) renderCard(c *Card, width int) string {
@@ -650,7 +658,7 @@ func (m *TUI) pickerView(height int) string {
 			star = lipgloss.NewStyle().Foreground(gold).Render("★ ")
 		}
 		cur := "  "
-		line := fmt.Sprintf("%-44s %6s  %s per M", ansi.Truncate(model.ID, 44, "…"), model.ContextLabel(), model.PriceLabel())
+		line := fmt.Sprintf("%-44s %6s  %s", ansi.Truncate(model.ID, 44, "…"), model.ContextLabel(), model.Badge())
 		if model.ID == m.opts.Agent.Model() {
 			line += "  (active)"
 		}

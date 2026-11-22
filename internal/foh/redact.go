@@ -13,8 +13,12 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}`),
 	// OpenRouter, OpenAI and Anthropic style keys.
 	regexp.MustCompile(`\bsk-(?:or-v1-|ant-|proj-)?[A-Za-z0-9_-]{16,}`),
-	// key=value pairs that name a key or token.
-	regexp.MustCompile(`(?i)\b((?:api[_-]?key|access[_-]?token|secret)\s*[=:]\s*"?)[^\s"',&]{8,}`),
+	// key=value pairs (and JSON "key": "value") that name a key or token.
+	regexp.MustCompile(`(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|secret)"?\s*[=:]\s*"?)[^\s"',&]{8,}`),
+	// The ChatGPT account header and its JSON form, whatever the value.
+	regexp.MustCompile(`(?i)\b((?:chatgpt[_-]account[_-]id|account[_-]id)"?\s*[=:]\s*"?)[^\s"',&]{4,}`),
+	// JWTs (OAuth access and id tokens).
+	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
 }
 
 // Scrub removes the given secret values and anything shaped like an API key
@@ -29,7 +33,7 @@ func Scrub(s string, secrets ...string) string {
 		switch i {
 		case 0:
 			s = re.ReplaceAllString(s, "${1}"+redacted)
-		case 3:
+		case 3, 4:
 			s = re.ReplaceAllString(s, "${1}"+redacted)
 		default:
 			s = re.ReplaceAllString(s, redacted)

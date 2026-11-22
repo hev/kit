@@ -1,6 +1,6 @@
 # RFC 0029 — Optional native FOH harness (`hev foh`)
 
-Status: Phase 1 implemented
+Status: Phase 1 implemented; multi-provider routing (codex-sub) implemented
 
 ## Summary
 
@@ -66,15 +66,67 @@ The catalog from `/api/v1/models` is cached at
 When the network is down, the picker uses the stale cache, or a built-in
 starter list if there is no cache.
 
+### Providers: OpenRouter and Codex subscriptions
+
+The loop talks to a `Provider` interface (`internal/foh/provider.go`): an ID,
+a streaming request with tool calls, and a model catalog. A `Router` holds the
+configured providers and sends each request to the one that serves its model,
+so the thread (kept by the agent, not the provider) survives a switch from one
+provider to another. Two providers exist:
+
+| Provider | Model IDs | Credentials | Wire format |
+|----------|-----------|-------------|-------------|
+| `openrouter` (default) | vendor slugs, such as `google/gemini-4-neon` | API key (above) | Chat Completions SSE |
+| `codex-sub` | `codex/NAME`, such as `codex/gpt-6-astra` | the operator's Codex ChatGPT login | Responses SSE at `chatgpt.com/backend-api/codex/responses` |
+
+`codex-sub` reuses the login that `codex login` saves. It reads `auth.json`
+from the first of `[foh.codex].home`, `CODEX_HOME`, the active workspace's
+codex profile (RFC 0024; `HEV_WORKSPACE`), or `~/.codex`, and it reads the file
+again on every request so a refresh by the Codex CLI is picked up. Requests
+carry `Authorization: Bearer <access_token>` and, when known,
+`ChatGPT-Account-Id`. An access token that has expired (or gets a 401) is
+refreshed once with the stored refresh token. Each refresh has a 30-second
+timeout, and a failed refresh isn't retried for a minute. The rotated tokens
+are written back to `auth.json` with every other field kept, because the old
+refresh token stops working. An `auth.json` with only an API key is not a
+subscription login. `[foh.codex].models` sets the listed models (default
+`gpt-6-astra`, `gpt-5.4`, `gpt-5.3-codex`). They appear only when a usable
+login is found, or when `[foh.codex].enabled = true`. `enabled = false` hides
+them. With no OpenRouter key and a Codex login, `hev foh` runs on codex-sub
+alone and starts on its first model.
+
+**Provider terms boundary (memo #446).** Subscription providers are added
+only where the provider's terms allow it, and OpenAI/Codex ChatGPT plans are
+the only one today. `hev foh` never reads or uses Anthropic/Claude OAuth
+subscription credentials. It refuses a Codex home inside any `.claude`
+directory or `CLAUDE_CONFIG_DIR`, refuses an auth file that holds a
+`claudeAiOauth` blob, and refuses `codex/claude-*` model names. Anthropic
+models in `hev foh` route through OpenRouter, or through another
+OpenAI-compatible gateway with an explicit API key. Claude subscriptions stay
+in Claude Code.
+
+Codex credentials get the same handling as the OpenRouter key. The access,
+refresh and id tokens and the account ID never appear in error text or
+session traces. The agent hands every loaded or refreshed value to the
+session and tool scrubbers, and the redactor also strips JWTs,
+`refresh_token`/`id_token` pairs and `ChatGPT-Account-Id` headers by shape.
+
 ### Model picker and hot swap
 
-`Ctrl+M` or `/model` opens a fuzzy picker over the catalog. Each row shows the
-slug, context window and prompt/completion price per million tokens. `Ctrl+F`
+`Ctrl+M` or `/model` opens a fuzzy picker over the merged catalog of every
+configured provider, with subscription models first. Each row shows the ID,
+context window and a provider/cost badge: `[codex-sub] sub` for a
+subscription model, `[OR] $3.00/$15.00` (prompt/completion per million tokens)
+for OpenRouter. `Ctrl+F`
 (or `f` with the list focused) stars a model. Stars are saved to
 `~/.hev/foh-favorites.json`, and starred models sort first. Choosing a model
 swaps the active model for the next request without touching the thread, and
-the transcript shows a badge. Each session record is stamped with the exact
-model that served it.
+the transcript shows a badge, which also names both providers when the swap
+crosses them (`⇄ model codex/gpt-6-astra → google/gemini-4-neon (codex-sub →
+openrouter)`). Each session record is stamped with the `provider` and the exact
+`model` that served it. A `model_switch` record carries `from` and
+`from_provider` too. Favorites from both providers share the one file,
+because their IDs never collide.
 
 ### Composable system prompt
 
@@ -135,7 +187,9 @@ version with no escape sequences. `hev foh --show-mascot` prints it and exits.
 - An approval or sandbox layer inside the loop.
 - Ingesting FOH sessions into the trace archive. Phase 2 adds a trace source
   for the registered root.
-- Providers other than OpenAI-compatible endpoints.
+- Providers other than OpenAI-compatible endpoints and the Codex ChatGPT
+  Responses backend. Anthropic subscription logins are out of scope for good
+  (memo #446).
 - Compacting context. A thread keeps at most 400 messages and drops whole
   exchanges from the front.
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -96,5 +97,60 @@ func TestFOHOnce(t *testing.T) {
 	_, errOut, code = runHevChild(t, home2, nil, "foh", "--once", "ping")
 	if code == 0 || !strings.Contains(errOut, "OPENROUTER_API_KEY") {
 		t.Fatalf("no key: code=%d stderr=%q", code, errOut)
+	}
+}
+
+// TestFOHOnceCodexSub runs hev foh on a Codex ChatGPT login alone: no
+// OpenRouter key, the default model falls back to a codex/ model, and the
+// trace stamps provider codex-sub without any credential. A Claude login in
+// the same HOME is never used.
+func TestFOHOnceCodexSub(t *testing.T) {
+	const access = "eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDI0NDQ4MDB9.c2lnbmF0dXJlLWNtZA"
+	const refresh = "rt_cmdREFRESHsecret0123456789"
+	var gotModel, gotAuth, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth, gotPath = r.Header.Get("Authorization"), r.URL.Path
+		var body struct {
+			Model string `json:"model"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		gotModel = body.Model
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n")
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	codexDir := filepath.Join(home, ".codex")
+	os.MkdirAll(codexDir, 0o700)
+	os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"tokens":{"access_token":"`+access+`","refresh_token":"`+refresh+`","account_id":"acct-cmd-1234"}}`), 0o600)
+	os.MkdirAll(filepath.Join(home, ".claude"), 0o700)
+	os.WriteFile(filepath.Join(home, ".claude", ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-NEVERUSED0000000000000"}}`), 0o600)
+
+	out, errOut, code := runHevChild(t, home, []string{"HEV_FOH_CODEX_BASE_URL=" + srv.URL}, "foh", "--once", "ping")
+	if code != 0 || strings.TrimSpace(out) != "pong" {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out, errOut)
+	}
+	if gotPath != "/responses" || gotModel != "gpt-6-astra" || gotAuth != "Bearer "+access {
+		t.Fatalf("path=%q model=%q auth ok=%v", gotPath, gotModel, gotAuth == "Bearer "+access)
+	}
+	sessions, _ := filepath.Glob(filepath.Join(home, ".hev", "foh", "sessions", "*.jsonl"))
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %v", sessions)
+	}
+	b, _ := os.ReadFile(sessions[0])
+	for _, s := range []string{access, refresh, "acct-cmd-1234", "NEVERUSED"} {
+		if strings.Contains(string(b), s) {
+			t.Fatalf("session leaked %q: %s", s, b)
+		}
+	}
+	if !strings.Contains(string(b), `"model":"codex/gpt-6-astra","provider":"codex-sub"`) {
+		t.Fatalf("session lacks provider stamp: %s", b)
+	}
+
+	// CODEX_HOME pointing at the Claude directory finds no login: the run
+	// fails cleanly and names both ways to sign in.
+	_, errOut, code = runHevChild(t, home, []string{"CODEX_HOME=" + filepath.Join(home, ".claude"), "HEV_FOH_CODEX_BASE_URL=" + srv.URL}, "foh", "--once", "ping")
+	if code == 0 || !strings.Contains(errOut, "OPENROUTER_API_KEY") || !strings.Contains(errOut, "codex login") || strings.Contains(errOut, "NEVERUSED") {
+		t.Fatalf("claude dir: code=%d stderr=%q", code, errOut)
 	}
 }
