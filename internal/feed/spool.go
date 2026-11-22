@@ -24,6 +24,7 @@ const (
 	ThreadSession      = "session"
 	ThreadRun          = "run"
 	ThreadCron         = "cron"
+	ThreadService      = "service"
 	ThreadOrchestrator = "orchestrator"
 	ThreadBoard        = "board"
 	ThreadEvidence     = "evidence"
