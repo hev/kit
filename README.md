@@ -221,7 +221,7 @@ scrubbing cannot cover every kind of sensitive data. Treat transcripts, the
 archive, and configuration as sensitive. Read
 [redaction and archive upgrades](https://hevkit.com/docs/archive-redaction)
 before upgrading an existing archive. See [instruction capture](https://hevkit.com/docs/skill-capture)
-and [session enrichment](https://hevkit.com/docs/session-backfill) for more ways to use the record.
+and [trace backfill](https://hevkit.com/docs/traces-stats#backfill) for more ways to use the record.
 
 ## Secrets
 
