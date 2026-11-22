@@ -53,6 +53,20 @@ and round numbering. A failed or empty checkpoint never replaces the last
 accepted checkpoint. Idle rounds compare evidence and inbox with the last
 accepted checkpoint's digest and avoid calling the model if unchanged.
 
+Before each round, the orchestrator snapshots its own host, hosts listed under `manages.hosts` or the workspace's `hosts`, and hosts it knows
+hold managed runs from run records, prior round packets or a follow-through
+snapshot. A run in `manages.runs.names` can be written as `host/run` to
+pin its name to a host and require that host's snapshot. A required host
+that cannot be reached stops the round with `cannot snapshot HOST: …`.
+
+With no host list or workspace host restriction, selectors and unqualified
+names discover runs on reachable configured hosts. Discovery skips hosts
+assigned to another workspace with `login = "own"` unless the orchestrator
+explicitly requires them or already tracks managed runs there. An unreachable
+discovery host is skipped until managed work there is known. A fixed
+follow-through snapshot or a list containing only qualified run names needs
+no discovery. Workspace host boundaries still apply.
+
 Checkpoint instructions require goal status, open threads by run name, named
 waits with release conditions, next actions and notes for `reply`. For
 `until: goal`, a completed goal also writes `goal-met.json` with `{"met":true}`
