@@ -37,6 +37,12 @@ func (s *scripted) Stream(_ context.Context, req ChatRequest, onDelta func(Delta
 	return r, nil
 }
 
+func (s *scripted) ID() string { return "scripted" }
+
+func (s *scripted) Models(context.Context, bool) ([]Model, CatalogSource, error) {
+	return nil, SourceStarter, nil
+}
+
 func call(id, name, args string) ToolCall {
 	return ToolCall{ID: id, Type: "function", Function: FunctionCall{Name: name, Arguments: args}}
 }

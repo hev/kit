@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,7 +27,7 @@ func isolateHome(t *testing.T) string {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HEV_CONFIG", "")
 	t.Setenv("HEV_FOH_SESSIONS_DIR", "")
-	for _, k := range []string{"OPENROUTER_API_KEY", "HEV_FOH_API_KEY", "HEV_FOH_MODEL", "HEV_FOH_BASE_URL"} {
+	for _, k := range []string{"OPENROUTER_API_KEY", "HEV_FOH_API_KEY", "HEV_FOH_MODEL", "HEV_FOH_BASE_URL", "CODEX_HOME", "HEV_WORKSPACE", "CLAUDE_CONFIG_DIR", "HEV_FOH_CODEX_BASE_URL"} {
 		t.Setenv(k, "")
 	}
 	return home
@@ -327,10 +328,10 @@ func TestConfigAndKeyResolution(t *testing.T) {
 	if cfg.ResolvedBaseURL() != "http://env" {
 		t.Fatal("env base url must win")
 	}
-	if cfg.ResolveModel("", []string{"fav/one"}) != "openai/gpt-5" || cfg.ResolveModel("flag/m", nil) != "flag/m" {
+	if cfg.ResolveModel("", []string{"fav/one"}, nil, "") != "openai/gpt-5" || cfg.ResolveModel("flag/m", nil, nil, "") != "flag/m" {
 		t.Fatal("model precedence")
 	}
-	if (Config{}).ResolveModel("", []string{"fav/one"}) != "fav/one" || (Config{}).ResolveModel("", nil) != DefaultModel {
+	if (Config{}).ResolveModel("", []string{"fav/one"}, nil, "") != "fav/one" || (Config{}).ResolveModel("", nil, nil, "") != DefaultModel {
 		t.Fatal("favorite / default model")
 	}
 
@@ -375,7 +376,7 @@ func TestConfigAndKeyResolution(t *testing.T) {
 		t.Fatalf("parse error = %v", err)
 	}
 	os.WriteFile(cfgPath, []byte("[metrics]\nenabled = true\n"), 0o600)
-	if c, err := LoadConfig(""); err != nil || c != (Config{}) {
+	if c, err := LoadConfig(""); err != nil || !reflect.DeepEqual(c, Config{}) {
 		t.Fatalf("other tables must be ignored: %+v %v", c, err)
 	}
 }

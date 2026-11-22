@@ -14,9 +14,12 @@ import (
 	"time"
 )
 
-// Model is one entry of the OpenRouter model catalog.
+// Model is one entry of the merged model catalog.
 type Model struct {
-	ID            string `json:"id"`
+	ID string `json:"id"`
+	// Provider is the provider ID that serves the model; empty means the
+	// provider ProviderOf(ID) derives.
+	Provider      string `json:"provider,omitempty"`
 	Name          string `json:"name,omitempty"`
 	ContextLength int    `json:"context_length,omitempty"`
 	// PromptPrice and CompletionPrice are USD per million tokens; negative

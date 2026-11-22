@@ -74,7 +74,7 @@ func TestTUIModelPicker(t *testing.T) {
 		t.Fatal("Ctrl+M did not open the picker")
 	}
 	v := plain(m)
-	for _, want := range []string{"openai/gpt-5", "400k", "$1.25/$10.00 per M", "1M", "free/free", "(active)"} {
+	for _, want := range []string{"openai/gpt-5", "400k", "[OR] $1.25/$10.00", "1M", "free/free", "(active)"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("picker missing %q:\n%s", want, v)
 		}

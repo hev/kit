@@ -26,6 +26,22 @@ type Config struct {
 	BaseURL      string `toml:"base_url"`
 	APIKeyRef    string `toml:"api_key_ref"`
 	SystemPrompt string `toml:"system_prompt"`
+	// Codex is the optional [foh.codex] table for the codex-sub provider.
+	Codex CodexConfig `toml:"codex"`
+}
+
+// CodexConfig is [foh.codex]: the OpenAI/Codex ChatGPT subscription provider.
+type CodexConfig struct {
+	// Enabled forces the provider on (true) or off (false). Unset means on
+	// when a ChatGPT login is found in the Codex auth file.
+	Enabled *bool `toml:"enabled"`
+	// Models lists upstream Codex model names; the picker shows each as
+	// codex/NAME. Empty uses DefaultCodexModels.
+	Models []string `toml:"models"`
+	// BaseURL overrides the ChatGPT Codex backend (HEV_FOH_CODEX_BASE_URL wins).
+	BaseURL string `toml:"base_url"`
+	// Home overrides the Codex home that holds auth.json (CODEX_HOME is next).
+	Home string `toml:"home"`
 }
 
 // ConfigPath is HEV_CONFIG or ~/.hev/config.toml.
@@ -65,6 +81,9 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, errors.New("could not read foh configuration")
 	}
 	for _, key := range md.Undecoded() {
+		if len(key) > 2 && key[0] == "foh" && key[1] == "codex" {
+			return Config{}, fmt.Errorf("unknown field in [foh.codex]: %s", key[2])
+		}
 		if len(key) > 1 && key[0] == "foh" {
 			return Config{}, fmt.Errorf("unknown field in [foh]: %s", key[1])
 		}
@@ -83,15 +102,23 @@ func (c Config) ResolvedBaseURL() string {
 }
 
 // ResolveModel picks the active model: flag, HEV_FOH_MODEL, [foh].model, the
-// first favorite, then DefaultModel.
-func (c Config) ResolveModel(flag string, favorites []string) string {
+// first favorite, then DefaultModel. available, when set, filters the
+// implicit choices (favorites and the default) to providers that are
+// configured; fallback is used when the default's provider isn't.
+func (c Config) ResolveModel(flag string, favorites []string, available func(id string) bool, fallback string) string {
 	for _, v := range []string{flag, os.Getenv("HEV_FOH_MODEL"), c.Model} {
 		if v = strings.TrimSpace(v); v != "" {
 			return v
 		}
 	}
-	if len(favorites) > 0 {
-		return favorites[0]
+	ok := func(id string) bool { return available == nil || available(id) }
+	for _, id := range favorites {
+		if ok(id) {
+			return id
+		}
+	}
+	if !ok(DefaultModel) && fallback != "" {
+		return fallback
 	}
 	return DefaultModel
 }
@@ -112,6 +139,10 @@ var ResolveSecretRef = func(ctx context.Context, ref string) (string, error) {
 
 // ErrNoAPIKey is returned when no OpenRouter key is configured.
 var ErrNoAPIKey = errors.New("no OpenRouter API key: set OPENROUTER_API_KEY, HEV_FOH_API_KEY or [foh].api_key_ref")
+
+// ErrNoProviders is returned when neither OpenRouter nor a Codex ChatGPT
+// subscription login is available.
+var ErrNoProviders = errors.New("no model provider: set OPENROUTER_API_KEY (or HEV_FOH_API_KEY, [foh].api_key_ref), or sign in to Codex with a ChatGPT plan (`codex login`)")
 
 // ResolveAPIKey reads OPENROUTER_API_KEY, HEV_FOH_API_KEY, then
 // [foh].api_key_ref. The returned error never includes the key.

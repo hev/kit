@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -68,6 +69,7 @@ type Toolset struct {
 	Cwd     string
 	Hev     HevRunner
 	Secrets []string
+	secMu   sync.Mutex
 	tools   map[string]Tool
 	order   []string
 }
@@ -82,6 +84,22 @@ func NewToolset(cwd string, hev HevRunner, secrets ...string) *Toolset {
 		t.Register(tool)
 	}
 	return t
+}
+
+// AddSecret scrubs v from later tool output too.
+func (t *Toolset) AddSecret(v string) {
+	if t == nil {
+		return
+	}
+	t.secMu.Lock()
+	t.Secrets = addSecret(t.Secrets, v)
+	t.secMu.Unlock()
+}
+
+func (t *Toolset) secrets() []string {
+	t.secMu.Lock()
+	defer t.secMu.Unlock()
+	return append([]string(nil), t.Secrets...)
 }
 
 // Register adds or replaces a tool.
@@ -129,10 +147,11 @@ func (t *Toolset) Run(ctx context.Context, call ToolCall) ToolResult {
 	} else {
 		res = tool.Run(ctx, args)
 	}
-	res.Content = capText(Scrub(res.Content, t.Secrets...), MaxToolOutput)
+	secrets := t.secrets()
+	res.Content = capText(Scrub(res.Content, secrets...), MaxToolOutput)
 	if res.Card != nil {
-		res.Card.Summary = Scrub(res.Card.Summary, t.Secrets...)
-		res.Card.Body = capText(Scrub(res.Card.Body, t.Secrets...), MaxCardBody)
+		res.Card.Summary = Scrub(res.Card.Summary, secrets...)
+		res.Card.Body = capText(Scrub(res.Card.Body, secrets...), MaxCardBody)
 	}
 	return res
 }

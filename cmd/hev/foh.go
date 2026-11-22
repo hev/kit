@@ -21,9 +21,10 @@ import (
 
 var fohCmd = &cobra.Command{
 	Use:   "foh",
-	Short: "Optional native front-of-house harness (OpenRouter, YOLO by default)",
+	Short: "Optional native front-of-house harness (OpenRouter or Codex subscription, YOLO by default)",
 	Long: `hev foh is kit's optional native front-of-house harness: a lean Go agent
-loop and Bubble Tea TUI routed through OpenRouter, with an in-harness model
+loop and Bubble Tea TUI routed through OpenRouter or an OpenAI/Codex ChatGPT
+subscription (codex/... models), with an in-harness model
 picker, a composable system prompt and first-class hev tools (dispatch, peers,
 board, traces, status). Tools run without approval prompts; isolation belongs
 to the host, workspace, admission and gates.
@@ -31,14 +32,15 @@ to the host, workspace, admission and gates.
 Back-of-house work stays on claude, codex and agy through hev dispatch.
 
 Set OPENROUTER_API_KEY (or HEV_FOH_API_KEY, or [foh].api_key_ref in
-~/.hev/config.toml). See docs/foh-harness.md.`,
+~/.hev/config.toml), or sign in to Codex with a ChatGPT plan (codex login).
+Claude subscription logins are never used. See docs/foh-harness.md.`,
 	Args: cobra.NoArgs,
 	RunE: runFOH,
 }
 
 func init() {
 	f := fohCmd.Flags()
-	f.String("model", "", "OpenRouter model slug (default [foh].model, HEV_FOH_MODEL or the first favorite)")
+	f.String("model", "", "Model ID: an OpenRouter slug or codex/NAME (default [foh].model, HEV_FOH_MODEL or the first favorite)")
 	f.String("prompt", "", "Extra system prompt file appended to the composed prompt")
 	f.String("once", "", "Run one non-interactive turn with this message and exit")
 	f.Bool("show-mascot", false, "Print the mascot and exit")
@@ -83,15 +85,20 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	promptFlag, _ := cmd.Flags().GetString("prompt")
 	once, _ := cmd.Flags().GetString("once")
 	favorites := foh.LoadFavorites("")
-	model := cfg.ResolveModel(modelFlag, favorites.IDs)
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
-	key, err := cfg.ResolveAPIKey(ctx)
+	router, secrets, err := fohProviders(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	client := foh.NewClient(cfg.ResolvedBaseURL(), key)
+	fallback := ""
+	if codex := router.Provider(foh.ProviderCodexSub); codex != nil {
+		if models, _, _ := codex.Models(ctx, false); len(models) > 0 {
+			fallback = models[0].ID
+		}
+	}
+	model := cfg.ResolveModel(modelFlag, favorites.IDs, func(id string) bool { return router.Has(foh.ProviderOf(id)) }, fallback)
 	cwd, _ := os.Getwd()
 	workspace := foh.WorkspaceName()
 	host, _ := os.Hostname()
@@ -112,26 +119,26 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	session, err := foh.OpenSession("", key)
+	session, err := foh.OpenSession("", secrets...)
 	if err != nil {
 		fmt.Fprintln(cmd.ErrOrStderr(), "hev foh: session trace disabled: could not create the sessions directory")
 		session = nil
 	}
 	defer session.Close()
-	session.Write(foh.Record{Type: "meta", Model: model, Cwd: cwd, Content: "hev foh " + version.String()})
-	tools := foh.NewToolset(cwd, nil, key)
-	agent = foh.NewAgent(client, tools, model, system)
+	tools := foh.NewToolset(cwd, nil, secrets...)
+	agent = foh.NewAgent(router, tools, model, system)
 	agent.Session = session
+	session.Write(foh.Record{Type: "meta", Model: model, Provider: agent.ProviderFor(model), Cwd: cwd,
+		Content: "hev foh " + version.String() + " providers: " + strings.Join(router.Providers(), ",")})
 
 	if strings.TrimSpace(once) != "" {
 		return runFOHOnce(ctx, agent, once, out, cmd.ErrOrStderr())
 	}
-	catalog := &foh.Catalog{Client: client}
 	tui := foh.NewTUI(foh.TUIOptions{
 		Agent: agent, Favorites: favorites, Composer: composer, Version: version.String(),
 		Cwd: cwd, Workspace: workspace, Color: color,
 		Catalog: func(ctx context.Context) ([]foh.Model, foh.CatalogSource, error) {
-			return catalog.Models(ctx, false)
+			return router.Models(ctx, false)
 		},
 	})
 	_, err = tea.NewProgram(tui, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
@@ -139,6 +146,32 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	return err
+}
+
+// fohProviders builds the provider router: OpenRouter when a key resolves,
+// and codex-sub when a Codex ChatGPT login is found (or [foh.codex].enabled
+// forces it). It never reads Anthropic/Claude subscription credentials. The
+// returned secrets seed the session and tool scrubbers.
+func fohProviders(ctx context.Context, cfg foh.Config) (*foh.Router, []string, error) {
+	var providers []foh.Provider
+	var secrets []string
+	key, keyErr := cfg.ResolveAPIKey(ctx)
+	if keyErr == nil {
+		providers = append(providers, foh.NewClient(cfg.ResolvedBaseURL(), key))
+		secrets = append(secrets, key)
+	} else if !errors.Is(keyErr, foh.ErrNoAPIKey) {
+		return nil, nil, keyErr
+	}
+	if codex, err := foh.NewCodexSub(cfg.Codex); err == nil && codex.Active() {
+		providers = append(providers, codex)
+		secrets = append(secrets, codex.Secrets()...)
+	} else if errors.Is(err, foh.ErrAnthropicCredentials) && cfg.Codex.Enabled != nil && *cfg.Codex.Enabled {
+		return nil, nil, err
+	}
+	if len(providers) == 0 {
+		return nil, nil, foh.ErrNoProviders
+	}
+	return foh.NewRouter(providers...), secrets, nil
 }
 
 // runFOHOnce streams one turn: text to stdout, tool activity to stderr.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -43,6 +44,7 @@ type Record struct {
 	Type       string     `json:"type"` // meta, user, assistant, tool, steer, model_switch, error
 	Turn       int        `json:"turn,omitempty"`
 	Model      string     `json:"model,omitempty"`
+	Provider   string     `json:"provider,omitempty"`
 	Role       string     `json:"role,omitempty"`
 	Content    string     `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
@@ -51,7 +53,9 @@ type Record struct {
 	IsError    bool       `json:"is_error,omitempty"`
 	Usage      *Usage     `json:"usage,omitempty"`
 	From       string     `json:"from,omitempty"`
-	Cwd        string     `json:"cwd,omitempty"`
+	// FromProvider is the provider before a model_switch.
+	FromProvider string `json:"from_provider,omitempty"`
+	Cwd          string `json:"cwd,omitempty"`
 }
 
 // SessionLog appends redacted records to ~/.hev/foh/sessions/<ulid>.jsonl.
@@ -110,13 +114,28 @@ func pruneSessions(dir string, keep int) {
 	}
 }
 
+// maxSecrets bounds the scrub lists a session or toolset keeps.
+const maxSecrets = 64
+
+// addSecret appends v once, keeping the newest maxSecrets values.
+func addSecret(list []string, v string) []string {
+	if len(v) < 4 || slices.Contains(list, v) {
+		return list
+	}
+	list = append(list, v)
+	if len(list) > maxSecrets {
+		list = append([]string(nil), list[len(list)-maxSecrets:]...)
+	}
+	return list
+}
+
 // AddSecret scrubs v from later records too.
 func (s *SessionLog) AddSecret(v string) {
 	if s == nil || v == "" {
 		return
 	}
 	s.mu.Lock()
-	s.secrets = append(s.secrets, v)
+	s.secrets = addSecret(s.secrets, v)
 	s.mu.Unlock()
 }
 
