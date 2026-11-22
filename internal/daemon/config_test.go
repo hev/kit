@@ -3,6 +3,7 @@ package daemon
 import (
 	"github.com/hev/kit/internal/cluster"
 	"github.com/hev/kit/internal/cron"
+	"github.com/hev/kit/internal/services"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/update"
 	"os"
@@ -114,6 +115,15 @@ enabled = false
 placement = ["node-a", "node-b"]
 env_refs = { TOKEN = "op://test/item/field" }
 
+[[service]]
+name = "board"
+cmd = ["hev", "board", "serve"]
+restart = "on-failure"
+stop_timeout = "20s"
+enabled = false
+placement = ["node-a", "node-b"]
+env_refs = { API_TOKEN = "op://test/item/token" }
+
 [cluster]
 bind = "127.0.0.1:0"
 name = "node-a"
@@ -142,5 +152,11 @@ key_ref = "op://test/item/cluster"
 	membership, err := cluster.LoadConfig(path)
 	if err != nil || membership == nil || membership.Name != "node-a" {
 		t.Fatal("bucket selection must preserve SWIM settings for placed jobs")
+	}
+	svcs, err := services.Load(path)
+	if err != nil || len(svcs) != 1 || svcs[0].Name != "board" || svcs[0].Restart != "on-failure" ||
+		svcs[0].StopTimeout != "20s" || svcs[0].Enabled == nil || *svcs[0].Enabled ||
+		len(svcs[0].Placement) != 2 || svcs[0].EnvRefs["API_TOKEN"] != "op://test/item/token" {
+		t.Fatalf("bucket selection modified a configured service: %+v %v", svcs, err)
 	}
 }

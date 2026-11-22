@@ -49,6 +49,7 @@ const (
 	SourceSwarm        = "swarm"
 	SourceSteer        = "steer"
 	SourceCron         = "cron"
+	SourceService      = "service"
 )
 
 // SourceLegacyExpedite is what edge builds before the orchestrator rename
@@ -131,6 +132,8 @@ func threadKey(source, host, name string) string {
 	switch source {
 	case SourceCron:
 		return "cron:" + host + "/" + name
+	case SourceService:
+		return "service:" + host + "/" + name
 	case SourceRun, SourceSteer:
 		return "run:" + host + "/" + name
 	}

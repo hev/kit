@@ -25,6 +25,7 @@ import (
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/services"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -100,6 +101,10 @@ func Run(ctx context.Context) error {
 	}
 
 	configuredCron, err := cron.Load(DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+	configuredServices, err := services.Load(DefaultConfigPath())
 	if err != nil {
 		return err
 	}
@@ -181,6 +186,26 @@ func Run(ctx context.Context) error {
 		},
 	}
 	defer cronRunner.Start(ctx, configuredCron)()
+	serviceSupervisor := services.Supervisor{
+		Home: home,
+		Membership: services.Membership{
+			Self:    membership.Self,
+			Enabled: membership.Enabled,
+			Members: membership.Members,
+		},
+		Logger: logger,
+		Resolve: func(ctx context.Context, refs []secrets.Ref) (map[string]string, error) {
+			return cache.ResolveAs(ctx, "hevd service", refs)
+		},
+		Notice: func(ctx context.Context, notice attention.Notice) error {
+			return attention.Default().Emit(ctx, notice, "")
+		},
+	}
+	stopServices, err := serviceSupervisor.Start(ctx, configuredServices)
+	if err != nil {
+		return err
+	}
+	defer stopServices()
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {
