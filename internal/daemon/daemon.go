@@ -19,6 +19,7 @@ import (
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
 	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/hygiene"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/license"
@@ -103,6 +104,10 @@ func Run(ctx context.Context) error {
 	}
 
 	configuredCron, err := cron.Load(DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+	configuredHygiene, err := hygiene.Load(DefaultConfigPath())
 	if err != nil {
 		return err
 	}
@@ -192,6 +197,8 @@ func Run(ctx context.Context) error {
 		},
 	}
 	defer cronRunner.Start(ctx, configuredCron)()
+	hygieneRunner := hygiene.Runner{Home: home, Logger: logger}
+	defer hygieneRunner.Start(ctx, configuredHygiene)()
 	serviceSupervisor := services.Supervisor{
 		Home: home,
 		Membership: services.Membership{
