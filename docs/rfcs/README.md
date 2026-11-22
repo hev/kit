@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0029](0029-native-foh-harness.md) | Optional native FOH harness (`hev foh`) | Phase 1 implemented | FOH coordination gets an OpenRouter-first Go loop and TUI with an in-harness model picker, mid-thread model swaps, a composable prompt, typed `hev` tool cards and native steering; BOH stays on vendor harnesses. YOLO by default: isolation belongs to host, workspace, admission and gates. |
 | [0028](0028-disk-hygiene.md) | Native disk-pressure and cache hygiene in hevd | Implemented | Absorbs cross-OS worktree compaction, stale tmp pruning, and macOS APFS snapshot thinning into hevd with strict safety guards and dry-run support. |
 | [0027](0027-previews.md) | Private previews (`[[preview]]` and `hev preview`) | Implemented | Unify bespoke site preview scripts into one cross-OS, Tailscale-only Go command with atomic bounded builds. |
 | [0026](0026-metrics.md) | Native cluster metrics export in hevd | Implemented | Emit allowlisted SWIM, secrets-quota, orchestrator, and cron gauges natively over loopback/Tailscale DogStatsD and Prometheus `/metrics`, retiring external Python metrics scripts. |

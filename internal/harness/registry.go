@@ -17,6 +17,8 @@ const (
 	OpenCode = "opencode"
 	Agy      = "agy"
 	Dot      = "dot"
+	// FOH is hev foh, kit's optional native front-of-house harness (RFC 0029).
+	FOH = "hev"
 )
 
 type Descriptor struct {
@@ -150,6 +152,10 @@ var registry = []Descriptor{
 			UserInstructions: ".codex/AGENTS.md", ProjectInstructions: []string{"AGENTS.md"},
 			InstallTarget: ".codex", InstallMarker: ".codex", CoveredBy: "agents"}},
 	{Name: Dot, Binary: Dot, TraceName: Dot, Trace: &Trace{Path: ".dot/traces", RequireHome: true, PreviewTail: true}},
+	// hev foh writes its own JSONL sessions; it is not dispatched, hooked or
+	// matched as a peer process (it runs as the hev binary itself).
+	{Name: FOH, Binary: FOH, TraceName: "hev_foh", Aliases: []string{"hev_foh", "foh"},
+		Trace: &Trace{Path: ".hev/foh/sessions", Override: "HEV_FOH_SESSIONS_DIR", RequireHome: true}},
 	{Name: Pi, Binary: Pi, TraceName: Pi,
 		Peers: &Peers{InboxOnly: true, MatchProcess: matchPi},
 		Trace: &Trace{Path: ".pi/agent/sessions", Override: "HEV_PI_SESSIONS_DIR"},

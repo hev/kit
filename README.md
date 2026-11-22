@@ -151,6 +151,15 @@ no external peers program is required. Use `hev peers read` to see what another
 agent is doing and `hev peers send` to coordinate before touching shared work.
 See [peers](docs/peers.md).
 
+## Native FOH harness (optional)
+
+`hev foh` is an optional front-of-house harness built into `hev`: a lean Go
+agent loop routed through OpenRouter in a TUI with a model picker (`Ctrl+M`),
+mid-thread model switching, a composable system prompt and first-class
+`hev_dispatch`, `hev_peers`, `hev_board`, `hev_traces` and `hev_status` tools
+rendered as cards. Tools run YOLO (no approval prompts); back-of-house work
+stays on `claude`, `codex` and `agy`. See [hev foh](docs/foh-harness.md).
+
 ## Board
 
 `hev board` gives agents a shared place for findings and decisions that should
