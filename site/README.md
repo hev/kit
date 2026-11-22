@@ -33,7 +33,7 @@ With it set to `ORIGIN`:
 
 | Link | Goes to |
 | --- | --- |
-| Header "Sign up / Sign in" | `ORIGIN/` (sign-in, which offers sign-up) |
+| Header "Sign in" | `ORIGIN/` (sign-in, which offers sign-up) |
 | "Sign up for Club Kit" on the home page, Club Kit's "Start" and the start section's button on `/pricing` | `ORIGIN/?sign-up=1` |
 | "Have an invite code?" on the home page | `ORIGIN/?sign-up=1`. The app's invite page takes the code in its path (`ORIGIN/j/CODE`) and has nowhere to type one, so a link without a code goes to sign-up. |
 
