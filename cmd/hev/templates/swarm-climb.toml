@@ -1,0 +1,44 @@
+kind = "climb"
+name = "example-swarm-climb"
+host = "scoring-host"
+goal = "Deliver the change described in the brief"
+reply = "owner-session"
+every = "10m"
+max_lifetime = "1d"
+brief = '''
+## Problem
+Describe what the workers should deliver.
+
+## Role: implement
+Implement the requested change.
+
+### Acceptance
+The relevant tests pass.
+'''
+
+[budget]
+concurrent_runs = 2
+
+[[roles]]
+name = "implement"
+shape = "single"
+
+[roles.order]
+repo = "example-repo"
+base = "main"
+validation = "none"
+
+[climb]
+repo = "example-repo"
+base = "main"
+
+[climb.objective]
+scorer = "example-metric"
+direction = "max"
+
+[climb.population]
+width = 4
+top_k = 2
+
+[climb.stop]
+max_generations = 10

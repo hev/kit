@@ -100,7 +100,7 @@ Scope is a list of names, `mine` (matching `reply`), `issue=GLOB`, or
 `swarm=NAME`, optionally intersected with repository labels. `swarm=NAME` must
 name the orchestrator itself: it matches runs whose metadata records
 `swarm: NAME`, which target admission writes only from that orchestrator's
-identity on `start`, never from order frontmatter. `hev swarm up` compiles it
+identity on `start`, never from order frontmatter. `hev orchestrate swarm up` compiles it
 ([swarms](swarms.md)). Authority defaults to `say` and `notify`; the other
 verbs are `rework`, `retry`, `validate`, `dispatch` and `stop` (RFC 0013), which
 stops a scoped run the way `hev dispatch stop` does.
@@ -395,3 +395,22 @@ three fields. An explicit empty list disables fallback. A launch error,
 nonzero exit, or missing or blank checkpoint advances to the next candidate
 within the round deadline. Stop and halt suppress retries. Each round keeps
 `attempts.json`, the final `trace`, and prior `trace.attempt-N` files.
+
+## Wrapper templates
+
+Use `hev orchestrate template swarm`, `hev orchestrate template climb` or
+`hev orchestrate template swarm-climb` to print a TOML starter. Save it as
+a `.toml` file and edit the goal, reply address and worker orders. Preview
+the compiled swarm with `hev orchestrate apply -f FILE.toml --dry-run`.
+Apply it without `--dry-run` to start the swarm supervisor. The swarm
+template uses the local supervisor in the unscoped default workspace.
+
+A swarm template sets `kind = "swarm"` or declares `[[roles]]`. Put the
+Markdown problem and role sections in the top-level `brief` string.
+Settings such as `every`, `max_lifetime` and `[budget]` go alongside
+the role tables. Markdown orchestrator and swarm files remain supported.
+
+A `[climb]` table declares the across-generation loop. Add `[[roles]]` to
+declare fan-out and reconciliation within each generation. After validating
+a climb template, apply and dry-run report that the climb runtime
+(PRs #322/#323) is required. A combined template never launches just the swarm.

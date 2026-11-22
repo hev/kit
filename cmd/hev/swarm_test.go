@@ -104,6 +104,7 @@ func TestSwarmSurfaceAndHelp(t *testing.T) {
 		t.Fatal("ps lacks --json")
 	}
 	root := &cobra.Command{Use: "hev", Long: rootCmd.Long}
+	c.Hidden = true
 	root.AddCommand(c)
 	groupClusterCommands(root)
 	var out bytes.Buffer

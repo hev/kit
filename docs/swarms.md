@@ -1,7 +1,7 @@
 # Swarms
 
 A swarm is one Markdown file. It declares a problem, an orchestrator and worker
-roles with concurrency limits. `hev swarm up` compiles the file into an
+roles with concurrency limits. `hev orchestrate swarm up` compiles the file into an
 ordinary [orchestrator](orchestrators.md) and ordinary dispatch runs.
 The orchestrator's supervisor then runs a code-only **reconcile tick**. The
 tick launches units, repairs failed ones in place and starts integration when
@@ -96,7 +96,7 @@ The frontmatter is decoded strictly, so a misspelt field is an error.
 
 ## What up compiles
 
-`hev swarm up -f FILE --dry-run` prints a summary, then the compiled
+`hev orchestrate swarm up -f FILE --dry-run` prints a summary, then the compiled
 orchestrator spec and every unit's order, each after a `--- orchestrator NAME
 ---` or `--- order RUN ---` line. It writes no state. The spec is one that
 `hev orchestrate apply --dry-run` accepts. It has `manages.runs: {selector:
@@ -147,7 +147,7 @@ round. Each tick:
    - `orchestrator` (the default): the round is told when every variant has
      ended, and records its pick in `choice.json`.
    - `person`: `reply` is told, and the person runs
-     `hev swarm say NAME choose ROLE/vN`.
+     `hev orchestrate swarm say NAME choose ROLE/vN`.
 
    Exactly one unit is chosen. Losing branches are kept.
 5. **Launches** pending units up to `replicas`. An `after` role waits until
@@ -166,19 +166,19 @@ when the swarm acceptance is met. A person merges the PR.
 ## Commands
 
 ```sh
-hev swarm up -f logfix.md --dry-run   # validate and print; no state
-hev swarm up -f logfix.md             # apply; rerun with an edited file to change roles in place
-hev swarm ps                          # swarms on this host
-hev swarm ps logfix [--json]          # units: role, unit, generation, host, state, head, restarts, note
-hev swarm logs logfix                 # supervisor and tick log
-hev swarm logs logfix --round 3       # one round's trace
-hev swarm logs logfix migrate/cli -f  # a unit's run log
-hev swarm say logfix "message"        # to the orchestrator's inbox; wakes a round
-hev swarm say logfix migrate/cli MSG  # to one unit's run (ROLE alone for a single role)
-hev swarm say logfix choose try/v2    # a person's race choice (choose: person)
-hev swarm pause logfix                # no rounds, launches or repairs; workers continue
-hev swarm resume logfix
-hev swarm down logfix                 # stop the orchestrator, then every current run
+hev orchestrate swarm up -f logfix.md --dry-run   # validate and print; no state
+hev orchestrate swarm up -f logfix.md             # apply; rerun with an edited file to change roles in place
+hev orchestrate swarm ps                          # swarms on this host
+hev orchestrate swarm ps logfix [--json]          # units: role, unit, generation, host, state, head, restarts, note
+hev orchestrate swarm logs logfix                 # supervisor and tick log
+hev orchestrate swarm logs logfix --round 3       # one round's trace
+hev orchestrate swarm logs logfix migrate/cli -f  # a unit's run log
+hev orchestrate swarm say logfix "message"        # to the orchestrator's inbox; wakes a round
+hev orchestrate swarm say logfix migrate/cli MSG  # to one unit's run (ROLE alone for a single role)
+hev orchestrate swarm say logfix choose try/v2    # a person's race choice (choose: person)
+hev orchestrate swarm pause logfix                # no rounds, launches or repairs; workers continue
+hev orchestrate swarm resume logfix
+hev orchestrate swarm down logfix                 # stop the orchestrator, then every current run
 ```
 
 `down` keeps branches, worktrees and records. Its units are recorded `held`
@@ -194,3 +194,15 @@ records `swarm: NAME`. Admission writes that field from the swarm's identity
 when the run starts. Order frontmatter cannot set it, and a caller cannot
 claim it. So the swarm can stop, say to, retry or rework only its own runs.
 `stop` is the RFC 0013 addition to orchestrator authority.
+
+## TOML templates
+
+Run `hev orchestrate template swarm` for an editable starter with
+`[[roles]]`, `[roles.order]` and a multiline Markdown `brief`. Preview it
+with `hev orchestrate apply -f FILE.toml --dry-run` or
+`hev orchestrate swarm up -f FILE.toml --dry-run`. Both compile the same
+orchestrator and dispatch orders as the Markdown format. Existing scripts
+can still use the hidden `hev swarm` alias.
+
+The `swarm-climb` starter adds a `[climb]` table around the role graph.
+Applying it requires the climb runtime.

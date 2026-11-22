@@ -1,4 +1,4 @@
-# RFC 0023: `hev climb`, multi-day hill climbing on a scored goal
+# RFC 0023: `hev orchestrate climb`, multi-day hill climbing on a scored goal
 
 Status: Proposed (2026-11-20). Design only; no code. Builds on
 [RFC 0008](0008-orchestrators.md) (orchestrators),
@@ -67,7 +67,7 @@ design, not as a follow-up.
 
 ## Decision
 
-1. **A climb is a file and an orchestrator.** `hev climb up -f FILE` checks
+1. **A climb is a file and an orchestrator.** `hev orchestrate climb up -f FILE` checks
    a climb file (`kind: climb`) and pins it by digest. It then compiles it
    into an RFC 0008 orchestrator with a code tick, as RFC 0013 swarms do.
    It adds no third runtime.
@@ -85,7 +85,7 @@ design, not as a follow-up.
 5. **Budgets are positive, finite and paced.** Every climb names at least
    one budget, plus a generation cap and a deadline. Pacing reads plan
    limits, holds before a weekly limit and resumes after the reset.
-6. **A person merges.** `hev climb promote` opens a draft PR from the best
+6. **A person merges.** `hev orchestrate climb promote` opens a draft PR from the best
    branch. Nothing in a climb has merge authority.
 7. **The lineage is the record.** It is an append-only, hash-chained JSONL
    file that names who started the climb, the pinned goal and scorers, and
@@ -228,23 +228,23 @@ carries the body unchanged (requirement 6).
 ### 2. Lifecycle verbs
 
 ```sh
-hev climb up -f FILE [--dry-run]     # validate, pin, score generation 0, start
-hev climb ls                         # name, state, generation, best, budget left, next action
-hev climb status NAME [--json]       # leaderboard, last generation, divergence, pacing
-hev climb lineage NAME [--gen N] [--json]
-hev climb pause NAME                 # no new launches; running candidates finish and are scored
-hev climb resume NAME [--ack ID]     # also clears a refusal or divergence hold (with --ack)
-hev climb stop NAME                  # pause, then end; the lineage is kept
-hev climb promote NAME [CANDIDATE]   # push the branch and open a draft PR (default: best)
-hev climb say NAME MSG               # a note into the next judgment round
+hev orchestrate climb up -f FILE [--dry-run]     # validate, pin, score generation 0, start
+hev orchestrate climb ls                         # name, state, generation, best, budget left, next action
+hev orchestrate climb status NAME [--json]       # leaderboard, last generation, divergence, pacing
+hev orchestrate climb lineage NAME [--gen N] [--json]
+hev orchestrate climb pause NAME                 # no new launches; running candidates finish and are scored
+hev orchestrate climb resume NAME [--ack ID]     # also clears a refusal or divergence hold (with --ack)
+hev orchestrate climb stop NAME                  # pause, then end; the lineage is kept
+hev orchestrate climb promote NAME [CANDIDATE]   # push the branch and open a draft PR (default: best)
+hev orchestrate climb say NAME MSG               # a note into the next judgment round
 ```
 
-The first sketch used `hev climb goal.toml`. `up -f` matches `hev swarm up
--f` and `hev orchestrate apply -f`. `--dry-run` prints the compiled
+The proposed runtime uses the same `-f` flag as swarm and orchestrator
+apply. Its `--dry-run` would print the compiled
 orchestrator spec, the first generation's orders, the pinned digests and the
 estimated cost of one generation.
 
-`hev climb status`:
+`hev orchestrate climb status`:
 
 ```text
 layer-recall  running  gen 14/40  oven  started by local:hev 2026-11-20
@@ -345,7 +345,7 @@ takes over three things from the RFC 0013 phase 1 code:
 - stall detection and fenced replacement for `effects: branch` units;
 - the `plans` hold.
 
-A climb is not a swarm file. Swarms cap a swarm at 32 units and `max_runs`
+Each generation can use a swarm role graph. Swarms cap a swarm at 32 units and `max_runs`
 at 4 × replicas over its lifetime, while a climb runs width × generations
 units, and the climb's budget is the bound. Each generation has its own unit
 table.
@@ -406,7 +406,7 @@ own terms:
    one of them makes the scorer `stale`.
 4. **`visibility: hidden`.** A scorer marked hidden never has its values,
    name or data placed in an order, a worker packet, a judge packet or the
-   board. Only `hev climb status`, `hev score` and the dashboard, read by a
+   board. Only `hev orchestrate climb status`, `hev score` and the dashboard, read by a
    person, show it. A climb's held-out scorer must be hidden. Its objective
    must not be.
 5. **`protect`.** A scorer declares the repository paths a subject may not
@@ -524,7 +524,7 @@ directory holds:
 
 ### 8. Promotion
 
-`hev climb promote NAME [CANDIDATE]` runs at the end of the climb, or
+`hev orchestrate climb promote NAME [CANDIDATE]` runs at the end of the climb, or
 whenever a person asks. It defaults to the best candidate whose held-out
 score is within `divergence` of its objective gain. It pushes
 `climb/NAME/best` and opens a **draft** PR against `base`. The PR body holds
@@ -575,7 +575,7 @@ start, steer or stop work, or push to a remote.
 - **Honest limit:** a worker running as the host's account can still read
   files by absolute path, and the tool gate stops cooperative agents and
   records attempts. Climb workers as a separate OS user (BYOS) is the strong
-  form. `hev climb up` warns when the host has not set
+  form. `hev orchestrate climb up` warns when the host has not set
   `[climb] worker_user`.
 
 ### 2. The scorers are host-pinned, and touching them disqualifies
@@ -644,9 +644,9 @@ namespace.
   - Auto-merge flags.
   - Promotion of a disqualified, `score-error` or `refused` candidate.
 - **Kept:**
-  - `hev climb promote` opens a draft PR for review.
+  - `hev orchestrate climb promote` opens a draft PR for review.
   - A person merges it, rebases it or throws it away.
-  - Candidate branches stay on origin until `hev climb stop NAME --prune`,
+  - Candidate branches stay on origin until `hev orchestrate climb stop NAME --prune`,
     run by a person.
 
 ### 5. A model refusal is final for that candidate
@@ -662,7 +662,7 @@ namespace.
   - Re-dispatching the same parent and angle in the same generation.
   - Putting the refused request's text into later briefs or lessons.
   - Launching new candidates after a refusal until a person runs
-    `hev climb resume NAME --ack REFUSAL-ID`. The hold is the default; see
+    `hev orchestrate climb resume NAME --ack REFUSAL-ID`. The hold is the default; see
     open question 3.
 - **Kept:**
   - The refusal record (harness, model, the harness's refusal message, the
@@ -933,7 +933,7 @@ show most clearly.
 
 ## Research questions
 
-Every candidate record carries the data to answer these. `hev climb lineage
+Every candidate record carries the data to answer these. `hev orchestrate climb lineage
 --json` is the export, and evals make them queryable in Layer.
 
 1. **Score against agent-hours.** Is the best score log-linear in cumulative
@@ -1021,3 +1021,12 @@ Every candidate record carries the data to answer these. `hev climb lineage
    time by width and repeats. Should the ramp start at the parent's
    breaking point and stop at the first failure, at the cost of not
    re-checking the lower steps?
+
+## TOML entry point
+
+The starter from `hev orchestrate template climb` declares the generation
+loop in `[climb]`. The `swarm-climb` starter adds `[[roles]]` for
+within-generation fan-out and reconciliation. The climb loop owns
+host-pinned scoring, top-k parent selection, failure digests and lineage.
+Applying either climb template requires the proposed runtime from
+PRs #322/#323.
