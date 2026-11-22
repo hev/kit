@@ -4,6 +4,11 @@ import sitemap from "@astrojs/sitemap";
 import cloudflare from "@astrojs/cloudflare";
 import hevAsk from "@hevmind/ask";
 
+// Pricing and sign-in are built only with PUBLIC_KIT_PRICING_SIGNIN=1 (or
+// true); see src/lib/site.ts. astro.config can't import it, so it reads the
+// same setting the same way.
+const PRICING_SIGNIN = /^(1|true)$/i.test(String(process.env.PUBLIC_KIT_PRICING_SIGNIN ?? "").trim());
+
 export default defineConfig({
 	site: "https://hevkit.com",
 	devToolbar: { enabled: false },
@@ -25,8 +30,9 @@ export default defineConfig({
 		"/docs/tradeoffs": "/docs/concepts",
 		"/docs/plugins": "/docs/exec-commands",
 		"/docs/swarms": "/docs/orchestrator-examples",
-		// The mobile app configurator lives in the hosted kit web UI now.
-		"/configure": "/pricing",
+		// The mobile app configurator lives in the hosted kit web UI now. Its
+		// old URL goes to pricing, or to the docs when there is no /pricing.
+		"/configure": PRICING_SIGNIN ? "/pricing" : "/docs",
 	},
 	// Static-first, as on hevlayer.com: every page prerenders; only the
 	// on-demand /api/ask route that hev ask injects runs as a Cloudflare

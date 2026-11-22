@@ -4,6 +4,8 @@
   python3 scripts/test-docs-preview.py
 
 Covers what the train relies on: build swaps `current` only after a build;
+PUBLIC_KIT_PRICING_SIGNIN and PUBLIC_KIT_APP_ORIGIN reach the build exactly as
+given, are recorded in preview.json and rebuild when they change;
 refresh follows a train docs branch (based on the train branch vX.Y),
 rebuilds after it is rebased, and falls back to $KIT_PREVIEW_FALLBACK (the
 train branch) once the docs branch is deleted at the cut; serve answers on a
@@ -27,7 +29,8 @@ STUB_PNPM = """#!/bin/sh
 case "$1" in
   install) exit 0 ;;
   build) mkdir -p dist/docs && cat src/content/docs/*.mdx > dist/docs/index.html
-         echo "app origin: ${PUBLIC_KIT_APP_ORIGIN-unset}" > dist/app-origin.txt ;;
+         echo "app origin: ${PUBLIC_KIT_APP_ORIGIN-unset}" > dist/app-origin.txt
+         echo "pricing signin: ${PUBLIC_KIT_PRICING_SIGNIN-unset}" > dist/pricing-signin.txt ;;
   *) echo "stub pnpm: $*" >&2; exit 1 ;;
 esac
 """
@@ -86,11 +89,14 @@ class DocsPreviewTest(unittest.TestCase):
         self.git(self.work, "add", "-A")
         self.git(self.work, "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg)
 
-    def preview(self, *args, ref=None, fallback=None, app_origin=None):
+    def preview(self, *args, ref=None, fallback=None, app_origin=None, pricing_signin=None):
         env = dict(self.env)
         env.pop("PUBLIC_KIT_APP_ORIGIN", None)
+        env.pop("PUBLIC_KIT_PRICING_SIGNIN", None)
         if app_origin:
             env["PUBLIC_KIT_APP_ORIGIN"] = app_origin
+        if pricing_signin is not None:
+            env["PUBLIC_KIT_PRICING_SIGNIN"] = pricing_signin
         if ref:
             env["KIT_PREVIEW_REF"] = ref
         if fallback:
@@ -161,6 +167,51 @@ class DocsPreviewTest(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual((state / "app-origin.txt").read_text().strip(), "app origin: unset")
         self.assertNotIn("app_origin", self.current()[0])
+
+    def test_pricing_signin_is_off_by_default_and_a_change_rebuilds(self):
+        state = Path(self.env["KIT_PREVIEW_DIR"]) / "current"
+        sha = self.git(self.work, "rev-parse", "origin/main")
+        flag = lambda: (state / "pricing-signin.txt").read_text().strip()
+        # Unset: the build never sees the setting, and preview.json says off.
+        p = self.preview("refresh", ref="origin/main")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(flag(), "pricing signin: unset")
+        self.assertIs(self.current()[0]["pricing_signin"], False)
+        self.assertEqual(os.readlink(state), f"builds/{sha}")
+        self.assertIn("pricing and sign-in off", p.stderr)
+        # Values that don't turn it on leave it off and build nothing new.
+        for off in ("0", "false", "", "yes"):
+            p = self.preview("refresh", ref="origin/main", pricing_signin=off)
+            self.assertIn("up to date", p.stderr, off)
+        # On, with the app origin unset and set: each is its own build, the
+        # build sees exactly PUBLIC_KIT_PRICING_SIGNIN=1, and preview.json records it.
+        for on, origin, name in (("1", None, f"{sha}-pricing"),
+                                 (" TRUE ", "https://app.example.test", None)):
+            p = self.preview("refresh", ref="origin/main", pricing_signin=on, app_origin=origin)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(flag(), "pricing signin: 1")
+            meta = self.current()[0]
+            self.assertIs(meta["pricing_signin"], True)
+            self.assertEqual(meta["sha"], sha)
+            self.assertEqual(meta.get("app_origin"), origin)
+            self.assertIn("pricing and sign-in on", p.stderr)
+            if name:
+                self.assertEqual(os.readlink(state), f"builds/{name}")
+            else:
+                self.assertRegex(os.readlink(state), rf"^builds/{sha}-pricing-app\d+$")
+            p = self.preview("refresh", ref="origin/main", pricing_signin=on, app_origin=origin)
+            self.assertIn("up to date", p.stderr)
+        # The app origin alone does not turn it on.
+        p = self.preview("refresh", ref="origin/main", app_origin="https://app.example.test")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(flag(), "pricing signin: unset")
+        self.assertIs(self.current()[0]["pricing_signin"], False)
+        self.assertRegex(os.readlink(state), rf"^builds/{sha}-app\d+$")
+        # Off again: back to the plain build.
+        p = self.preview("refresh", ref="origin/main")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(os.readlink(state), f"builds/{sha}")
+        self.assertIs(self.current()[0]["pricing_signin"], False)
 
     def test_serve_answers_on_magicdns_host(self):
         self.assertEqual(self.preview("build", "origin/main").returncode, 0)

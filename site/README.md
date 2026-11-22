@@ -17,17 +17,29 @@ train is `scripts/docs-preview.sh`; see `docs/runbooks/release-train.md`.
 
 ## Build settings
 
-Both are read from the environment when `pnpm build` (or `pnpm dev`) runs.
+All are read from the environment when `pnpm build` (or `pnpm dev`) runs.
 
 | Setting | What it does | Unset |
 | --- | --- | --- |
-| `PUBLIC_KIT_APP_ORIGIN` | The origin of the hosted app where Club Kit sign-in and sign-up live, for example `https://app.example.test`. The sign-up and sign-in links are built from it. | The links stay on the site, at `/pricing#start`, and the copy says hosted sign-up isn't live yet. |
+| `PUBLIC_KIT_PRICING_SIGNIN` | `1` or `true` builds pricing and sign-in / sign-up: the header's "Sign up / Sign in" button and `pricing` link, the home page's Club Kit calls to action and bands, the `/pricing` page, and the docs' pricing links (`PricingOpen` / `PricingClosed`). | Off (also for `0`, `false` or anything else). None of those are built, `dist/pricing/` doesn't exist, the home page offers "Install hev kit" and "Read the docs", `/configure` redirects to `/docs`, and `PUBLIC_KIT_APP_ORIGIN` is ignored. |
+| `PUBLIC_KIT_APP_ORIGIN` | The origin of the hosted app where Club Kit sign-in and sign-up live, for example `https://app.example.test`. With `PUBLIC_KIT_PRICING_SIGNIN` on, the sign-up and sign-in links are built from it. | The links stay on the site, at `/pricing#start`, and the copy says hosted sign-up isn't live yet. |
 | `ANTHROPIC_API_KEY` | Lets `@hevmind/ask` rebuild the docs digest during the build. | The committed `.hev-ask/` digest is used. |
+
+### `PUBLIC_KIT_PRICING_SIGNIN`
+
+The 0.7 site and the train preview ship without pricing or sign-in, so this is
+off unless set to `1` or `true`. `src/lib/site.ts` reads it as
+`PRICING_SIGNIN`, and `astro.config.mjs` reads it the same way for the
+`/configure` redirect. `/pricing` is `src/pages/[pricing].astro`, whose
+`getStaticPaths` returns no paths when it's off. Docs text that links to
+`/pricing` goes inside `<PricingOpen>` (or `<PricingClosed>` for text shown
+only when it's off); `src/lib/docs-export.ts` keeps the same one in the
+Markdown exports.
 
 ### `PUBLIC_KIT_APP_ORIGIN`
 
 There is no default in the source, so a build that doesn't set it never links
-to a hosted app. `src/lib/site.ts` is the only place that reads it.
+to a hosted app. It only takes effect with `PUBLIC_KIT_PRICING_SIGNIN` on. `src/lib/site.ts` is the only place that reads it.
 
 With it set to `ORIGIN`:
 

@@ -1,0 +1,8 @@
+---
+// Docs text shown only when the build has pricing and sign-in
+// (PUBLIC_KIT_PRICING_SIGNIN), such as a link to /pricing, which isn't built
+// otherwise. PricingClosed is its opposite. lib/docs-export.ts keeps the same
+// one of the pair in the Markdown exports.
+import { PRICING_SIGNIN } from "../../lib/site";
+---
+{PRICING_SIGNIN && <slot />}

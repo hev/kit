@@ -1,6 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import { INVITE_HREF, SIGNUP_HREF } from "../lib/site";
+import { INVITE_HREF, PRICING_SIGNIN, SIGNUP_HREF } from "../lib/site";
 import HevdBanner from "../components/HevdBanner.astro";
 import TraceStory from "../components/TraceStory.astro";
 import Dive from "../components/deep/Dive.astro";
@@ -131,26 +131,41 @@ Rework anything red once. Ask me before touching the API repo.`;
 			</aside>
 
 			<div class="cta-row">
-				<a href={SIGNUP_HREF} class="btn primary" data-home-signup="hero">Sign up for Club Kit</a>
-				<a href="/docs/install" class="btn">Install Starter Kit</a>
-				<p class="invite-note"><a href={INVITE_HREF} data-home-signup="hero">Have an invite code? Use it for free Club Kit credit.</a></p>
+				{
+					PRICING_SIGNIN ? (
+						<>
+							<a href={SIGNUP_HREF} class="btn primary" data-home-signup="hero">Sign up for Club Kit</a>
+							<a href="/docs/install" class="btn">Install Starter Kit</a>
+							<p class="invite-note"><a href={INVITE_HREF} data-home-signup="hero">Have an invite code? Use it for free Club Kit credit.</a></p>
+						</>
+					) : (
+						<>
+							<a href="/docs/install" class="btn primary">Install hev kit</a>
+							<a href="/docs" class="btn">Read the docs</a>
+						</>
+					)
+				}
 			</div>
 		</section>
 	</div>
 
 	<main>
-		<section class="club-band" aria-labelledby="why-club-kit">
-			<p class="section-label"># why Club Kit</p>
-			<h2 id="why-club-kit">Bring every machine into the same conversation.</h2>
-			<ul class="club-benefits">
-				<li>Shared traces and orders across every machine.</li>
-				<li>One board and peers for the team.</li>
-				<li>Your own voice-first mobile app.</li>
-				<li>Unlimited people and agents.</li>
-				<li>Pay for what you store and search.</li>
-			</ul>
-			<a href={SIGNUP_HREF} class="btn primary" data-home-signup="band">Sign up for Club Kit</a>
-		</section>
+		{
+			PRICING_SIGNIN && (
+				<section class="club-band" aria-labelledby="why-club-kit">
+					<p class="section-label"># why Club Kit</p>
+					<h2 id="why-club-kit">Bring every machine into the same conversation.</h2>
+					<ul class="club-benefits">
+						<li>Shared traces and orders across every machine.</li>
+						<li>One board and peers for the team.</li>
+						<li>Your own voice-first mobile app.</li>
+						<li>Unlimited people and agents.</li>
+						<li>Pay for what you store and search.</li>
+					</ul>
+					<a href={SIGNUP_HREF} class="btn primary" data-home-signup="band">Sign up for Club Kit</a>
+				</section>
+			)
+		}
 
 		<section id="kit" class="oss-section">
 			<div class="section-heading">
@@ -280,12 +295,16 @@ Rework anything red once. Ask me before touching the API repo.`;
 				<p><a href="/docs/orchestrators" class="text-link">Orchestrators</a></p>
 			</div>
 		</section>
-		<section class="club-band" aria-labelledby="start-club-kit">
-			<p class="section-label"># work together</p>
-			<h2 id="start-club-kit">One shared memory for your team.</h2>
-			<p>Bring everyone. Club Kit is hosted by us, with unlimited people and agents.</p>
-			<a href={SIGNUP_HREF} class="btn primary" data-home-signup="footer">Sign up for Club Kit</a>
-		</section>
+		{
+			PRICING_SIGNIN && (
+				<section class="club-band" aria-labelledby="start-club-kit">
+					<p class="section-label"># work together</p>
+					<h2 id="start-club-kit">One shared memory for your team.</h2>
+					<p>Bring everyone. Club Kit is hosted by us, with unlimited people and agents.</p>
+					<a href={SIGNUP_HREF} class="btn primary" data-home-signup="footer">Sign up for Club Kit</a>
+				</section>
+			)
+		}
 	</main>
 	<Seafloor />
 </Base>

@@ -9,12 +9,13 @@ import CodeTabs from "../../components/docs/CodeTabs.astro";
 import AgentPrompt from "../../components/docs/AgentPrompt.astro";
 import SignupOpen from "../../components/docs/SignupOpen.astro";
 import SignupClosed from "../../components/docs/SignupClosed.astro";
+import PricingOpen from "../../components/docs/PricingOpen.astro";
 import Callout from "../../components/docs/Callout.astro";
 import Edition from "../../components/docs/Edition.astro";
 
 hev kit comes in three tiers. They run the same `hev` binary; what changes is
-where traces and the board are kept and who can reach them. Prices and limits
-are on the [pricing page](/pricing).
+where traces and the board are kept and who can reach them.
+<PricingOpen>Prices and limits are on the [pricing page](/pricing).</PricingOpen>
 
 - **Starter Kit** is open source (Apache-2.0) and runs on your own machines, up
   to three nodes. Everything is in plain files: each node keeps its own traces

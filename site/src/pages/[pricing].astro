@@ -1,6 +1,13 @@
 ---
 import Base from "../layouts/Base.astro";
-import { APP_LIVE, SIGNIN_HREF, SIGNUP_HREF } from "../lib/site";
+import { APP_LIVE, PRICING_SIGNIN, SIGNIN_HREF, SIGNUP_HREF } from "../lib/site";
+
+// /pricing is built only when pricing and sign-in are on
+// (PUBLIC_KIT_PRICING_SIGNIN, see lib/site.ts). Off, there are no paths and
+// no dist/pricing/ at all, so nothing can link to a half-hidden page.
+export function getStaticPaths() {
+	return PRICING_SIGNIN ? [{ params: { pricing: "pricing" } }] : [];
+}
 
 // Every number on this page lives in `pricing` below. They're placeholders:
 // change them here and the markup, the crossover line and the FAQ follow.

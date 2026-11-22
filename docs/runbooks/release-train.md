@@ -209,7 +209,10 @@ script from a kit clone used only for the preview:
   preview's sign-up and sign-in links go to it (`site/README.md`); the script
   hands it to the site build, records it in `/preview.json` as `app_origin`,
   and rebuilds on the next tick when it changes. Unset, the links stay on the
-  site.
+  site. Pricing and sign-in are off unless `PUBLIC_KIT_PRICING_SIGNIN=1` is
+  set here too (the origin alone turns nothing on); the script records it in
+  `/preview.json` as `pricing_signin` and rebuilds when it changes. Leave it
+  unset for the 0.7 preview.
 
 launchd agents get a minimal `PATH`: set one in `EnvironmentVariables` that
 reaches `git`, `python3`, `node` and `pnpm`. Changing a stage is editing the

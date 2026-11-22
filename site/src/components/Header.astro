@@ -1,6 +1,6 @@
 ---
 import DeepToggle from "./deep/DeepToggle.astro";
-import { APP_LIVE, SIGNIN_HREF } from "../lib/site";
+import { APP_LIVE, PRICING_SIGNIN, SIGNIN_HREF } from "../lib/site";
 
 interface Props {
 	current?: "product" | "docs" | "pricing";
@@ -19,7 +19,11 @@ const REPO = "hev/kit";
 			</a>
 			{deep && <DeepToggle />}
 		</div>
-		<a class="signup" href={SIGNIN_HREF} data-app-signup={APP_LIVE ? "header" : undefined}>Sign up / Sign in</a>
+		{
+			PRICING_SIGNIN && (
+				<a class="signup" href={SIGNIN_HREF} data-app-signup={APP_LIVE ? "header" : undefined}>Sign up / Sign in</a>
+			)
+		}
 		<button
 			class="nav-toggle"
 			type="button"
@@ -33,7 +37,7 @@ const REPO = "hev/kit";
 		<div class="nav-links" id="primary-nav-panel" data-nav-panel>
 			<a href="/docs" aria-current={current === "docs" ? "page" : undefined}>docs</a>
 			<a href="/docs/install">install</a>
-			<a href="/pricing" aria-current={current === "pricing" ? "page" : undefined}>pricing</a>
+			{PRICING_SIGNIN && <a href="/pricing" aria-current={current === "pricing" ? "page" : undefined}>pricing</a>}
 			{
 				current === "docs" && (
 					<button class="ask-open" type="button" data-hev-ask-open aria-label="Search the docs">

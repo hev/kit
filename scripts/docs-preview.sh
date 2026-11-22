@@ -42,6 +42,12 @@
 #                     and sign-in links go there (default: unset, and the links stay on the
 #                     site; see site/README.md). A build is kept per commit and origin, so
 #                     changing it rebuilds on the next refresh.
+#   PUBLIC_KIT_PRICING_SIGNIN  "1" or "true" builds the site with pricing and sign-in / sign-up
+#                     (the header button, the home page's Club Kit calls to action and
+#                     /pricing); anything else, or unset, builds without them (the default;
+#                     see site/README.md). It is recorded in /preview.json as pricing_signin,
+#                     and a build is kept per commit and setting, so changing it rebuilds on
+#                     the next refresh.
 set -euo pipefail
 
 REPO="${KIT_PREVIEW_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -51,6 +57,11 @@ PORT="${KIT_PREVIEW_PORT:-4370}"
 FOLLOW="${KIT_PREVIEW_REF:-origin/main}"
 FALLBACK="${KIT_PREVIEW_FALLBACK:-origin/main}"
 APP_ORIGIN="${PUBLIC_KIT_APP_ORIGIN:-}"
+# "1" when pricing and sign-in are on, "" when off; read the way site/src/lib/site.ts reads it.
+PRICING_SIGNIN=""
+shopt -s nocasematch
+[[ "$(printf '%s' "${PUBLIC_KIT_PRICING_SIGNIN:-}" | tr -d '[:space:]')" =~ ^(1|true)$ ]] && PRICING_SIGNIN=1
+shopt -u nocasematch
 KEEP=3
 
 log() { printf 'docs-preview: %s\n' "$*" >&2; }
@@ -66,14 +77,19 @@ current_app_origin() {
     python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("app_origin", ""))' "$DIR/current/preview.json"
 }
 
-# The build directory's name: the commit, plus a checksum of the app origin
-# when one is set, so the same commit built with another origin is another build.
+current_pricing_signin() {
+    [[ -f "$DIR/current/preview.json" ]] || return 0
+    python3 -c 'import json,sys; print("1" if json.load(open(sys.argv[1])).get("pricing_signin") else "")' "$DIR/current/preview.json"
+}
+
+# The build directory's name: the commit, plus "-pricing" when pricing and
+# sign-in are on, plus a checksum of the app origin when one is set, so the
+# same commit built with other settings is another build.
 build_name() {
-    if [[ -z "$APP_ORIGIN" ]]; then
-        printf '%s\n' "$1"
-    else
-        printf '%s-app%s\n' "$1" "$(printf '%s' "$APP_ORIGIN" | cksum | cut -d' ' -f1)"
-    fi
+    local name="$1"
+    [[ -n "$PRICING_SIGNIN" ]] && name+="-pricing"
+    [[ -n "$APP_ORIGIN" ]] && name+="-app$(printf '%s' "$APP_ORIGIN" | cksum | cut -d' ' -f1)"
+    printf '%s\n' "$name"
 }
 
 swap_current() {
@@ -117,18 +133,18 @@ build() {
         rm -rf "$src" "$out.tmp"
         mkdir -p "$src"
         git -C "$REPO" archive "$sha" site | tar -x -C "$src"
-        log "building site/ at ${sha:0:7} ($ref)${APP_ORIGIN:+ with PUBLIC_KIT_APP_ORIGIN=$APP_ORIGIN}"
-        # The site build reads PUBLIC_KIT_APP_ORIGIN; hand it exactly what this
-        # run was given, set or not.
-        if [[ -n "$APP_ORIGIN" ]]; then
-            (cd "$src/site" && pnpm install --frozen-lockfile --silent && PUBLIC_KIT_APP_ORIGIN="$APP_ORIGIN" pnpm build) >&2
-        else
-            (cd "$src/site" && pnpm install --frozen-lockfile --silent && env -u PUBLIC_KIT_APP_ORIGIN pnpm build) >&2
-        fi
-        python3 - "$src/site/dist/preview.json" "$sha" "$ref" "$APP_ORIGIN" <<'PY'
+        log "building site/ at ${sha:0:7} ($ref)${PRICING_SIGNIN:+ with PUBLIC_KIT_PRICING_SIGNIN=1}${APP_ORIGIN:+ with PUBLIC_KIT_APP_ORIGIN=$APP_ORIGIN}"
+        # The site build reads PUBLIC_KIT_PRICING_SIGNIN and PUBLIC_KIT_APP_ORIGIN;
+        # hand it exactly what this run was given, set or not.
+        local -a build_env=(env -u PUBLIC_KIT_PRICING_SIGNIN -u PUBLIC_KIT_APP_ORIGIN)
+        [[ -n "$PRICING_SIGNIN" ]] && build_env+=(PUBLIC_KIT_PRICING_SIGNIN=1)
+        [[ -n "$APP_ORIGIN" ]] && build_env+=("PUBLIC_KIT_APP_ORIGIN=$APP_ORIGIN")
+        (cd "$src/site" && pnpm install --frozen-lockfile --silent && "${build_env[@]}" pnpm build) >&2
+        python3 - "$src/site/dist/preview.json" "$sha" "$ref" "$APP_ORIGIN" "$PRICING_SIGNIN" <<'PY'
 import datetime, json, sys
-path, sha, ref, app_origin = sys.argv[1:]
+path, sha, ref, app_origin, pricing_signin = sys.argv[1:]
 meta = {"schema": "kit.docs-preview/v1", "sha": sha, "ref": ref,
+        "pricing_signin": pricing_signin == "1",
         "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
 if app_origin:
     meta["app_origin"] = app_origin
@@ -139,7 +155,9 @@ PY
     fi
     swap_current "$name"
     prune
-    log "current is ${sha:0:7} ($ref)${APP_ORIGIN:+, app origin $APP_ORIGIN}"
+    local pricing=off
+    [[ -n "$PRICING_SIGNIN" ]] && pricing=on
+    log "current is ${sha:0:7} ($ref), pricing and sign-in $pricing${APP_ORIGIN:+, app origin $APP_ORIGIN}"
 }
 
 refresh() {
@@ -152,7 +170,8 @@ refresh() {
         FOLLOW="$FALLBACK"
         want="$(git -C "$REPO" rev-parse --verify "$FOLLOW^{commit}")"
     fi
-    if [[ "$want" == "$(current_sha)" && "$APP_ORIGIN" == "$(current_app_origin)" ]]; then
+    if [[ "$want" == "$(current_sha)" && "$APP_ORIGIN" == "$(current_app_origin)" &&
+        "$PRICING_SIGNIN" == "$(current_pricing_signin)" ]]; then
         log "up to date at ${want:0:7} ($FOLLOW)"
         return 0
     fi
