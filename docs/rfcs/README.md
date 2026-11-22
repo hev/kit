@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0026](0026-metrics.md) | Native cluster metrics export in hevd | Implemented | Emit allowlisted SWIM, secrets-quota, orchestrator, and cron gauges natively over loopback/Tailscale DogStatsD and Prometheus `/metrics`, retiring external Python metrics scripts. |
 | [0025](0025-services.md) | Native services in hevd | Implemented | Long-lived services share the daemon secrets cache, redacted ring logs, attention notices and optional SWIM active-standby placement across macOS, Linux and Windows. |
 | [0024](0024-workspaces.md) | Workspaces | Proposed | Scope host routing, harness subscriptions and storage to a workspace. |
 | [0024](0024-licensing.md) | Offline Kit Pro licenses | Implemented | Distinct Ed25519 verification and local entitlement for Kit Pro. |
