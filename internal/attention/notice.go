@@ -1,4 +1,4 @@
-// Package attention is kit's one "needs you" notice (docs/notify.md): a typed
+// Package attention is kit's one "needs you" notice (https://hevkit.com/docs/config-reference): a typed
 // record of a run, orchestrator, swarm or steer moment. needs-you
 // is only an open decision or a halt escalated to a hard stop, keyed by its
 // subject; the opt-in ready and done kinds carry everything else. A

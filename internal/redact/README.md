@@ -35,7 +35,7 @@ new write and generated model output are scrubbed too.
 
 Existing archives are rewritten by the first enabled `index.Run` or
 `index.Summarize` for each Claude/Codex source root. See
-[archive upgrade handling](../../docs/archive-redaction.md) for cleanup,
+the archive redaction migration notes on `hev board` for cleanup,
 completion, retries, source loss and ownership errors. `Version` and
 `Scrubber.Identity()` identify the policy and salt in migration journals.
 
@@ -48,5 +48,5 @@ The deterministic acceptance corpus in `fixture` synthesizes one qualifying
 specimen for every embedded text regex (207 in the pinned policy), plus nine kit
 envelope specimens. The parser acceptance test checks all 216 specimens in
 prompt, tool-use and tool-result payloads for both Claude and Codex. See
-[real-store acceptance](../../docs/testing-redaction.md) for opt-in retrieval,
+the real-store acceptance record in `hev evidence` for opt-in retrieval,
 migration, fingerprint and daemon checks and their recorded limits.

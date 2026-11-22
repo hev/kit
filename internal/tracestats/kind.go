@@ -35,7 +35,7 @@ var loopTools = map[string]bool{"ScheduleWakeup": true, "CronCreate": true}
 // same prompt in the window for them to count as a loop.
 const LoopRepeats = 3
 
-// RunKind derives a session's run kind (see docs/traces-stats.md):
+// RunKind derives a session's run kind (see https://hevkit.com/docs/traces):
 //
 //  1. orchestrator-round: the dispatch order is an orchestrator's (orch-*),
 //     or the working directory is under a dispatch root's orch-* directory.

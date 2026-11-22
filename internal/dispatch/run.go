@@ -225,7 +225,7 @@ func workerPrompt(dir string, m Meta) string {
 
 // reviewNotesPrompt asks a worker for ../review-notes.json: anchored notes in
 // hunk's agent-context format that hev review shows beside the diff (see
-// internal/reviewnotes and docs/review.md).
+// internal/reviewnotes and https://hevkit.com/docs/dispatch).
 func reviewNotesPrompt(m Meta) string {
 	author := strings.TrimSpace(m.Name + " " + m.Model)
 	if author == "" {

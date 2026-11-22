@@ -65,7 +65,7 @@ Bring-your-own Turbopuffer is hosted-only now: there is no local gateway lane.
 
 Data lives under ~/.hev/<surface>/ (traces, board, orders, peers, hooks,
 evidence). A machine that already has ~/.hev/archive, ~/dispatch or
-~/.local/state/peers-v2 keeps using them; see docs/trace-archive.md. With no
+~/.local/state/peers-v2 keeps using them; see https://hevkit.com/docs/traces. With no
 dispatch config, up writes one naming this machine as the local host "here".
 
 On a terminal, the first ` + "`hev up`" + ` on an unconfigured machine runs ` + "`hev onboard`" + `

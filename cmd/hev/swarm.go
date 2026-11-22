@@ -27,7 +27,7 @@ orchestrator and ordinary dispatch runs on this host; a code-only reconcile
 tick in the orchestrator's supervisor launches units, repairs failed ones in
 place and starts integration when the pieces are done. A person merges.
 
-Phase 1: every unit runs on this host. See docs/swarms.md.`,
+Phase 1: every unit runs on this host. See https://hevkit.com/docs/swarms.`,
 	}
 	var file string
 	var dry bool

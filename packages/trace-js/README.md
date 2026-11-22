@@ -1,7 +1,7 @@
 # @hevmind/trace
 
 Send a host app's [Vercel AI SDK](https://ai-sdk.dev) traces to
-[`hev collect`](https://github.com/hev/kit/blob/main/docs/app-traces.md) over
+[`hev collect`](https://hevkit.com/docs/traces) over
 OTLP/HTTP. Apache-2.0. ESM, Node 22 or later.
 
 ```ts

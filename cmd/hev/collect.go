@@ -39,7 +39,7 @@ var collectCmd = &cobra.Command{
 hev collect takes OTLP/HTTP trace exports on /v1/traces, scrubs every span with
 kit's redaction policy, writes each span as a trace envelope, collapses each
 turn's spans into one turn document, and stores it for search. Storage
-follows kit's rule (docs/design/storage-modes.md): with a Layer API key, turns
+follows kit's rule (see the storage modes decision on hev board): with a Layer API key, turns
 and app boards go to hev layer and search is hybrid; with no key, they go to
 the file archive on this host (HEV_ARCHIVE_DIR, [archive] dir, default
 ~/.hev/traces, or a legacy ~/.hev/archive) and search is grep: every word of the query, no meaning.
@@ -63,7 +63,7 @@ collector's key may write and read. Spans without an allowed namespace are
 refused; API calls name a namespace and read only it. A namespace's turns
 live in the Layer (or archive) namespace <--traces-namespace>-<namespace>, for
 example hev-app-traces-story-prod. It runs no transcript tailing, dispatch, peers or
-dashboard. See docs/app-traces.md.`,
+dashboard. See https://hevkit.com/docs/traces.`,
 	Args: cobra.NoArgs,
 	RunE: runCollect,
 }

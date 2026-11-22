@@ -99,7 +99,7 @@ func bootstrapDispatch(out io.Writer, workspace string) error {
 	}
 	var buf bytes.Buffer
 	buf.WriteString("# Written by hev up: dispatch runs on this machine (host \"here\").\n")
-	buf.WriteString("# Run records live under " + displayHome(hevpaths.Dir(hevpaths.Orders)) + " (docs/dispatch.md).\n")
+	buf.WriteString("# Run records live under " + displayHome(hevpaths.Dir(hevpaths.Orders)) + " (https://hevkit.com/docs/dispatch).\n")
 	if err := toml.NewEncoder(&buf).Encode(bootstrapConfig{Cap: 2, Workspace: workspace, DefaultHost: "here",
 		Hosts: map[string]bootstrapHost{"here": {Local: true, Workspace: workspace}}}); err != nil {
 		return err

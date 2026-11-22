@@ -37,7 +37,7 @@
     "tracing",
     "hev"
   ],
-  "homepage": "https://github.com/hev/kit/blob/main/docs/app-traces.md",
+  "homepage": "https://hevkit.com/docs/traces",
   "bugs": {
     "url": "https://github.com/hev/kit/issues"
   },

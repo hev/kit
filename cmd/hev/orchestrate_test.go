@@ -11,44 +11,72 @@ import (
 	"github.com/hev/kit/internal/dispatch"
 )
 
-func TestOrchestrateDryRunRFCAndDefaultOff(t *testing.T) {
+func TestOrchestrateDryRunAndDefaultOff(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	b, e := os.ReadFile("../../docs/rfcs/0008-orchestrators.md")
-	if e != nil {
-		t.Fatal(e)
-	}
-	_, rest, ok := strings.Cut(string(b), "```yaml\n")
-	if !ok {
-		t.Fatal("missing RFC example")
-	}
-	example, _, _ := strings.Cut(rest, "```")
+	const example = `---
+kind: orchestrator
+name: release-train
+goal: Every PR labelled release-0.9 is merged with green CI by Friday.
+host: build-1              # where rounds run; default = host of the managed runs
+mode: loop                 # once | loop
+every: 20m
+until: goal                # goal | 2026-11-08 | never (needs max_lifetime)
+max_lifetime: 7d
+harness: claude
+model: claude-opus-5-5
+reply: my-session          # peers address that hears about decisions and blockers
+
+manages:                   # scope; nothing outside it can be touched
+  runs: {selector: "issue=REL-*"}   # or names: [...] or "mine"
+  repos: [app]
+
+authority:                 # default is say + notify only
+  - say
+  - rework
+  - retry
+  - validate
+  - dispatch               # start new runs within scope
+
+budget:
+  concurrent_runs: 3
+  runs_per_day: 20
+  usd_per_day: 40
+
+handoff:
+  rotate_after: 30         # rounds; then a summarised checkpoint starts a new lineage
+
+idle: skip                 # skip | run — whether a round with no new evidence calls the model
+source: none               # or a plugin, see "Sources"
+---
+Standing brief.
+`
 	file := filepath.Join(t.TempDir(), "example.md")
-	if e = os.WriteFile(file, []byte("---\n"+example+"---\nStanding brief.\n"), 0600); e != nil {
+	if e := os.WriteFile(file, []byte(example), 0600); e != nil {
 		t.Fatal(e)
 	}
 	cmd := newOrchestrateCommand()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"apply", "--dry-run", "-f", file})
-	if e = cmd.Execute(); e != nil {
+	if e := cmd.Execute(); e != nil {
 		t.Fatal(e)
 	}
 	if !strings.Contains(out.String(), "valid release-train") {
 		t.Fatal(out.String())
 	}
-	if _, e = os.Stat(dispatch.OrchestratorConfigDir()); !os.IsNotExist(e) {
+	if _, e := os.Stat(dispatch.OrchestratorConfigDir()); !os.IsNotExist(e) {
 		t.Fatal("dry run created config")
 	}
-	if _, e = os.Stat(dispatch.Root()); !os.IsNotExist(e) {
+	if _, e := os.Stat(dispatch.Root()); !os.IsNotExist(e) {
 		t.Fatal("dry run created runtime state")
 	}
 	cmd = newOrchestrateCommand()
 	out.Reset()
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"ls", "--json"})
-	if e = cmd.Execute(); e != nil {
+	if e := cmd.Execute(); e != nil {
 		t.Fatal(e)
 	}
 	if strings.TrimSpace(out.String()) != "[]" {

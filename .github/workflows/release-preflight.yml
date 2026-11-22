@@ -7,9 +7,9 @@
 # its ancestor (main is fast-forwarded to the tag afterwards), notes final, vet (and GOOS=windows vet) and tests, the five release
 # archives build with the version injected and report it, bundled skills install
 # current in a temporary HOME, the dashboard image builds and is not yet on
-# Docker Hub, the changelog and the install pages name the version, and the draft
+# Docker Hub, and the draft
 # targets this commit. A green run is the "ready to publish" signal. It writes
-# nothing anywhere. docs/runbooks/release-train.md has the table.
+# nothing anywhere. See the release-train runbook on hev board for the table.
 name: release-preflight
 
 on:
