@@ -29,80 +29,80 @@ const (
 // field names; role order fields are order frontmatter keys. Fields owned by
 // later build phases decode so a file is portable, and up refuses them.
 type SwarmSpec struct {
-	Kind         string `yaml:"kind" json:"kind"`
-	Name         string `yaml:"name" json:"name"`
-	Goal         string `yaml:"goal" json:"goal"`
-	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
-	Host         string `yaml:"host,omitempty" json:"host,omitempty"`
-	Every        string `yaml:"every,omitempty" json:"every,omitempty"`
-	MaxLifetime  string `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
-	Harness      string `yaml:"harness,omitempty" json:"harness,omitempty"`
-	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
-	RoundTimeout string `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
-	NotifyRoute  string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
+	Kind         string `yaml:"kind" toml:"kind" json:"kind"`
+	Name         string `yaml:"name" toml:"name" json:"name"`
+	Goal         string `yaml:"goal" toml:"goal" json:"goal"`
+	Reply        string `yaml:"reply,omitempty" toml:"reply" json:"reply,omitempty"`
+	Host         string `yaml:"host,omitempty" toml:"host" json:"host,omitempty"`
+	Every        string `yaml:"every,omitempty" toml:"every" json:"every,omitempty"`
+	MaxLifetime  string `yaml:"max_lifetime,omitempty" toml:"max_lifetime" json:"max_lifetime,omitempty"`
+	Harness      string `yaml:"harness,omitempty" toml:"harness" json:"harness,omitempty"`
+	Model        string `yaml:"model,omitempty" toml:"model" json:"model,omitempty"`
+	RoundTimeout string `yaml:"round_timeout,omitempty" toml:"round_timeout" json:"round_timeout,omitempty"`
+	NotifyRoute  string `yaml:"notify_route,omitempty" toml:"notify_route" json:"notify_route,omitempty"`
 	Budget       struct {
-		ConcurrentRuns int     `yaml:"concurrent_runs,omitempty" json:"concurrent_runs"`
-		RunsPerDay     int     `yaml:"runs_per_day,omitempty" json:"runs_per_day"`
-		USDPerDay      float64 `yaml:"usd_per_day,omitempty" json:"usd_per_day,omitempty"`
-	} `yaml:"budget,omitempty" json:"budget"`
-	ReconcileEvery string        `yaml:"reconcile_every,omitempty" json:"reconcile_every,omitempty"`
-	Restart        SwarmRestart  `yaml:"restart,omitempty" json:"restart"`
-	Roles          []SwarmRole   `yaml:"roles" json:"roles"`
-	Standby        []string      `yaml:"standby,omitempty" json:"standby,omitempty"`
-	StateRepo      string        `yaml:"state_repo,omitempty" json:"state_repo,omitempty"`
-	HostGrace      string        `yaml:"host_grace,omitempty" json:"host_grace,omitempty"`
-	Plans          *SwarmPlans   `yaml:"plans,omitempty" json:"plans,omitempty"`
-	MaxRuns        int           `yaml:"max_runs,omitempty" json:"max_runs,omitempty"`
-	Brief          string        `yaml:"-" json:"-"`
-	Sections       swarmSections `yaml:"-" json:"-"`
+		ConcurrentRuns int     `yaml:"concurrent_runs,omitempty" toml:"concurrent_runs" json:"concurrent_runs"`
+		RunsPerDay     int     `yaml:"runs_per_day,omitempty" toml:"runs_per_day" json:"runs_per_day"`
+		USDPerDay      float64 `yaml:"usd_per_day,omitempty" toml:"usd_per_day" json:"usd_per_day,omitempty"`
+	} `yaml:"budget,omitempty" toml:"budget" json:"budget"`
+	ReconcileEvery string        `yaml:"reconcile_every,omitempty" toml:"reconcile_every" json:"reconcile_every,omitempty"`
+	Restart        SwarmRestart  `yaml:"restart,omitempty" toml:"restart" json:"restart"`
+	Roles          []SwarmRole   `yaml:"roles" toml:"roles" json:"roles"`
+	Standby        []string      `yaml:"standby,omitempty" toml:"standby" json:"standby,omitempty"`
+	StateRepo      string        `yaml:"state_repo,omitempty" toml:"state_repo" json:"state_repo,omitempty"`
+	HostGrace      string        `yaml:"host_grace,omitempty" toml:"host_grace" json:"host_grace,omitempty"`
+	Plans          *SwarmPlans   `yaml:"plans,omitempty" toml:"plans" json:"plans,omitempty"`
+	MaxRuns        int           `yaml:"max_runs,omitempty" toml:"max_runs" json:"max_runs,omitempty"`
+	Brief          string        `yaml:"-" toml:"brief" json:"-"`
+	Sections       swarmSections `yaml:"-" toml:"-" json:"-"`
 }
 
 type SwarmRestart struct {
-	Limit      *int   `yaml:"limit,omitempty" json:"limit,omitempty"`
-	Backoff    string `yaml:"backoff,omitempty" json:"backoff,omitempty"`
-	MaxBackoff string `yaml:"max_backoff,omitempty" json:"max_backoff,omitempty"`
-	SwarmLimit int    `yaml:"swarm_limit,omitempty" json:"swarm_limit,omitempty"`
+	Limit      *int   `yaml:"limit,omitempty" toml:"limit" json:"limit,omitempty"`
+	Backoff    string `yaml:"backoff,omitempty" toml:"backoff" json:"backoff,omitempty"`
+	MaxBackoff string `yaml:"max_backoff,omitempty" toml:"max_backoff" json:"max_backoff,omitempty"`
+	SwarmLimit int    `yaml:"swarm_limit,omitempty" toml:"swarm_limit" json:"swarm_limit,omitempty"`
 }
 
 type SwarmPlans struct {
-	HoldAt   int `yaml:"hold_at,omitempty" json:"hold_at,omitempty"`
-	ShrinkAt int `yaml:"shrink_at,omitempty" json:"shrink_at,omitempty"`
+	HoldAt   int `yaml:"hold_at,omitempty" toml:"hold_at" json:"hold_at,omitempty"`
+	ShrinkAt int `yaml:"shrink_at,omitempty" toml:"shrink_at" json:"shrink_at,omitempty"`
 }
 
 type SwarmRole struct {
-	Name      string          `yaml:"name" json:"name"`
-	Shape     string          `yaml:"shape" json:"shape"`
-	Replicas  int             `yaml:"replicas,omitempty" json:"replicas"`
-	Pieces    SwarmPieces     `yaml:"pieces,omitempty" json:"pieces,omitempty"`
-	Variants  []SwarmOrder    `yaml:"variants,omitempty" json:"variants,omitempty"`
-	Choose    string          `yaml:"choose,omitempty" json:"choose,omitempty"`
-	After     []string        `yaml:"after,omitempty" json:"after,omitempty"`
-	Effects   string          `yaml:"effects,omitempty" json:"effects"`
-	Stall     string          `yaml:"stall,omitempty" json:"stall,omitempty"`
-	Order     SwarmOrder      `yaml:"order" json:"order"`
-	Placement *SwarmPlacement `yaml:"placement,omitempty" json:"placement,omitempty"`
+	Name      string          `yaml:"name" toml:"name" json:"name"`
+	Shape     string          `yaml:"shape" toml:"shape" json:"shape"`
+	Replicas  int             `yaml:"replicas,omitempty" toml:"replicas" json:"replicas"`
+	Pieces    SwarmPieces     `yaml:"pieces,omitempty" toml:"pieces" json:"pieces,omitempty"`
+	Variants  []SwarmOrder    `yaml:"variants,omitempty" toml:"variants" json:"variants,omitempty"`
+	Choose    string          `yaml:"choose,omitempty" toml:"choose" json:"choose,omitempty"`
+	After     []string        `yaml:"after,omitempty" toml:"after" json:"after,omitempty"`
+	Effects   string          `yaml:"effects,omitempty" toml:"effects" json:"effects"`
+	Stall     string          `yaml:"stall,omitempty" toml:"stall" json:"stall,omitempty"`
+	Order     SwarmOrder      `yaml:"order" toml:"order" json:"order"`
+	Placement *SwarmPlacement `yaml:"placement,omitempty" toml:"placement" json:"placement,omitempty"`
 }
 
 // SwarmOrder holds the order keys a role may set. name, host, reply and the
 // repeat keys belong to the swarm, so they are not fields here.
 type SwarmOrder struct {
-	Repo       string `yaml:"repo,omitempty" json:"repo,omitempty"`
-	Base       string `yaml:"base,omitempty" json:"base,omitempty"`
-	Harness    string `yaml:"harness,omitempty" json:"harness,omitempty"`
-	Model      string `yaml:"model,omitempty" json:"model,omitempty"`
-	Validation string `yaml:"validation,omitempty" json:"validation,omitempty"`
-	Issue      string `yaml:"issue,omitempty" json:"issue,omitempty"`
-	Linear     string `yaml:"linear,omitempty" json:"linear,omitempty"`
-	Class      string `yaml:"class,omitempty" json:"class,omitempty"`
-	Preview    string `yaml:"preview,omitempty" json:"preview,omitempty"`
-	Timeout    int    `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Repo       string `yaml:"repo,omitempty" toml:"repo" json:"repo,omitempty"`
+	Base       string `yaml:"base,omitempty" toml:"base" json:"base,omitempty"`
+	Harness    string `yaml:"harness,omitempty" toml:"harness" json:"harness,omitempty"`
+	Model      string `yaml:"model,omitempty" toml:"model" json:"model,omitempty"`
+	Validation string `yaml:"validation,omitempty" toml:"validation" json:"validation,omitempty"`
+	Issue      string `yaml:"issue,omitempty" toml:"issue" json:"issue,omitempty"`
+	Linear     string `yaml:"linear,omitempty" toml:"linear" json:"linear,omitempty"`
+	Class      string `yaml:"class,omitempty" toml:"class" json:"class,omitempty"`
+	Preview    string `yaml:"preview,omitempty" toml:"preview" json:"preview,omitempty"`
+	Timeout    int    `yaml:"timeout,omitempty" toml:"timeout" json:"timeout,omitempty"`
 }
 
 type SwarmPlacement struct {
-	Hosts   []string `yaml:"hosts,omitempty" json:"hosts,omitempty"`
-	OS      string   `yaml:"os,omitempty" json:"os,omitempty"`
-	Spread  bool     `yaml:"spread,omitempty" json:"spread,omitempty"`
-	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	Hosts   []string `yaml:"hosts,omitempty" toml:"hosts" json:"hosts,omitempty"`
+	OS      string   `yaml:"os,omitempty" toml:"os" json:"os,omitempty"`
+	Spread  bool     `yaml:"spread,omitempty" toml:"spread" json:"spread,omitempty"`
+	Exclude []string `yaml:"exclude,omitempty" toml:"exclude" json:"exclude,omitempty"`
 }
 
 // SwarmPieces is a list of piece names, or the scalar orchestrator.
@@ -175,13 +175,20 @@ func ParseSwarm(text string) (SwarmSpec, error) {
 	if e := d.Decode(&extra); e != io.EOF {
 		return s, fmt.Errorf("one frontmatter document required")
 	}
-	s.Brief = strings.TrimSpace(body)
-	sections, e := parseSwarmBody(s.Brief)
-	if e != nil {
-		return s, e
+	if err := s.setBrief(body); err != nil {
+		return s, err
+	}
+	return s, s.Validate()
+}
+
+func (s *SwarmSpec) setBrief(body string) error {
+	s.Brief = strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n"))
+	sections, err := parseSwarmBody(s.Brief)
+	if err != nil {
+		return err
 	}
 	s.Sections = sections
-	return s, s.Validate()
+	return nil
 }
 
 // parseSwarmBody splits ## Problem, ## Acceptance and ## Role: NAME (with its

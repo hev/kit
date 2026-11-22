@@ -14,14 +14,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() { rootCmd.AddCommand(newSwarmCommand()) }
+func init() {
+	compat := newSwarmCommand()
+	compat.Hidden = true
+	rootCmd.AddCommand(compat)
+}
 
 func newSwarmCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:    "swarm",
-		Hidden: true,
-		Short:  "Put an orchestrator and its workers on a problem from one file",
-		Long: `A swarm is one Markdown file that declares a problem, an orchestrator and
+		Use:   "swarm",
+		Short: "Put an orchestrator and its workers on a problem from one file",
+		Long: `A swarm is one Markdown or TOML file that declares a problem, an orchestrator and
 worker roles with concurrency limits (RFC 0013). up compiles it into an
 orchestrator and ordinary dispatch runs on this host; a code-only reconcile
 tick in the orchestrator's supervisor launches units, repairs failed ones in
@@ -36,15 +39,10 @@ Phase 1: every unit runs on this host. See docs/swarms.md.`,
 		if e != nil {
 			return e
 		}
-		plan, e := dispatch.SwarmUp(string(b), dry)
-		if e != nil {
-			return e
+		if strings.EqualFold(filepath.Ext(file), ".toml") {
+			return applySwarmTemplate(cmd, string(b), dry)
 		}
-		dispatch.WriteSwarmPlan(cmd.OutOrStdout(), plan, dry)
-		if !dry {
-			fmt.Fprintf(cmd.OutOrStdout(), "applied o-%s; the reconcile tick launches units\n", plan.Spec.Name)
-		}
-		return nil
+		return applySwarm(cmd, string(b), dry)
 	}}
 	up.Flags().StringVarP(&file, "file", "f", "", "Swarm file")
 	_ = up.MarkFlagRequired("file")

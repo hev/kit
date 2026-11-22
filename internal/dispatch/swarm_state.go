@@ -226,7 +226,7 @@ func SwarmUp(text string, dry bool) (SwarmPlan, error) {
 	if processRecordLive(filepath.Join(dir, "supervisor.json")) {
 		cur, _ := os.ReadFile(filepath.Join(OrchestratorConfigDir(), name+".md"))
 		if string(cur) != plan.OrchSpec {
-			return plan, fmt.Errorf("swarm %s is running and its orchestrator fields changed; run hev swarm down %s, then up", name, name)
+			return plan, fmt.Errorf("swarm %s is running and its orchestrator fields changed; run hev orchestrate swarm down %s, then up", name, name)
 		}
 		// Desired state changes in place; the next tick acts on it.
 		return plan, writeSwarmFiles(plan, text, false)
@@ -518,7 +518,7 @@ func WriteSwarmDown(w io.Writer, r SwarmDownReport) {
 		fmt.Fprintf(w, "  %s\n", b)
 	}
 	fmt.Fprintf(w, "kept: %d worktrees\n", len(r.Worktrees))
-	fmt.Fprintf(w, "records: hev swarm ps %s\n", r.Name)
+	fmt.Fprintf(w, "records: hev orchestrate swarm ps %s\n", r.Name)
 }
 
 // SwarmUnitRun resolves ROLE/UNIT, or ROLE for a single role, to its run.
@@ -537,7 +537,7 @@ func SwarmUnitRun(name, address string) (string, bool) {
 }
 
 // SwarmChoose records a race's one chosen unit. by is first-green (code),
-// orchestrator (a round's choice.json) or person (hev swarm say NAME choose).
+// orchestrator (a round's choice.json) or person (hev orchestrate swarm say NAME choose).
 func SwarmChoose(name, address, reason, by string) error {
 	unlock, e := lockSwarm(name)
 	if e != nil {

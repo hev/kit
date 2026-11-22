@@ -506,7 +506,7 @@ func (t *swarmTick) races() {
 			if settled && done > 0 {
 				msg := fmt.Sprintf("race %s is ready for a choice: %d of %d variants done.", r.Name, done, len(r.units()))
 				if r.choose() == "person" {
-					t.notice("race:"+r.Name, msg+fmt.Sprintf(" Choose with: hev swarm say %s choose %s/vN", t.st.Name, r.Name))
+					t.notice("race:"+r.Name, msg+fmt.Sprintf(" Choose with: hev orchestrate swarm say %s choose %s/vN", t.st.Name, r.Name))
 				} else {
 					t.roundNote("race:"+r.Name, msg+" Compare reports and branches and write choice.json.")
 				}

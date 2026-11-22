@@ -7,7 +7,7 @@ design only. Proposed 2026-11-11.
 ## Summary
 
 A swarm is one Markdown file that declares a problem, one orchestrator and a
-set of worker roles with concurrency limits. `hev swarm up -f FILE` compiles it
+set of worker roles with concurrency limits. `hev orchestrate swarm up -f FILE` compiles it
 into what kit already runs: an RFC 0008 orchestrator and ordinary dispatch
 runs. The swarm adds three things the pieces lack today: **desired state**
 (which units of work exist and how many may run at once), a **reconcile
@@ -25,9 +25,9 @@ each phase is one dispatchable order.
 ### The decision in five lines
 
 1. A swarm file is a kit-native, compose-like Markdown file. It is not a Docker Compose file. Its YAML frontmatter extends the orchestrator spec with `roles:`, and each role's fields are order frontmatter keys.
-2. `hev swarm up|ps|logs|scale|say|pause|resume|down|sweep` drive `hev orchestrate` and `hev dispatch` underneath. Swarms add no third runtime.
+2. `hev orchestrate swarm up|ps|logs|scale|say|pause|resume|down|sweep` drive `hev orchestrate` and `hev dispatch` underneath. Swarms add no third runtime.
 3. Two shapes: `partition` (one run per piece, then an `integrate` worker produces the single draft PR) and `race` (variants of one task; the orchestrator picks one, a person merges).
-4. The reconciler is code inside the owning orchestrator supervisor and acts only while that supervisor holds the swarm lease. `hevd`'s existing scan, or a scheduled `hev swarm sweep`, only restarts a dead supervisor or claims an expired lease.
+4. The reconciler is code inside the owning orchestrator supervisor and acts only while that supervisor holds the swarm lease. `hevd`'s existing scan, or a scheduled `hev orchestrate swarm sweep`, only restarts a dead supervisor or claims an expired lease.
 5. A worker is replaced automatically only when its role is `effects: branch`, the old run is confirmed stopped or its host has been unreachable past the grace period, and the replacement is fenced to a new branch. Anything else stops and asks a person.
 
 ## Motivation
@@ -56,7 +56,7 @@ each phase is one dispatchable order.
 
 ## Decision
 
-Add `hev swarm` and a swarm file. `up` validates the file, writes an
+Add `hev orchestrate swarm` and a swarm file. `up` validates the file, writes an
 orchestrator spec and per-role order templates into the orchestrator's state
 directory, and applies them. The supervisor gains a code-only **reconcile
 tick** that runs between rounds, compares desired state with dispatch
@@ -213,20 +213,20 @@ three field ideas, not its file.
 
 ### 2. Lifecycle verbs
 
-**Decision: `hev swarm VERB`, a noun group like `hev orchestrate` and `hev
+**Decision: `hev orchestrate swarm VERB`, a noun group like `hev orchestrate` and `hev
 dispatch`. Every verb resolves to existing verbs plus the swarm's state file.
 Kept from the sketch.**
 
 | Verb | What it does | Underneath |
 |---|---|---|
-| `hev swarm up -f FILE [--dry-run]` | Validate, compile, apply. Rerunning with an edited file updates desired state in place, as in Compose. | `orchestrate apply` on the owner; `orchestrate apply --scope-only-owner` on each candidate host (phase 3); the first reconcile tick launches units with dispatch `start`. |
-| `hev swarm ps NAME [--json]` | Units by role: piece or variant, generation, host, state, branch head, restarts, fenced generations | `orchestrate show` + `dispatch ls --json` rows whose `ORCH` is the swarm |
-| `hev swarm logs NAME [ROLE[/UNIT]] [-f] [--round N]` | Without a unit: orchestrator rounds. With one: the current generation's run log | `orchestrate logs`, `dispatch logs` |
-| `hev swarm scale NAME ROLE=N` | Change `replicas` in desired state | Owner state write; the next tick acts |
-| `hev swarm say NAME [ROLE/UNIT] MSG` | Message the orchestrator, or one unit's current run | `orchestrate say`, `dispatch say` |
-| `hev swarm pause|resume NAME` | Stop or restart launches, repairs and rounds. Running workers continue. | `orchestrate pause/resume` |
-| `hev swarm down NAME [--keep-runs]` | Stop the orchestrator, then stop every current run. Worktrees, branches and PRs stay. Prints what is left. | `orchestrate stop`, `dispatch stop` per run |
-| `hev swarm sweep` | Restart dead supervisors and claim expired leases for swarms registered on this host | Same entry point as `hev dispatch sweep` |
+| `hev orchestrate swarm up -f FILE [--dry-run]` | Validate, compile, apply. Rerunning with an edited file updates desired state in place, as in Compose. | `orchestrate apply` on the owner; `orchestrate apply --scope-only-owner` on each candidate host (phase 3); the first reconcile tick launches units with dispatch `start`. |
+| `hev orchestrate swarm ps NAME [--json]` | Units by role: piece or variant, generation, host, state, branch head, restarts, fenced generations | `orchestrate show` + `dispatch ls --json` rows whose `ORCH` is the swarm |
+| `hev orchestrate swarm logs NAME [ROLE[/UNIT]] [-f] [--round N]` | Without a unit: orchestrator rounds. With one: the current generation's run log | `orchestrate logs`, `dispatch logs` |
+| `hev orchestrate swarm scale NAME ROLE=N` | Change `replicas` in desired state | Owner state write; the next tick acts |
+| `hev orchestrate swarm say NAME [ROLE/UNIT] MSG` | Message the orchestrator, or one unit's current run | `orchestrate say`, `dispatch say` |
+| `hev orchestrate swarm pause|resume NAME` | Stop or restart launches, repairs and rounds. Running workers continue. | `orchestrate pause/resume` |
+| `hev orchestrate swarm down NAME [--keep-runs]` | Stop the orchestrator, then stop every current run. Worktrees, branches and PRs stay. Prints what is left. | `orchestrate stop`, `dispatch stop` per run |
+| `hev orchestrate swarm sweep` | Restart dead supervisors and claim expired leases for swarms registered on this host | Same entry point as `hev dispatch sweep` |
 
 `scale` down never stops a running unit. It lowers the limit, cancels queued
 units first (cancelling a queued order is already atomic, RFC 0012), and lets
@@ -263,7 +263,7 @@ who picks:
   the choice and its reason in the checkpoint, and sends it to `reply`. The
   round also writes `choice.json` (`{"role","unit","reason"}`) in its round
   directory; code records it after the checkpoint is accepted.
-- `person`: the round only summarises; `hev swarm say NAME choose v2` records
+- `person`: the round only summarises; `hev orchestrate swarm say NAME choose v2` records
   the choice.
 
 Losing branches are kept and never deleted.
@@ -439,7 +439,7 @@ generation to cherry-pick them (`say`). Code never merges or deletes them.
 | **Worker's host unreachable** | Host unreachable in every tick for `host_grace` | Mark unit `lost`, fence generation N in `swarm.json`, then repair 2 on another candidate | No other admitted candidate (unit `held`, swarm keeps going); role not `effects: branch`; unit already lost once on another host within `host_grace` × 3 (looks like a partition, not a crash) |
 | **Lost host returns with the old worker still running** | A fenced run appears `live` in inventory | `stop` the fenced run; if it ended on its own, nothing to stop. Record its head; raise `orphaned-work` if it has commits past the replacement's base. Mark it `superseded`. | `stop` fails; the fenced run opened a PR or did anything visible outside its branch (an `effects: branch` violation, reported, never auto-repaired) |
 | **Orchestrator round fails** | Existing: no accepted checkpoint, failure streak (`consecutive_failures`) | Previous checkpoint stands (existing). The tick keeps doing deterministic repairs. No new judgement: no new pieces, no race choice, no answers. | Existing notice at the second consecutive failure. At `round_failures_limit` (default 3) the swarm **holds**: no new launches and no cross-host replacement, only in-place repair 1. |
-| **Orchestrator supervisor dies** | `hevd` scan or `hev swarm sweep` on the owner: state says running but no `o-NAME` supervisor (Unix tmux session; Windows PID and start time, as dispatch checks) | Stop any orphaned round harness through its recorded process group, discard the round without a checkpoint (the previous one stands, as today), relaunch the supervisor | Supervisor restarted 3 times in an hour; lease held by another host (then the local one stays down) |
+| **Orchestrator supervisor dies** | `hevd` scan or `hev orchestrate swarm sweep` on the owner: state says running but no `o-NAME` supervisor (Unix tmux session; Windows PID and start time, as dispatch checks) | Stop any orphaned round harness through its recorded process group, discard the round without a checkpoint (the previous one stands, as today), relaunch the supervisor | Supervisor restarted 3 times in an hour; lease held by another host (then the local one stays down) |
 | **Orchestrator's host lost** | Standby's sweep sees the lease past expiry plus margin | Standby claims the lease with epoch + 1 (an atomic compare-and-swap on the state ref), reads `checkpoint.md` and `swarm.json` from the ref, announces the epoch to worker hosts, starts its supervisor | No standby configured (the swarm keeps whatever is running and holds; workers finish within their timeouts); the claim races and loses (the other claimant owns it); the state ref is unreachable |
 | **Partition between hosts** | Unreachable from the owner but not necessarily down | Workers on the far side keep going on their own branches. After `host_grace`, repair 2 as for a lost host. The owner, if cut off from the state ref, stops acting once its lease lapses. | Any case where the lease cannot be renewed or claimed by anyone: the swarm holds until someone can reach the ref |
 
@@ -447,7 +447,7 @@ generation to cherry-pick them (`say`). Code never merges or deletes them.
 
 **Decision: in the owning orchestrator supervisor, gated by a lease kept in a
 compare-and-swap ref on the swarm repository's origin. `hevd`'s scan and
-`hev swarm sweep` act only as a watchdog. Default off holds: only hosts that
+`hev orchestrate swarm sweep` act only as a watchdog. Default off holds: only hosts that
 applied a swarm or registered a standby do anything.**
 
 Options considered:
@@ -511,7 +511,7 @@ Phase 1 needs none of this: on one host, the state stays local in
 enough.
 
 The watchdog, as one function on two schedules: hevd's scan calls it after
-`SweepQueueBackstop`, and `hev swarm sweep` runs it from a scheduled task. It
+`SweepQueueBackstop`, and `hev orchestrate swarm sweep` runs it from a scheduled task. It
 does two things, only for swarms registered on this host: restart a dead
 supervisor that still holds the lease, and try a claim if this host is a
 standby and the lease has expired. It never reconciles units itself.
@@ -657,13 +657,13 @@ run the whole test suite, open one draft PR.
 **up.**
 
 ```
-$ hev swarm up -f logfix.md --dry-run
+$ hev orchestrate swarm up -f logfix.md --dry-run
 swarm logfix: owner build-1, standby build-2, 2 roles, 6 units, max 3 concurrent
   orchestrator o-logfix  authority say,notify,rework,retry,dispatch,stop
   migrate    5 pieces  replicas 3  candidates build-1 build-2 build-3 (spread)
   integrate  1 unit    after migrate  pinned build-1
   state ref  hev-swarm/logfix on app's origin
-$ hev swarm up -f logfix.md
+$ hev orchestrate swarm up -f logfix.md
 ```
 
 `up` applies `o-logfix` on `build-1`, registers it scope-only on `build-2`
@@ -674,7 +674,7 @@ build-2 and `-cli-g1` on build-3. Each becomes `live` when it appears in
 inventory.
 
 ```
-$ hev swarm ps logfix
+$ hev orchestrate swarm ps logfix
 ROLE       UNIT     GEN  HOST     STATE    HEAD     RESTARTS
 migrate    api      1    build-1  live     -        0
 migrate    worker   1    build-2  live     -        0
@@ -718,7 +718,7 @@ evidence and writes a reply ("merge-ready, head 51e0, CI green") with
 **down.**
 
 ```
-$ hev swarm down logfix
+$ hev orchestrate swarm down logfix
 stopped o-logfix (goal met)
 runs: 0 stopped (none live)
 kept: 7 branches (5 pieces, 1 superseded, 1 integration), 1 draft PR
@@ -803,7 +803,7 @@ Each phase is one order. Phase 1 needs one host only.
    evidence. Still one owner and no takeover.
 4. **Durable owner.** State ref with compare-and-swap lease, the
    act-only-while-leased rule, supervisor watchdog in hevd's scan and
-   `hev swarm sweep`, standby registration and takeover, epoch announcement.
+   `hev orchestrate swarm sweep`, standby registration and takeover, epoch announcement.
 5. **Windows parity and docs.** Detached-supervisor watchdog and sweep on
    Windows, user docs in `docs/swarms.md`, and an end-to-end smoke on three
    isolated local dispatch roots (`config_path`) that kills a worker, drops a
@@ -862,9 +862,6 @@ found while building it.
 
 These are for the operator to decide. Each has the default this RFC proposes.
 
-- **Command name.** `hev swarm` or `hev orchestrate up`? Default:
-  `hev swarm`. It is the concept the operator asked for, and `orchestrate`
-  keeps its single-orchestrator meaning.
 - **Where the lease and checkpoint live.** On the work repo's origin, a
   separate private repo, or host-local only (no takeover)? Default: work
   repo's origin with `state_repo` override. Phases 1–3 are host-local
@@ -884,3 +881,10 @@ These are for the operator to decide. Each has the default this RFC proposes.
 - **Bound senders.** Default: excluded. Revisit with per-grant authority under
   RFC 0011.
 - **Merge authority.** Default: none, unchanged from RFC 0008.
+
+## TOML entry point
+
+`hev orchestrate template swarm` prints a TOML starter with a `[[roles]]`
+graph and a Markdown `brief`. `hev orchestrate apply -f FILE.toml`
+reuses the swarm compiler and supervisor. Existing Markdown frontmatter
+specs and the hidden `hev swarm` compatibility command remain supported.

@@ -24,14 +24,21 @@ var orchestrateApplyRPC = dispatch.RPC
 func init() { rootCmd.AddCommand(newOrchestrateCommand()) }
 func newOrchestrateCommand() *cobra.Command {
 	c := &cobra.Command{Use: "orchestrate", Short: "Manage opt-in orchestrators with durable checkpoints"}
-	c.AddCommand(newFollowCommand())
+	c.AddCommand(newFollowCommand(), newSwarmCommand(), newOrchestrateTemplateCommand())
 	var file string
 	var dry bool
 	var scopeOwner, seed string
-	apply := &cobra.Command{Use: "apply -f FILE", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	apply := &cobra.Command{Use: "apply -f FILE", Short: "Apply an orchestrator spec or TOML wrapper template", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		b, e := os.ReadFile(file)
 		if e != nil {
 			return e
+		}
+		if strings.EqualFold(filepath.Ext(file), ".toml") {
+			cmd.SilenceUsage = true
+			if scopeOwner != "" || seed != "" {
+				return fmt.Errorf("TOML templates do not support --scope-only-owner or --seed-checkpoint")
+			}
+			return applySwarmTemplate(cmd, string(b), dry)
 		}
 		if b, e = resolveSpecPaths(file, b); e != nil {
 			return e
@@ -141,7 +148,7 @@ func newOrchestrateCommand() *cobra.Command {
 		fmt.Fprintln(cmd.OutOrStdout(), "applied", s.Name)
 		return nil
 	}}
-	apply.Flags().StringVarP(&file, "file", "f", "", "Markdown spec")
+	apply.Flags().StringVarP(&file, "file", "f", "", "Markdown spec or TOML wrapper template")
 	_ = apply.MarkFlagRequired("file")
 	apply.Flags().StringVar(&scopeOwner, "scope-only-owner", "", "Register admission scope only; configured owner host controls lifecycle")
 	apply.Flags().BoolVar(&dry, "dry-run", false, "Validate without writing state or launching a session")

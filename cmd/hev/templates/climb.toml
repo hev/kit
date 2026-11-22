@@ -1,0 +1,21 @@
+kind = "climb"
+name = "example-climb"
+goal = "Improve the score on a pinned objective"
+host = "scoring-host"
+reply = "owner-session"
+brief = "Describe the goal and constraints for each generation."
+
+[climb]
+repo = "example-repo"
+base = "main"
+
+[climb.objective]
+scorer = "example-metric"
+direction = "max"
+
+[climb.population]
+width = 4
+top_k = 2
+
+[climb.stop]
+max_generations = 10

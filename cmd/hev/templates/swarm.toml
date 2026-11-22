@@ -1,0 +1,28 @@
+kind = "swarm"
+name = "example-swarm"
+goal = "Deliver the change described in the brief"
+reply = "owner-session"
+every = "10m"
+max_lifetime = "1d"
+brief = '''
+## Problem
+Describe what the workers should deliver.
+
+## Role: implement
+Implement the requested change.
+
+### Acceptance
+The relevant tests pass.
+'''
+
+[budget]
+concurrent_runs = 2
+
+[[roles]]
+name = "implement"
+shape = "single"
+
+[roles.order]
+repo = "example-repo"
+base = "main"
+validation = "none"
