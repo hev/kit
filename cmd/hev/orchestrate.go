@@ -34,6 +34,7 @@ func newOrchestrateCommand() *cobra.Command {
 			return e
 		}
 		if strings.EqualFold(filepath.Ext(file), ".toml") {
+			cmd.SilenceUsage = true
 			if scopeOwner != "" || seed != "" {
 				return fmt.Errorf("TOML templates do not support --scope-only-owner or --seed-checkpoint")
 			}
