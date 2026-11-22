@@ -11,6 +11,8 @@ surface / Open questions.
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
 | [0027](0027-previews.md) | Private previews (`[[preview]]` and `hev preview`) | Implemented | Unify bespoke site preview scripts into one cross-OS, Tailscale-only Go command with atomic bounded builds. |
+| [0026](0026-metrics.md) | Native cluster metrics export in hevd | Implemented | Emit allowlisted SWIM, secrets-quota, orchestrator, and cron gauges natively over loopback/Tailscale DogStatsD and Prometheus `/metrics`, retiring external Python metrics scripts. |
+| [0025](0025-services.md) | Native services in hevd | Implemented | Long-lived services share the daemon secrets cache, redacted ring logs, attention notices and optional SWIM active-standby placement across macOS, Linux and Windows. |
 | [0024](0024-workspaces.md) | Workspaces | Proposed | Scope host routing, harness subscriptions and storage to a workspace. |
 | [0024](0024-licensing.md) | Offline Kit Pro licenses | Implemented | Distinct Ed25519 verification and local entitlement for Kit Pro. |
 | [0023](0023-climb.md) | `hev climb` — multi-day hill climbing on a scored goal | Proposed | A meta-harness can spend agent-hours for days on its own hosts and plans; the missing piece is the loop: a pinned numeric objective (an RFC 0021 `metric` scorer), a population of branches, selection, paced budgets, and control rules so the fleet cannot dispatch, merge or grade itself. |

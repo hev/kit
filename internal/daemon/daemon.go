@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/cluster"
 	"github.com/hev/kit/internal/cron"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
@@ -21,10 +22,12 @@ import (
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/license"
+	"github.com/hev/kit/internal/metrics"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/services"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -103,7 +106,15 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cache, membership, stopSidecars := startSecretSidecars(ctx, logger)
+	configuredMetrics, err := metrics.Load(DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+	configuredServices, err := services.Load(DefaultConfigPath())
+	if err != nil {
+		return err
+	}
+	cache, clusterSvc, membership, stopSidecars := startSecretSidecars(ctx, logger)
 	defer stopSidecars()
 	licenseCtx, stopLicense := context.WithCancel(ctx)
 	defer stopLicense()
@@ -181,6 +192,27 @@ func Run(ctx context.Context) error {
 		},
 	}
 	defer cronRunner.Start(ctx, configuredCron)()
+	serviceSupervisor := services.Supervisor{
+		Home: home,
+		Membership: services.Membership{
+			Self:    membership.Self,
+			Enabled: membership.Enabled,
+			Members: membership.Members,
+		},
+		Logger: logger,
+		Resolve: func(ctx context.Context, refs []secrets.Ref) (map[string]string, error) {
+			return cache.ResolveAs(ctx, "hevd service", refs)
+		},
+		Notice: func(ctx context.Context, notice attention.Notice) error {
+			return attention.Default().Emit(ctx, notice, "")
+		},
+	}
+	stopServices, err := serviceSupervisor.Start(ctx, configuredServices)
+	if err != nil {
+		return err
+	}
+	defer stopServices()
+	defer startMetrics(ctx, configuredMetrics, cache, clusterSvc, membership, cronRunner, configuredCron, logger)()
 	outcomeCursor := ""
 	archive := target.Archive()
 	run := func() {
@@ -398,17 +430,17 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 
 // The optional secrets sidecar must never prevent trace capture from starting.
 func startSecrets(ctx context.Context, logger *slog.Logger) func() {
-	_, _, stop := startSecretSidecars(ctx, logger)
+	_, _, _, stop := startSecretSidecars(ctx, logger)
 	return stop
 }
 
-func startSecretSidecars(ctx context.Context, logger *slog.Logger) (*secrets.Cache, cron.Membership, func()) {
+func startSecretSidecars(ctx context.Context, logger *slog.Logger) (*secrets.Cache, *cluster.Service, cron.Membership, func()) {
 	cache := secrets.New()
 	closeSecrets, err := secrets.Serve(ctx, cache)
-	membership, closeCluster := startCluster(ctx, cache, logger)
+	clusterSvc, membership, closeCluster := startCluster(ctx, cache, logger)
 	if err != nil {
 		logger.Warn("secrets endpoint unavailable; direct resolution remains available")
-		return cache, membership, closeCluster
+		return cache, clusterSvc, membership, closeCluster
 	}
-	return cache, membership, func() { closeCluster(); closeSecrets() }
+	return cache, clusterSvc, membership, func() { closeCluster(); closeSecrets() }
 }
