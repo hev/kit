@@ -1,7 +1,7 @@
 # Verified standard API list rates, USD per million tokens.
 # Current rows observed 2026-09-08; separately sourced historical rows below.
 # Reasoning is included in output. hev cost leaves unknown models/dates
-# unpriced; traces show them as $0 or approximate (the cost-rate sources on hev board).
+# unpriced; traces show them as $0 or approximate (https://hevkit.com/docs/cost-attribution).
 
 [[rates]]
 model = "gpt-6-astra"
@@ -68,7 +68,7 @@ source = "https://platform.claude.com/docs/en/about-claude/pricing"
 creation_1h = 10
 
 # Historical standard rates: dated launch/amendment plus the provider's
-# dated universal cache policy. See the cost-rate sources on hev board.
+# dated universal cache policy. See https://hevkit.com/docs/cost-attribution.
 # Historical 1h writes require the separate August 23 evidence below.
 [[rates]]
 model = "claude-sonnet-5"
@@ -123,7 +123,7 @@ output = 50
 source = "https://platform.claude.com/docs/en/release-notes/overview"
 
 # November 2026 additions. Dated launch notes set base rates; cache categories
-# follow each provider's stated multiplier. See the cost-rate sources on hev board.
+# follow each provider's stated multiplier. See https://hevkit.com/docs/cost-attribution.
 
 # Claude Opus 5.5: September 22 release note dates $4/$20. Writes follow the
 # dated 1.25x/2x cache policy; reads are the pricing table's 0.05x footnote.

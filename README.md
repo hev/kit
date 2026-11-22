@@ -50,14 +50,14 @@ hev s
 On a terminal, the first `hev up` on a new machine runs `hev onboard`: pick the
 agent harnesses kit found, confirm the workspace (default `~/workspace`), and
 it creates the data directories, starts kit and opens the Picker when one is
-installed ([onboarding](https://hevkit.com/docs/quickstart)). Without a terminal, or with
+installed ([onboarding](https://hevkit.com/docs/onboard)). Without a terminal, or with
 `hev up --non-interactive`, it asks nothing and takes the defaults.
 
 kit keeps its data under `~/.hev/<surface>/`: `traces`, `board`, `orders`
 (dispatch run records), `peers`, `hooks` and `evidence`, one directory per
 hev layer `/v1` surface. A machine set up before this layout keeps its
 `~/.hev/archive`, `~/dispatch` and `~/.local/state/peers-v2`; see
-[the trace archive](https://hevkit.com/docs/traces#where-traces-are-kept) for the rule.
+[the trace archive](https://hevkit.com/docs/trace-archive#where-it-lives) for the rule.
 
 `hev up` also writes `~/.config/hev/dispatch.toml` when there is none, naming
 this machine as host `here`, so dispatch works with no hand-edited TOML. It
@@ -122,7 +122,7 @@ the capture daemon. Follow work with `hev dispatch logs`, inspect it with
 `hev dispatch amend` while keeping its name, branch, and PR.
 Review a run's branch with `hev review`, which opens it in
 [hunk](https://hunk.dev) with the worker's and reviewers' anchored notes, and
-send your own notes back with `hev review send`; see [review](https://hevkit.com/docs/dispatch).
+send your own notes back with `hev review send`; see [review](https://hevkit.com/docs/review).
 An order can name a context recipe (`context: PATH`); dispatch builds an
 explicit, reproducible context bundle at launch, gives it to the worker, and
 records its digest on the run. `hev context` assesses, builds, compares and
@@ -142,7 +142,7 @@ the target enforces its own capacity. Upgrade receiving hosts to
 0.6 before relying on this policy. See [repository admission](https://hevkit.com/docs/admission).
 Invited teammates can add and remove repositories themselves only when the owner sets
 `[admission] add_from` and grants them `repos`; see
-[teammate-added repositories](https://hevkit.com/docs/hosts).
+[teammate-added repositories](https://hevkit.com/docs/nodes#teammate-added-repositories).
 
 ## Peers
 
@@ -158,7 +158,7 @@ agent loop routed through OpenRouter in a TUI with a model picker (`Ctrl+M`),
 mid-thread model switching, a composable system prompt and first-class
 `hev_dispatch`, `hev_peers`, `hev_board`, `hev_traces` and `hev_status` tools
 rendered as cards. Tools run YOLO (no approval prompts); back-of-house work
-stays on `claude`, `codex` and `agy`. See [hev foh](https://hevkit.com/docs/dispatch).
+stays on `claude`, `codex` and `agy`. See [hev foh](https://hevkit.com/docs/foh-harness).
 
 ## Board
 
@@ -178,7 +178,7 @@ computer-use and spike runs: screenshots, short videos (MP4, WebM, MOV up to
 package is a folder under `~/.hev/evidence` with a `manifest.json`; files are
 checked by their bytes, text is scrubbed of secrets before it is written, and
 `hev evidence search` matches words. `hev s` reports what each surface uses
-on disk under `~/.hev`. See [evidence](https://hevkit.com/docs/cli).
+on disk under `~/.hev`. See [evidence](https://hevkit.com/docs/evidence).
 
 ## App traces
 
@@ -186,11 +186,11 @@ on disk under `~/.hev`. See [evidence](https://hevkit.com/docs/cli).
 OTLP/HTTP, sent with the `@hevmind/trace` package) and serves the app's agent
 tools a search over each user's past turns and a memory board. With no Layer
 key it keeps them in the file archive and searches with grep; with a key, in
-hev layer. See [app traces and memory](https://hevkit.com/docs/traces).
+hev layer. See [app traces and memory](https://hevkit.com/docs/app-traces).
 
 ## Traces
 
-Hevd can also run an opt-in [encrypted membership cluster](https://hevkit.com/docs/hosts)
+Hevd can also run an opt-in [encrypted membership cluster](https://hevkit.com/docs/cluster)
 with liveness and shared usage facts.
 
 The daemon captures coding sessions into a searchable archive. With no hev
@@ -199,7 +199,7 @@ redacted sessions to a file archive under `~/.hev/traces/`, `hev serve` runs
 as a service for the dashboard on `http://127.0.0.1:8099` (two tabs: Traces,
 and a read-only Board over `~/.hev/board`), and search is grep
 (`rg` when it is installed): a hit contains every word you type, not
-something that means the same (see [the trace archive](https://hevkit.com/docs/traces#where-traces-are-kept)).
+something that means the same (see [the trace archive](https://hevkit.com/docs/trace-archive)).
 A config from the retired local Postgres lane is moved to files on the next
 `hev up`, exporting its rows when its containers start. To use the shared hosted archive
 on [hev layer](https://hevlayer.com), export `HEVLAYER_API_KEY` and run
@@ -208,18 +208,20 @@ dashboard. Saved targets are reused; select `--store`
 explicitly to move an existing archive setup. `HEVLAYER_ENDPOINT` and `HEVLAYER_NAMESPACE` select
 the gateway and archive. Bring-your-own Turbopuffer is hosted-only. See
 [hosted setup](https://hevkit.com/docs/kit-and-layer).
-Capture reads Claude Code, Codex, Pi, OpenCode, Antigravity (`agy`) and dot sessions from their usual local
+Capture reads Claude Code, Codex, [Pi](https://hevkit.com/docs/native-pi),
+[OpenCode](https://hevkit.com/docs/native-opencode), Antigravity (`agy`) and dot sessions from their usual local
 stores. Use `hev traces search` to find prior work, `hev traces show` to read a session,
-`hev traces ls` to list captured sessions, and [`hev traces stats`](https://hevkit.com/docs/traces)
+`hev traces ls` to list captured sessions, and [`hev traces stats`](https://hevkit.com/docs/traces-stats)
 to count skill loads, tool use and dispatch health across them. `hev d` starts capture and
 `hev s` reports its status. `hev down` stops capture and the dashboard service and
 preserves the archive.
 
 Secret scrubbing is enabled by default, but source transcripts remain raw and
 scrubbing cannot cover every kind of sensitive data. Treat transcripts, the
-archive, and configuration as sensitive. Read the archive redaction migration
-notes on `hev board` before upgrading an existing archive. See the
-[traces guide](https://hevkit.com/docs/traces#sensitive-data) for handling captured data.
+archive, and configuration as sensitive. Read
+[redaction and archive upgrades](https://hevkit.com/docs/archive-redaction)
+before upgrading an existing archive. See [instruction capture](https://hevkit.com/docs/skill-capture)
+and [session enrichment](https://hevkit.com/docs/session-backfill) for more ways to use the record.
 
 ## Secrets
 
@@ -261,7 +263,7 @@ bundled skills using `[[skills.sources]]` in the HEV config and
 Popular skill packs go on a short, pinned shelf instead of into every
 session. A pack is installed at a reviewed commit but stays inactive until a
 dispatch run enables some of its skills with `skills: [pack/skill, ...]` in
-the order. See [the skills shelf](https://hevkit.com/docs/order-reference).
+the order. See [the skills shelf](https://hevkit.com/docs/skills-shelf).
 
 ```sh
 hev skills add cursor/plugins//pstack --kind mode   # pin and install, not active

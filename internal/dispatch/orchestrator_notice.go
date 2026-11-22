@@ -37,7 +37,7 @@ type OrchestratorNotice struct {
 	Lease time.Time `json:"lease,omitempty"`
 	// Attention is the typed notice behind this receipt, when it is a
 	// needs-you moment. A host that pulls the receipt re-emits it there
-	// (https://hevkit.com/docs/config-reference), so Slack works from pull-route hosts too.
+	// (https://hevkit.com/docs/notify), so Slack works from pull-route hosts too.
 	Attention *attention.Notice `json:"attention,omitempty"`
 }
 

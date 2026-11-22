@@ -11,7 +11,7 @@ import (
 	"github.com/hev/kit/internal/attention"
 )
 
-// Attention notices (https://hevkit.com/docs/config-reference). Emission happens on the host where the
+// Attention notices (https://hevkit.com/docs/notify). Emission happens on the host where the
 // moment happens; it runs hook handlers and, with [notify.slack], posts to
 // Slack. It never fails a run or a round. Tests replace emitAttention.
 var emitAttention = func(n attention.Notice, stateDir string) {

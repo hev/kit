@@ -35,7 +35,7 @@ new write and generated model output are scrubbed too.
 
 Existing archives are rewritten by the first enabled `index.Run` or
 `index.Summarize` for each Claude/Codex source root. See
-the archive redaction migration notes on `hev board` for cleanup,
+[archive upgrade handling](https://hevkit.com/docs/archive-redaction) for cleanup,
 completion, retries, source loss and ownership errors. `Version` and
 `Scrubber.Identity()` identify the policy and salt in migration journals.
 

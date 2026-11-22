@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hevkit.com/schemas/attention_event.schema.json",
   "title": "hev.attention.event/v1",
-  "description": "One attention notice (https://hevkit.com/docs/config-reference): a moment a person must look at a dispatch run, orchestrator, swarm or steer, or the opt-in ready and done kinds. Kit emits it on the host where it happens. hev-hook-NAME handlers on PATH receive it whole on stdin as the run-lifecycle event named by `event` (argument and HEV_HOOK_EVENT; HEV_HOOK_HARNESS is kit). Handler output is ignored. The same record is what [notify.slack] posts and what a pulled owner receipt carries.",
+  "description": "One attention notice (https://hevkit.com/docs/notify): a moment a person must look at a dispatch run, orchestrator, swarm or steer, or the opt-in ready and done kinds. Kit emits it on the host where it happens. hev-hook-NAME handlers on PATH receive it whole on stdin as the run-lifecycle event named by `event` (argument and HEV_HOOK_EVENT; HEV_HOOK_HARNESS is kit). Handler output is ignored. The same record is what [notify.slack] posts and what a pulled owner receipt carries.",
   "type": "object",
   "required": ["schema", "id", "time", "event", "source", "name", "host", "text", "thread"],
   "properties": {

@@ -63,7 +63,7 @@ collector's key may write and read. Spans without an allowed namespace are
 refused; API calls name a namespace and read only it. A namespace's turns
 live in the Layer (or archive) namespace <--traces-namespace>-<namespace>, for
 example hev-app-traces-story-prod. It runs no transcript tailing, dispatch, peers or
-dashboard. See https://hevkit.com/docs/traces.`,
+dashboard. See https://hevkit.com/docs/app-traces.`,
 	Args: cobra.NoArgs,
 	RunE: runCollect,
 }

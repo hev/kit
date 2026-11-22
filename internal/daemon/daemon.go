@@ -299,7 +299,7 @@ func scanLoop(ctx context.Context, gate func(context.Context) error, run func(),
 				return nil
 			}
 			run()
-			// Retry Slack notices nothing else woke for (https://hevkit.com/docs/config-reference).
+			// Retry Slack notices nothing else woke for (https://hevkit.com/docs/notify).
 			attention.Flush(ctx)
 			feed.Wake()
 			if AfterCycle != nil && AfterCycle(ctx, logger) {
