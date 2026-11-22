@@ -10,6 +10,7 @@ surface / Open questions.
 
 | RFC | Title | State | Why now |
 |-----|-------|-------|---------|
+| [0027](0027-previews.md) | Private previews (`[[preview]]` and `hev preview`) | Implemented | Unify bespoke site preview scripts into one cross-OS, Tailscale-only Go command with atomic bounded builds. |
 | [0026](0026-metrics.md) | Native cluster metrics export in hevd | Implemented | Emit allowlisted SWIM, secrets-quota, orchestrator, and cron gauges natively over loopback/Tailscale DogStatsD and Prometheus `/metrics`, retiring external Python metrics scripts. |
 | [0025](0025-services.md) | Native services in hevd | Implemented | Long-lived services share the daemon secrets cache, redacted ring logs, attention notices and optional SWIM active-standby placement across macOS, Linux and Windows. |
 | [0024](0024-workspaces.md) | Workspaces | Proposed | Scope host routing, harness subscriptions and storage to a workspace. |
