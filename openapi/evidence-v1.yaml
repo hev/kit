@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: hev kit Pro API — Evidence and Federated Search (/v1 additive spec)
   version: 1.0.0-draft
-  summary: Additive /v1/evidence/* multimodal evidence surface and /v1/search federated retrieval API (RFC 0022).
+  summary: Hosted evidence persistence and planned retrieval routes (RFC 0022).
   description: |
     Additive OpenAPI 3.1 contract for **Evidence** (kit's 6th data surface) and
     **Federated Search** (`/v1/search`), designed to merge into
@@ -14,7 +14,14 @@ info:
       (unified text, image, and video vector space; model-agnostic wire contract)
       plus `/v1/search` federated across `traces`, `board`, and `evidence`.
 
-    Reuses all `openapi/kit-v1.yaml` conventions: `Authorization: Bearer <HEV_API_KEY>`,
+    The initial hosted persistence slice implements package create, list,
+    read, patch and evaluation, direct blob upload, limits and blob reads.
+    Its direct upload cap is 10 MiB (text 5 MiB, video 60 seconds). S3-enabled deployments
+    support staged video over 10 MiB through 100 MiB.
+    Deletion, multimodal search and federated search are planned.
+    The persistence slice uses machine bearer keys.
+
+    Reuses `openapi/kit-v1.yaml` conventions: `Authorization: Bearer <HEV_API_KEY>`,
     cursor pagination (`Page`), `ErrorResponse`, `SearchMeta`, ISO-8601 UTC
     timestamps, `Idempotency-Key`, and additive-only `/v1` evolution.
 
@@ -71,7 +78,7 @@ paths:
       tags: [Evidence]
       operationId: listEvidencePackages
       summary: List evidence packages, newest first
-      description: Packages ordered by `created_at` descending, then `id`.
+      description: The persistence slice lists by descending ULID and accepts cursor and limit (maximum 20). Other filters are planned.
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
@@ -111,10 +118,13 @@ paths:
       tags: [Evidence]
       operationId: getEvidencePackage
       summary: Read one evidence package
-      description: Returns the full `EvidencePackage`, including ordered items, blob/poster URLs, and claims.
+      description: Returns the manifest, including ordered items, blob URLs and claims, with a strong ETag for conditional updates.
       responses:
         '200':
           description: Package detail.
+          headers:
+            ETag:
+              schema: {type: string}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/EvidencePackage'}
@@ -127,7 +137,10 @@ paths:
       description: |
         Appends `add_items` or `add_claims`, updates `title`/`summary`/`tags`,
         or transitions `state` from `open` to `sealed`. Mutating a `sealed`
-        package returns `409` (`conflict`).
+        package returns `409` (`conflict`). Only the package owner can edit.
+      parameters:
+        - $ref: '#/components/parameters/EvidenceIfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -145,6 +158,8 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {$ref: '#/components/responses/Conflict'}
         '422': {$ref: '#/components/responses/Unprocessable'}
+        '412': {description: Stale revision.}
+        '428': {description: If-Match required.}
     delete:
       tags: [Evidence]
       operationId: deleteEvidencePackage
@@ -158,6 +173,41 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+
+  /v1/evidence/{id}/evaluation:
+    parameters:
+      - $ref: '#/components/parameters/EvidenceId'
+    put:
+      tags: [Evidence]
+      operationId: updateEvidenceEvaluation
+      summary: Conditionally enrich an open or sealed package
+      description: |
+        Requires a tenant-enrolled evaluator. Replaces only the evaluation
+        projection, preserving the manifest bytes, seal and blob hashes.
+        An identical projection with the current ETag does not advance it.
+      parameters:
+        - $ref: '#/components/parameters/EvidenceIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EvidenceEvaluation'}
+      responses:
+        '200':
+          description: Package with the evaluation projection and current revision.
+          headers:
+            ETag:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EvidencePackage'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '412': {description: Stale revision.}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '428': {description: If-Match required.}
 
   /v1/evidence/search:
     get:
@@ -271,10 +321,12 @@ paths:
     post:
       tags: [Evidence blobs]
       operationId: createEvidenceBlobUpload
-      summary: Initiate a staged/presigned upload for larger videos or artifacts
+      summary: Initiate a presigned S3 upload for a larger video
       description: |
         Returns a short-lived presigned upload URL so clips up to 100 MiB stream
-        straight to object storage without buffering through the API gateway.
+        straight to private object storage. Send only the returned headers on the S3
+        PUT. The URL expires within 15 minutes and must be kept private.
+        A deployment with staging disabled returns 404.
         Call `POST /v1/evidence/blobs/uploads/{upload_id}/complete` once bytes
         are uploaded.
       requestBody:
@@ -290,7 +342,11 @@ paths:
               schema: {$ref: '#/components/schemas/EvidenceBlobUpload'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
 
   /v1/evidence/blobs/uploads/{upload_id}/complete:
     parameters:
@@ -304,22 +360,20 @@ paths:
       summary: Finalize a staged media upload
       description: |
         Verifies sha256, sniffs media container and dimensions/duration (refusing
-        clips over `max_video_duration_ms`), generates a poster thumbnail for
-        videos, and promotes the object into content-addressed storage.
+        clips over `max_video_duration_ms`), and promotes the object into
+        content-addressed storage. Repeated completion before grant expiry
+        returns the same blob.
       responses:
         '200':
-          description: Blob already existed; deduplicated.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/EvidenceBlob'}
-        '201':
-          description: Blob verified and stored.
+          description: Blob verified and stored or deduplicated.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/EvidenceBlob'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
         '415': {$ref: '#/components/responses/UnsupportedMediaType'}
         '422': {$ref: '#/components/responses/Unprocessable'}
@@ -433,6 +487,11 @@ components:
       description: A kit API key (`HEV_API_KEY`, or `[kit] key` from `hev login`). Never sent to a redirect target.
 
   parameters:
+    EvidenceIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema: {type: string}
     Cursor:
       name: cursor
       in: query
@@ -803,10 +862,71 @@ components:
           const: sealed
           description: Transition an `open` package to `sealed`.
 
+    EvidenceEvaluation:
+      type: object
+      additionalProperties: false
+      required: [schema, evaluation_id, policy_version, observed_at, outcome, score, reason, source, provenance, learning]
+      properties:
+        schema: {const: 'hev.evaluation/v1'}
+        evaluation_id: {$ref: '#/components/schemas/EvaluationIdentifier'}
+        policy_version: {$ref: '#/components/schemas/EvaluationIdentifier'}
+        observed_at: {$ref: '#/components/schemas/Timestamp'}
+        outcome: {enum: [merged, closed_unmerged, active, stale, superseded, corrected, reverted]}
+        score: {type: [number, 'null'], minimum: -1, maximum: 1}
+        reason: {type: string, maxLength: 1000}
+        source:
+          type: object
+          additionalProperties: false
+          required: [provider, organization, repository, pr_id, revision, event_id]
+          properties:
+            provider: {enum: [github, azure_devops]}
+            organization: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            project: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            repository: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            pr_id: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            revision: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            event_id: {$ref: '#/components/schemas/EvaluationIdentifier'}
+          if:
+            properties:
+              provider: {const: azure_devops}
+          then:
+            required: [project]
+        provenance:
+          type: object
+          additionalProperties: false
+          required: [order_id, attempt_id, trace_session_ids, evidence_ids]
+          properties:
+            order_id: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            attempt_id: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            trace_session_ids:
+              type: array
+              maxItems: 32
+              items: {$ref: '#/components/schemas/EvaluationIdentifier'}
+            evidence_ids:
+              type: array
+              maxItems: 32
+              items: {$ref: '#/components/schemas/EvidenceId'}
+        learning:
+          type: object
+          additionalProperties: false
+          required: [status]
+          properties:
+            status: {enum: [pending, recorded, none, failed, disabled]}
+            refs:
+              type: array
+              maxItems: 16
+              items: {$ref: '#/components/schemas/EvaluationIdentifier'}
+    EvaluationIdentifier:
+      type: string
+      minLength: 1
+      maxLength: 200
+
     EvidencePackageSummary:
       type: object
       required: [schema, id, state, title, item_counts, created_at, updated_at]
       properties:
+        content_sha256: {$ref: '#/components/schemas/Sha256'}
+        evaluation: {$ref: '#/components/schemas/EvidenceEvaluation'}
         schema: {type: string, const: 'hev.evidence.package/v1'}
         id: {$ref: '#/components/schemas/EvidenceId'}
         state: {$ref: '#/components/schemas/EvidenceState'}
@@ -890,15 +1010,16 @@ components:
 
     EvidenceBlobUploadCreate:
       type: object
-      required: [size, sha256]
+      required: [size, sha256, content_type]
       properties:
-        size: {type: integer, format: int64, minimum: 1, maximum: 104857600}
+        size: {type: integer, format: int64, minimum: 10485761, maximum: 104857600}
         sha256: {$ref: '#/components/schemas/Sha256'}
-        modality: {$ref: '#/components/schemas/EvidenceModality'}
+        modality: {type: string, enum: [video]}
+        content_type: {type: string, enum: [video/mp4, video/quicktime, video/webm]}
 
     EvidenceBlobUpload:
       type: object
-      required: [upload_id, upload_url, method, expires_at]
+      required: [upload_id, upload_url, method, headers, expires_at]
       properties:
         upload_id: {type: string, pattern: '^evu_[0-9a-z]{26}$'}
         upload_url: {type: string, format: uri}

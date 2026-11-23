@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +22,27 @@ const evidenceNotice = "Local evidence search matches words in titles, summaries
 func init() { rootCmd.AddCommand(newEvidenceCommand()) }
 
 // openEvidence is the local evidence folder with kit's hooks wired.
-var openEvidence = func(cmd *cobra.Command) (*evidence.Store, error) {
+type evidenceStore interface {
+	Create(evidence.Meta) (*evidence.Package, error)
+	Put(evidence.Meta, []evidence.ItemInput, []evidence.ClaimInput) (*evidence.Package, error)
+	AddItem(string, evidence.ItemInput) (*evidence.Package, *evidence.Item, error)
+	AddClaim(string, evidence.ClaimInput) (*evidence.Package, *evidence.Claim, error)
+	Seal(string) (*evidence.Package, error)
+	List(evidence.Filter) ([]evidence.Summary, error)
+	Load(string) (*evidence.Package, error)
+	Path(string) string
+	Export(string, string) (*evidence.Package, error)
+	Verify(string) (*evidence.Package, error)
+	Search(context.Context, evidence.SearchQuery) (*evidence.SearchResponse, error)
+}
+
+var openEvidence = func(cmd *cobra.Command) (evidenceStore, error) {
+	if hosted, err := hostedEvidence(cmd.Context()); err != nil || hosted != nil {
+		if err != nil {
+			return nil, err
+		}
+		return hosted, nil
+	}
 	s, err := evidence.Open(evidence.Root())
 	if err != nil {
 		return nil, err
@@ -465,7 +486,7 @@ func evidenceLsCmd() *cobra.Command {
 				return writeEvidenceJSON(cmd.OutOrStdout(), map[string]any{"data": list, "next_cursor": nil})
 			}
 			if len(list) == 0 {
-				fmt.Fprintf(cmd.ErrOrStderr(), "no evidence packages in %s\n", s.Root)
+				fmt.Fprintf(cmd.ErrOrStderr(), "no evidence packages in %s\n", s.Path(""))
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
