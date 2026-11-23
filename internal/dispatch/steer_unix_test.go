@@ -4,6 +4,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
