@@ -1,7 +1,7 @@
 # Cut a release: macOS/Linux tarballs and a Windows zip on the GitHub release, the dashboard image on
 # Docker Hub, and the Homebrew formula in hev/homebrew-tap.
 #
-# Started by Adam publishing the draft release (docs/runbooks/release-train.md).
+# Started by Adam publishing the draft release (the release-train runbook on hev board).
 # Publishing is the human decision: it creates the tag vX.Y.Z at the commit the
 # draft targets, and the `release: published` event starts this run. A release
 # is not cut by pushing a tag any more: a tag created by publishing a release
@@ -67,7 +67,7 @@ jobs:
           case "$draft" in
             false) ;;
             true) echo "::error::$TAG is still a draft. Publishing it is Adam's step."; exit 1 ;;
-            *) echo "::error::No release for $TAG. Releases start from the draft (docs/runbooks/release-train.md)."; exit 1 ;;
+            *) echo "::error::No release for $TAG. Releases start from the draft (the release-train runbook on hev board)."; exit 1 ;;
           esac
           # Only the newest release moves :latest. A patch on an older line
           # (v0.6.3 after v0.7.0) must not.
@@ -112,9 +112,7 @@ jobs:
             --push .
 
       # The release already exists: Adam published it. Attach the assets
-      # (--clobber makes a re-run replace them) and swap the draft's private
-      # docs-preview section for hevkit.com links. Everything above that
-      # section is the notes Adam read, re-rendered from the same commit.
+      # (--clobber replaces them on a rerun) and render the final notes from the tag.
       - name: Attach assets and finalize the notes
         env:
           GH_TOKEN: ${{ github.token }}

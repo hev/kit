@@ -7,8 +7,8 @@
 
 Both print one pass/fail table (and append it to $GITHUB_STEP_SUMMARY when
 set) and exit 1 if any row failed. Neither writes anything to GitHub, Docker
-Hub or the tap: every remote call is a read. The process is
-docs/runbooks/release-train.md.
+Hub or the tap. Every remote call is a read. See
+the release-train runbook on hev board.
 """
 from __future__ import annotations
 
@@ -36,9 +36,7 @@ ARCHIVES = ["darwin_arm64.tar.gz", "darwin_amd64.tar.gz", "linux_arm64.tar.gz",
 # Every X.Y.Z on these pages must be the release being cut. History belongs in
 # the changelog, which is checked separately.
 DOCS_PIN_FILES = ["install.mdx", "index.mdx", "windows.mdx", "invited.mdx", "join-a-host.mdx"]
-SITE_DOCS = ROOT / "site/src/content/docs"
 PLANNED = re.compile(r"^#{1,6}\s.*\bplanned\b", re.I | re.M)
-TRAIN_DOCS_DECL = re.compile(r"^<!--\s*train-docs:\s*(\S+)\s*-->\s*$", re.M)
 VERSIONISH = re.compile(r"(?<![\d.])v?(\d+\.\d+\.\d+)(?!\.?\d)")
 
 
@@ -109,7 +107,7 @@ def gh_json(*args):
 
 def notes_problems(text: str | None, version: str) -> list[str]:
     if text is None:
-        return [f"docs/releases/v{version}.md does not exist"]
+        return [f"releases/v{version}.md does not exist"]
     problems = []
     if PLANNED.search(text):
         problems.append("still has a 'Planned' section; delete it (or move shipped items up) before publishing")
@@ -142,13 +140,6 @@ def changelog_problem(docs_dir: Path, version: str) -> str | None:
     return None
 
 
-def train_docs_branch(notes: str | None, version: str) -> str:
-    """Same rule as release-draft.py: the notes file's train-docs line, else train/vX.Y-docs."""
-    m = TRAIN_DOCS_DECL.search(notes or "")
-    if m:
-        return m.group(1)
-    major, minor, _ = version.split(".")
-    return f"train/v{major}.{minor}-docs"
 
 
 def train_branch(version: str) -> str:
@@ -210,6 +201,20 @@ def marker(body: str) -> dict | None:
     return {"version": m.group(1), "base": m.group(2), "source": m.group(3)} if m else None
 
 
+def check_site_docs(t: Table, version: str, checkout: Path | None) -> None:
+    if checkout is None:
+        t.add("docs", "changelog and docs pin", "SKIP", "check in hev/kit-cloud or supply --site-checkout")
+        return
+    docs = checkout / "site/src/content/docs"
+    if not docs.is_dir():
+        t.add("docs", "changelog and docs pin", "FAIL", "checkout lacks site/src/content/docs")
+        return
+    problem = changelog_problem(docs, version)
+    t.add("docs", f"changelog has {version}", "FAIL" if problem else "PASS", problem or "")
+    pins = docs_pin_problems(docs, version)
+    t.add("docs", f"install and download pages pin {version}", "FAIL" if pins else "PASS", "; ".join(pins))
+
+
 # --- preflight ---------------------------------------------------------------
 
 
@@ -225,10 +230,10 @@ def preflight(version: str, args) -> Table:
         t.add("source", f"tag {tag} not yet created", "FAIL" if out else "PASS",
               "the tag exists: this version is already released" if out else "")
 
-    notes_path = ROOT / f"docs/releases/{tag}.md"
+    notes_path = ROOT / f"releases/{tag}.md"
     notes_text = notes_path.read_text() if notes_path.exists() else None
     problems = notes_problems(notes_text, version)
-    t.add("notes", f"docs/releases/{tag}.md is final", "FAIL" if problems else "PASS", "; ".join(problems))
+    t.add("notes", f"releases/{tag}.md is final", "FAIL" if problems else "PASS", "; ".join(problems))
 
     if args.skip_go:
         t.add("go", "vet, windows vet, test", "SKIP", "--skip-go (CI ran them on this commit)")
@@ -263,13 +268,7 @@ def preflight(version: str, args) -> Table:
                 rc, out = run(["docker", "run", "--rm", f"kit-preflight:{version}", "version"])
                 t.add("image", f"image's hev reports {version}", "PASS" if out == version else "FAIL", out)
 
-    if SITE_DOCS.exists():
-        p = changelog_problem(SITE_DOCS, version)
-        t.add("docs", f"changelog has {version}", "FAIL" if p else "PASS", p or "")
-        pins = docs_pin_problems(SITE_DOCS, version)
-        t.add("docs", f"install and download pages pin {version}", "FAIL" if pins else "PASS", "; ".join(pins))
-    else:
-        t.add("docs", "changelog and docs pin", "SKIP", "site/ is not on this branch yet; check the site branch by hand")
+    check_site_docs(t, version, args.site_checkout)
 
     train = train_branch(version)
     run(["git", "fetch", "--quiet", "origin", f"+refs/heads/main:refs/remotes/origin/main",
@@ -282,15 +281,6 @@ def preflight(version: str, args) -> Table:
     problems = dependabot_problems(dep.read_text() if dep.exists() else None, version)
     t.add("source", "Dependabot targets the next train (X.Y.0 only)", "FAIL" if problems else "PASS",
           "; ".join(problems))
-
-    branch = train_docs_branch(notes_text, version)
-    rc, out = run(["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"])
-    if rc != 0:
-        t.add("docs", f"train docs branch {branch} closed", "FAIL", out)
-    else:
-        t.add("docs", f"train docs branch {branch} closed", "FAIL" if out else "PASS",
-              "still on origin: move its remaining pages to the next train's branch, close its PR "
-              f"and delete the branch; the preview then follows {train}" if out else "")
 
     if args.draft:
         draft_check(t, version, head)
@@ -433,6 +423,7 @@ def main(argv=None) -> int:
     p.add_argument("version")
     p.add_argument("--draft", action="store_true", help="also check the draft release on GitHub (read only)")
     p.add_argument("--docker", action="store_true", help="also build the dashboard image locally")
+    p.add_argument("--site-checkout", type=Path, help="optional path to a hev/kit-cloud checkout")
     p.add_argument("--skip-go", action="store_true", help="skip vet and test (CI already ran them)")
     v = sub.add_parser("verify")
     v.add_argument("version")

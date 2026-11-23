@@ -3,10 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 )
@@ -37,24 +34,6 @@ func TestSourceTransitionIDsDispatchEachEntry(t *testing.T) {
 	}
 	if n := slices.Index(f.starts, r["REL-8"].Run); n < 0 || slices.Index(f.starts[n+1:], r["REL-8"].Run) >= 0 {
 		t.Fatal("a stable item ID is one transition", f.starts)
-	}
-}
-
-func TestSourceTransitionIdentityDocumented(t *testing.T) {
-	for file, want := range map[string][]string{
-		filepath.Join("..", "..", "docs", "rfcs", "0008-orchestrators.md"): {"identifies the item plus the transition", "stable on replay", "new ID on re-entry"},
-		filepath.Join("..", "..", "docs", "orchestrators.md"):              {"transition ID"},
-	} {
-		b, e := os.ReadFile(file)
-		if e != nil {
-			t.Fatal(e)
-		}
-		text := strings.Join(strings.Fields(string(b)), " ")
-		for _, w := range want {
-			if !strings.Contains(text, w) {
-				t.Errorf("%s does not document %q", file, w)
-			}
-		}
 	}
 }
 

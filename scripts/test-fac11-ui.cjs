@@ -2,6 +2,7 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
+const os = require('node:os');
 // Filters are layer-ui chips: open the field's picker, then toggle a value in it.
 const pickFilter=async(page,key,value)=>{
  const chip=page.locator(`.live-filter:has(> span:text-is("${key}"))`);
@@ -26,7 +27,7 @@ const pickFilter=async(page,key,value)=>{
  await page.getByLabel('accuracy ceiling').selectOption('3');
  await page.waitForSelector('[data-trace-count="1"]');
  assert.match(await page.locator('#v-traces tbody').innerText(),/2·4·5·5/);
- const screenshotDir=process.env.HEV_SCREENSHOT_DIR||'docs/images';
+ const screenshotDir=process.env.HEV_SCREENSHOT_DIR||os.tmpdir();
  fs.mkdirSync(screenshotDir,{recursive:true});
  await page.screenshot({path:screenshotDir+'/fac11-filter-bar.png'});
  let requests=0;page.on('request',()=>requests++);
