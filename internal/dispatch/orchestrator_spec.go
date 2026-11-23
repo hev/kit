@@ -3,6 +3,7 @@ package dispatch
 import (
 	"bytes"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
@@ -18,23 +19,27 @@ import (
 
 // OrchestratorSpec is the opt-in declaration. The body is the standing brief.
 type OrchestratorSpec struct {
-	Kind         string `yaml:"kind" json:"kind"`
-	Name         string `yaml:"name" json:"name"`
-	Goal         string `yaml:"goal" json:"goal"`
-	Host         string `yaml:"host,omitempty" json:"host,omitempty"`
-	Mode         string `yaml:"mode,omitempty" json:"mode"`
-	Every        string `yaml:"every,omitempty" json:"every,omitempty"`
-	Until        string `yaml:"until,omitempty" json:"until,omitempty"`
-	RoundTimeout string `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
-	MaxLifetime  string `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
-	Harness      string `yaml:"harness,omitempty" json:"harness"`
-	Model        string `yaml:"model,omitempty" json:"model,omitempty"`
-	Reply        string `yaml:"reply,omitempty" json:"reply,omitempty"`
+	WorkspaceName string        `yaml:"workspace,omitempty" json:"workspace,omitempty"`
+	Fallbacks     FallbackChain `yaml:"fallbacks,omitempty" json:"fallbacks"`
+	Kind          string        `yaml:"kind" json:"kind"`
+	Name          string        `yaml:"name" json:"name"`
+	Goal          string        `yaml:"goal" json:"goal"`
+	Host          string        `yaml:"host,omitempty" json:"host,omitempty"`
+	Mode          string        `yaml:"mode,omitempty" json:"mode"`
+	Every         string        `yaml:"every,omitempty" json:"every,omitempty"`
+	Until         string        `yaml:"until,omitempty" json:"until,omitempty"`
+	RoundTimeout  string        `yaml:"round_timeout,omitempty" json:"round_timeout,omitempty"`
+	MaxLifetime   string        `yaml:"max_lifetime,omitempty" json:"max_lifetime,omitempty"`
+	Harness       string        `yaml:"harness,omitempty" json:"harness"`
+	Model         string        `yaml:"model,omitempty" json:"model,omitempty"`
+	Effort        string        `yaml:"effort,omitempty" json:"effort,omitempty"`
+	Reply         string        `yaml:"reply,omitempty" json:"reply,omitempty"`
 	// NotifyRoute pull keeps owner notices queued for notices pull.
 	NotifyRoute string `yaml:"notify_route,omitempty" json:"notify_route,omitempty"`
 	Manages     struct {
 		Runs  RunScope `yaml:"runs" json:"runs"`
 		Repos []string `yaml:"repos,omitempty" json:"repos,omitempty"`
+		Hosts []string `yaml:"hosts,omitempty" json:"hosts,omitempty"`
 	} `yaml:"manages" json:"manages"`
 	Authority []string `yaml:"authority,omitempty" json:"authority"`
 	Budget    struct {
@@ -112,7 +117,7 @@ func OrchestratorDuration(v string) (time.Duration, error) {
 	return d, nil
 }
 func ParseOrchestrator(text string) (OrchestratorSpec, error) {
-	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: "codex", Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
+	s := OrchestratorSpec{RoundTimeout: "30m", Mode: "once", Harness: DefaultOrchestratorHarness, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	if !strings.HasPrefix(text, "---\n") {
 		return s, fmt.Errorf("spec must start with ---")
@@ -134,6 +139,9 @@ func ParseOrchestrator(text string) (OrchestratorSpec, error) {
 	return s, s.Validate()
 }
 func (s OrchestratorSpec) Validate() error {
+	if err := s.Fallbacks.validate(); err != nil {
+		return err
+	}
 	if s.RoundTimeout != "" {
 		if _, e := OrchestratorDuration(s.RoundTimeout); e != nil {
 			return fmt.Errorf("round_timeout: %w", e)
@@ -145,8 +153,11 @@ func (s OrchestratorSpec) Validate() error {
 	if s.Mode != "once" && s.Mode != "loop" {
 		return fmt.Errorf("mode must be once or loop")
 	}
-	if s.Harness != "codex" && s.Harness != "claude" {
+	if _, ok := harness.DispatchFor(s.Harness); !ok {
 		return fmt.Errorf("invalid harness")
+	}
+	if e := checkEffort(s.Effort); e != nil {
+		return e
 	}
 	if s.Idle != "skip" && s.Idle != "run" {
 		return fmt.Errorf("idle must be skip or run")
@@ -226,14 +237,20 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, n := range r.Names {
-		if !ValidName(n) || seen[n] {
+		host, name := splitScopedRun(n)
+		if !ValidName(name) || (strings.Contains(n, "/") && !ValidLabel(host)) || seen[n] {
 			return fmt.Errorf("invalid or duplicate run name")
 		}
 		seen[n] = true
 	}
+	for _, host := range s.Manages.Hosts {
+		if !ValidLabel(host) {
+			return fmt.Errorf("invalid manages host %q", host)
+		}
+	}
 	for _, v := range s.Authority {
 		switch v {
-		case "say", "notify", "rework", "retry", "validate", "dispatch", "stop":
+		case "say", "notify", "rework", "retry", "validate", "dispatch", "stop", "merge":
 		default:
 			return fmt.Errorf("unsupported authority %q", v)
 		}
@@ -296,11 +313,24 @@ func (s OrchestratorSpec) Includes(o Order) bool {
 		return match
 	}
 	for _, n := range s.Manages.Runs.Names {
-		if n == o.Name {
+		host, name := splitScopedRun(n)
+		if name == o.Name && (host == "" || hostlabel.Same(host, o.Host)) {
 			return true
 		}
 	}
 	return false
+}
+
+func (s OrchestratorSpec) includesOnHost(o Order, host string) bool {
+	o.Host = host
+	return s.Includes(o)
+}
+
+func splitScopedRun(ref string) (host, name string) {
+	if host, name, ok := strings.Cut(ref, "/"); ok {
+		return host, name
+	}
+	return "", ref
 }
 
 // ValidateOrchestratorNesting checks the whole proposed graph, including parents

@@ -160,6 +160,34 @@ func TestUnknownAuthorityFailsBeforeWork(t *testing.T) {
 	}
 }
 
+func TestMatchesReplyBareSession(t *testing.T) {
+	if !MatchesReply("foh-kit-6", "macbook/foh-kit-6") {
+		t.Fatal("bare session should match qualified own address")
+	}
+	if !MatchesReply("Adams-MacBook-Air/foh-kit-6", "macbook/foh-kit-6") {
+		t.Fatal("mac alias should match")
+	}
+	if MatchesReply("foh-kit-7", "macbook/foh-kit-6") {
+		t.Fatal("different bare session should not match")
+	}
+	if MatchesReply("mini/foh-kit-6", "macbook/foh-kit-6") {
+		t.Fatal("different host should not match")
+	}
+	if MatchesReply("", "macbook/foh-kit-6") {
+		t.Fatal("empty reply should not match")
+	}
+	inv := map[string]dispatch.Response{
+		"oven": {Rows: []dispatch.Row{
+			{Meta: dispatch.Meta{Order: dispatch.Order{Name: "bare-run", Repo: "kit", Reply: "foh-kit-6"}}, State: "done"},
+			{Meta: dispatch.Meta{Order: dispatch.Order{Name: "other-host", Repo: "kit", Reply: "mini/foh-kit-6"}}, State: "done"},
+		}},
+	}
+	runs, err := Collect(inv, "macbook/foh-kit-6")
+	if err != nil || len(runs) != 1 || runs[0].Name != "bare-run" {
+		t.Fatalf("Collect = %v, %v", runs, err)
+	}
+}
+
 func TestAmendBoundToReviewedHead(t *testing.T) {
 	for _, tc := range []struct {
 		name, evidenceHead, state string
@@ -198,5 +226,28 @@ func TestAmendBoundToReviewedHead(t *testing.T) {
 				t.Fatal(f.reports)
 			}
 		})
+	}
+}
+
+// A closed run (hev dispatch close) is settled: not collected into a new
+// snapshot, and a round reports it closed without asking for anything.
+func TestClosedRunIsSettled(t *testing.T) {
+	rows := []dispatch.Row{
+		{Meta: dispatch.Meta{Order: dispatch.Order{Name: "open", Reply: "desk/foh", Repo: "sample"}}, State: "blocked"},
+		{Meta: dispatch.Meta{Order: dispatch.Order{Name: "shut", Reply: "desk/foh", Repo: "sample"}}, State: dispatch.StateClosed},
+	}
+	runs, err := Collect(map[string]dispatch.Response{"worker": {Rows: rows}}, "desk/foh")
+	if err != nil || len(runs) != 1 || runs[0].Name != "open" {
+		t.Fatalf("%+v %v", runs, err)
+	}
+	d := &fakeDriver{row: dispatch.Row{State: dispatch.StateClosed, ClosedReason: "superseded by mini/shut-b"}, pr: green()}
+	all, err := Round(context.Background(), Plan{Authority: "merge-on-green", Runs: []Run{{Host: "worker", Name: "shut"}}}, nil, d)
+	if err != nil || !all || len(d.reports) != 1 || d.reports[0] != "worker/shut: closed (superseded by mini/shut-b)" {
+		t.Fatalf("%v %v %+v", all, err, d.reports)
+	}
+	for _, e := range d.events {
+		if e == "merge" || strings.HasPrefix(e, "amend:") {
+			t.Fatalf("closed run acted on: %v", d.events)
+		}
 	}
 }

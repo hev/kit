@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/weave"
 )
 
@@ -145,7 +146,7 @@ func parseOrder(text string) (parsedOrder, error) {
 			return o, fmt.Errorf("invalid context recipe path: %w", err)
 		}
 	}
-	if o.Harness != "codex" && o.Harness != "claude" {
+	if _, ok := harness.DispatchFor(o.Harness); !ok {
 		return o, fmt.Errorf("invalid harness")
 	}
 	if o.Validation != "none" && o.Validation != "browser" {

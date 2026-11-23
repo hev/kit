@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"os/exec"
@@ -92,13 +91,13 @@ func newFollowCommand() *cobra.Command {
 	c := &cobra.Command{Use: "follow", Short: "Start a follow-through orchestrator for this session's open runs", Args: cobra.NoArgs}
 	c.PersistentFlags().StringVar(&path, "config", "", "Dispatch configuration")
 	c.PersistentFlags().StringVar(&host, "host", "", "Headless host (otherwise configured default)")
-	c.Flags().StringVar(&harness, "harness", "", "Round harness (config or claude)")
-	c.Flags().StringVar(&model, "model", "", "Round model (config or claude-fable-5-2)")
+	c.Flags().StringVar(&harness, "harness", "", "Round harness (config or agy)")
+	c.Flags().StringVar(&model, "model", "", "Round model (config or gemini-4-neon-medium)")
 	c.Flags().StringVar(&authority, "authority", "review", "review or merge-on-green")
 	c.Flags().StringVar(&every, "every", "10m", "Round interval")
 	c.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum lifetime")
 	c.Flags().StringVar(&repo, "repo", "", "Repository for the orchestrator worktree (defaults to first followed run)")
-	load := func() (dispatch.Config, error) { path = dispatch.ConfigPath(path); return dispatch.Load(path) }
+	load := func() (dispatch.Config, error) { path = dispatch.ConfigPath(path); return loadWorkspaceDispatch(path) }
 	c.RunE = func(cmd *cobra.Command, _ []string) error {
 		cfg, err := load()
 		if err != nil {
@@ -112,7 +111,7 @@ func newFollowCommand() *cobra.Command {
 		// PR merge state is authoritative; dispatch completion alone is not merging.
 		for hn, r := range inv {
 			for i, row := range r.Rows {
-				if !hostlabel.SameAddress(row.Reply, reply) || row.PR == "" {
+				if !followthrough.MatchesReply(row.Reply, reply) || row.PR == "" {
 					continue
 				}
 				b, e := exec.CommandContext(cmd.Context(), "gh", "pr", "view", row.PR, "--json", "state").Output()
@@ -150,7 +149,7 @@ func newFollowCommand() *cobra.Command {
 		}
 		for _, r := range inv {
 			for _, row := range r.Rows {
-				if hostlabel.SameAddress(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
+				if followthrough.MatchesReply(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
 					return fmt.Errorf("follow-through orchestrator %s already exists; inspect or stop it first", row.Name)
 				}
 			}
@@ -197,7 +196,7 @@ func newFollowCommand() *cobra.Command {
 					return fmt.Errorf("%s: %s", hn, r.Error)
 				}
 				for _, row := range r.Rows {
-					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && !hostlabel.SameAddress(row.Reply, reply)) {
+					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && !followthrough.MatchesReply(row.Reply, reply)) {
 						continue
 					}
 					found = true
@@ -209,6 +208,11 @@ func newFollowCommand() *cobra.Command {
 
 					roundSpec, _ := dispatch.ParseOrchestrator(shown.Files["spec.md"])
 					fmt.Fprintf(cmd.OutOrStdout(), "%s/%s %s harness=%s model=%s rounds=%d last=%s next=%s reason=%s\n", hn, row.Name, row.State, roundSpec.Harness, roundSpec.Model, row.Schedule.Rounds, roundTime(row.Schedule.Last), roundTime(row.Schedule.Next), row.Schedule.Reason)
+					var state dispatch.OrchestratorState
+					_ = json.Unmarshal([]byte(shown.Files["state.json"]), &state)
+					for i, a := range state.Attempts {
+						fmt.Fprintf(cmd.OutOrStdout(), "  attempt=%d harness=%s model=%s status=%s %s\n", i+1, a.Harness, a.Model, a.Status, a.Error)
+					}
 					if len(shown.Notices) > 0 {
 						newest := shown.Notices[len(shown.Notices)-1]
 						fmt.Fprintf(cmd.OutOrStdout(), "  undelivered=%d newest=%s error=%s\n", len(shown.Notices), newest.Message, newest.Error)
@@ -417,34 +421,49 @@ func followModel(cfg dispatch.Config, harness, model string) (string, string) {
 		harness = cfg.FollowDefaults().Harness
 	}
 	if harness == "" {
-		harness = "claude"
+		harness = dispatch.DefaultOrchestratorHarness
 	}
 	if model == "" {
 		model = cfg.FollowDefaults().Model
 	}
-	if model == "" {
-		model = "claude-fable-5-2"
+	if model == "" && harness == dispatch.DefaultOrchestratorHarness {
+		model = dispatch.DefaultOrchestratorModel
 	}
 	return harness, model
 }
 func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	if o.Harness == "" {
-		o.Harness = "claude"
+		o.Harness = dispatch.DefaultOrchestratorHarness
 	}
-	if o.Model == "" {
-		o.Model = "claude-fable-5-2"
+	if o.Model == "" && o.Harness == dispatch.DefaultOrchestratorHarness {
+		o.Model = dispatch.DefaultOrchestratorModel
 	}
 	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
 	if p, err := followPlan(text); err == nil {
+		if p.Authority == "merge-on-green" {
+			s.Authority = append(s.Authority, "merge")
+		}
 		for _, r := range p.Runs {
 			s.Manages.Runs.Names = append(s.Manages.Runs.Names, r.Name)
 		}
 	}
-	s.Brief = "Follow the snapshot below. Read-only exact-head review with gh and reading reports/worktrees is always allowed. Use hev dispatch validate NAME --host HOST for independent verification; read validation.json and verdict.json next round and bind the verdict to the current head. Use say or rework for interventions; report merge-ready results to the owner. If validation is unavailable, write [needs you] with the reason once. Only for an open decision the owner must make, write [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice. Write checkpoint.md before exiting. When all followed runs are merged or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
+	s.Brief = "Follow the snapshot below. Read-only exact-head review with gh and reading reports/worktrees is always allowed. Use hev dispatch validate NAME --host HOST for independent verification; read validation.json and verdict.json next round and bind the verdict to the current head. Use say or rework for interventions; report merge-ready results to the owner. If validation is unavailable, write [needs you] with the reason once. Only for an open decision the owner must make, write [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice. Write checkpoint.md before exiting. A run in state closed (hev dispatch close: finished elsewhere or superseded) is settled like an abandoned one; do not review, rework or report it as needing you. When all followed runs are merged, closed or explicitly abandoned, write goal-met.json containing {\"met\":true}.\n\n" + text
 	return s
 }
 func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
+	if err := cfg.SelectedWorkspace.RequireHost(o.Host); err != nil {
+		return err
+	}
+	cmd.SetContext(dispatch.WorkspaceContext(cmd.Context(), cfg.SelectedWorkspace))
 	s := followPreset(o, text)
+	s.WorkspaceName = scopedOrchestratorName(cfg.SelectedWorkspace)
+	s.Fallbacks = cfg.Orchestrate.Follow.Fallbacks
+	if s.Fallbacks == nil {
+		s.Fallbacks = cfg.OrchestratorFallbacks()
+	}
+	if s.Fallbacks == nil {
+		s.Fallbacks = dispatch.FallbackChain{{Harness: "codex"}}
+	}
 	b, e := yaml.Marshal(s)
 	if e != nil {
 		return e
@@ -475,6 +494,10 @@ func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch
 			continue
 		}
 		seen[run.Host] = true
+		if err := cfg.SelectedWorkspace.RequireHost(run.Host); err != nil {
+			rollback()
+			return err
+		}
 		target, ok := cfg.Hosts[run.Host]
 		if !ok {
 			rollback()

@@ -123,7 +123,7 @@ func authorizeSender(q *Request, sender string) error {
 			return fmt.Errorf("teammate steering needs a running run; %s has ended", q.Name)
 		}
 		return nil
-	case "say", "peer-send", "logs", "show", "stop", "review-fetch":
+	case "say", "peer-send", "logs", "show", "stop", "review-fetch", "close":
 		if !ValidName(q.Name) {
 			return fmt.Errorf("invalid name")
 		}
@@ -133,6 +133,10 @@ func authorizeSender(q *Request, sender string) error {
 		}
 		if q.Action == "say" {
 			q.Action = "peer-send"
+		}
+		if q.Action == "close" {
+			// A teammate closes as itself, never as a sender the request names.
+			q.Meta = Meta{Sender: sender}
 		}
 		return nil
 	default:

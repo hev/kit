@@ -2,10 +2,10 @@ package compat
 
 import (
 	"errors"
+	"github.com/hev/kit/internal/hevpaths"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 )
 
@@ -32,10 +32,7 @@ func LocalAgentCounts() (out AgentCounts, err error) {
 		return out, ErrNoTmux
 	}
 	home, _ := os.UserHomeDir()
-	state := os.Getenv("HEV_PEERS_STATE")
-	if state == "" {
-		state = filepath.Join(home, ".local/state/peers-v2")
-	}
+	state := hevpaths.Dir(hevpaths.Peers)
 	p := &P{home: home, stateDir: state, out: io.Discard, err: io.Discard}
 	defer func() {
 		if recover() != nil {

@@ -3,6 +3,7 @@ package feed
 import (
 	"bufio"
 	"encoding/json"
+	"github.com/hev/kit/internal/hevpaths"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,8 +64,7 @@ func (o Observer) dispatchRoot() string {
 	if o.DispatchRoot != "" {
 		return o.DispatchRoot
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "dispatch")
+	return hevpaths.Dir(hevpaths.Orders)
 }
 
 func (o Observer) add(rec Record) {
@@ -318,6 +318,10 @@ func (o Observer) ObserveLifecycle(event string, payload []byte) {
 		kind := ThreadRun
 		if strings.HasPrefix(n.Thread, "orchestrator:") {
 			kind = ThreadOrchestrator
+		} else if strings.HasPrefix(n.Thread, "cron:") {
+			kind = ThreadCron
+		} else if strings.HasPrefix(n.Thread, "service:") {
+			kind = ThreadService
 		}
 		h := n.Host
 		if h == "" {

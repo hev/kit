@@ -3,6 +3,7 @@
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 // Filters are layer-ui chips: open the field's picker, then toggle a value in it.
 const pickFilter=async(page,key,value)=>{
  const chip=page.locator(`.live-filter:has(> span:text-is("${key}"))`);
@@ -58,9 +59,9 @@ const pickFilter=async(page,key,value)=>{
 
   await page.goto(base+'/?window=all#stats');await page.waitForFunction(()=>!document.body.classList.contains('loading'));await page.waitForSelector('.heat .c');
   assert.equal(await page.locator('.wordmark').innerText(),'hev_ kit');assert.equal(await page.title(),'hev_ kit — traces');
-  const screenshotDir=process.env.HEV_SCREENSHOT_DIR||'docs/images';fs.mkdirSync(screenshotDir,{recursive:true});
+  const screenshotDir=process.env.HEV_SCREENSHOT_DIR||os.tmpdir();fs.mkdirSync(screenshotDir,{recursive:true});
   await page.screenshot({path:screenshotDir+'/dashboard-wordmark.png',animations:'disabled'});
   assert.deepEqual(errors,[],'browser errors');
-  console.log('PASS: hev_ kit wordmark/title; screenshot docs/images/dashboard-wordmark.png; no browser errors');
+  console.log('PASS: hev_ kit wordmark/title; screenshot dashboard-wordmark.png; no browser errors');
  } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exit(1);});

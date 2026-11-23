@@ -3,12 +3,13 @@ package dispatch
 import (
 	"context"
 	"fmt"
-	"github.com/hev/kit/internal/hostlabel"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/hostlabel"
 )
 
 // admitOrchestrator is enforced at the target, before routing or mutation. The
@@ -102,6 +103,9 @@ func admitOrchestrator(q Request) error {
 	var o Order
 	if q.Action == "start" {
 		o, e = Parse(q.Order)
+		if q.Meta.Host != "" {
+			o.Host = q.Meta.Host
+		}
 		// Frontmatter cannot claim a swarm; the identity places the run.
 		o.Swarm = swarmIdentity(s.Name)
 	} else {
@@ -124,7 +128,7 @@ func admitOrchestrator(q Request) error {
 		if err != nil {
 			return err
 		}
-		if q.Meta.Harness != cfg.Validation.Harness || q.Meta.Model != cfg.Validation.Model {
+		if q.Meta.Harness != cfg.Validation.Harness || q.Meta.Model != cfg.Validation.Model || q.Meta.Effort != cfg.Validation.Effort {
 			return fmt.Errorf("validator must use configured harness and model")
 		}
 	}
@@ -308,12 +312,12 @@ func reserveOrchestratorCounts(s OrchestratorSpec, count int, ledger string) err
 
 func reserveOrchestratorInventoryCounts(s OrchestratorSpec, inv map[string]Response) error {
 	// Name and repo filters apply to the same inventory used by round gathering.
-	rows, e := SelectInventoryEvidence(inv, func(row Row) bool {
+	rows, e := selectInventoryEvidence(inv, func(host string, row Row) bool {
 		o := row.Order
 		if row.Parent != "" {
 			o.Name = row.Parent
 		}
-		return s.Includes(o)
+		return s.includesOnHost(o, host)
 	})
 	if e != nil {
 		return e
@@ -417,14 +421,28 @@ func orchestratorBudgetHosts(s OrchestratorSpec, hosts map[string]Host, target H
 		}
 	}
 	add(target)
+	for name := range orchestratorKnownHosts(s, hosts) {
+		out[name] = hosts[name]
+	}
+	return out
+}
+
+func orchestratorKnownHosts(s OrchestratorSpec, hosts map[string]Host) map[string]bool {
+	out := map[string]bool{}
 	entries, _ := os.ReadDir(Root())
 	for _, f := range entries {
 		var m Meta
-		if readJSON(filepath.Join(Root(), f.Name(), "meta.json"), &m) == nil && s.Includes(m.Order) {
+		if readJSON(filepath.Join(Root(), f.Name(), "meta.json"), &m) != nil ||
+			(s.WorkspaceName != "" && workspaceOfRun(m.WorkspaceName) != s.WorkspaceName) {
+			continue
+		}
+		for name, h := range hosts {
+			matchesHost := hostlabel.Same(m.Host, name) || (m.Host == "" && h.Local)
 			if m.Forward != nil {
-				add(*m.Forward)
-			} else if h, ok := hosts[m.Host]; ok {
-				add(h)
+				matchesHost = h.Local == m.Forward.Local && h.SSH == m.Forward.SSH && h.Namespace == m.Forward.Namespace
+			}
+			if matchesHost && s.includesOnHost(m.Order, name) {
+				out[name] = true
 			}
 		}
 	}
@@ -433,10 +451,8 @@ func orchestratorBudgetHosts(s OrchestratorSpec, hosts map[string]Host, target H
 		var packet OrchestratorPacket
 		if readJSON(filepath.Join(OrchestratorDir(s.Name), "rounds", fmt.Sprintf("%03d", i), "packet.json"), &packet) == nil {
 			for _, ev := range packet.Evidence {
-				if s.Includes(ev.Row.Order) {
-					if h, ok := hosts[ev.Host]; ok {
-						out[ev.Host] = h
-					}
+				if _, ok := hosts[ev.Host]; ok && s.includesOnHost(ev.Row.Order, ev.Host) {
+					out[ev.Host] = true
 				}
 			}
 		}

@@ -37,7 +37,7 @@ type OrchestratorNotice struct {
 	Lease time.Time `json:"lease,omitempty"`
 	// Attention is the typed notice behind this receipt, when it is a
 	// needs-you moment. A host that pulls the receipt re-emits it there
-	// (docs/notify.md), so Slack works from pull-route hosts too.
+	// (https://hevkit.com/docs/notify), so Slack works from pull-route hosts too.
 	Attention *attention.Notice `json:"attention,omitempty"`
 }
 
@@ -260,6 +260,10 @@ func terminalNoticeError(e error) bool {
 // bounded attempt per wake. Definitive pull routes never exec a transport;
 // transient failures parked by older builds become eligible again.
 func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
+	flushOrchestratorNoticesOnce(s, send, false)
+}
+
+func flushOrchestratorNoticesOnce(s OrchestratorSpec, send OrchestratorNotifier, reconciled bool) {
 	if s.NotifyRoute == "pull" {
 		return
 	}
@@ -269,6 +273,16 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 	}
 	now := noticeNow()
 	blocked := map[string]bool{}
+	failed := false
+	defer func() {
+		// An adopt that ran while a send held its lease could not move that
+		// notice; if the send failed, move it now and try the new owner once.
+		if failed && !reconciled && reconcileLiveOwner(s.Name) > 0 {
+			if cur, e := LoadOrchestrator(s.Name); e == nil {
+				flushOrchestratorNoticesOnce(cur, send, true)
+			}
+		}
+	}()
 	for _, f := range all {
 		if f.n.Status != "queued" || (f.n.Route == "pull" && noticeNeedsPull(errors.New(f.n.Error))) || blocked[f.n.To] {
 			continue
@@ -315,6 +329,7 @@ func flushOrchestratorNotices(s OrchestratorSpec, send OrchestratorNotifier) {
 		})
 		if sendErr != nil {
 			blocked[n.To] = true
+			failed = true
 		}
 	}
 }

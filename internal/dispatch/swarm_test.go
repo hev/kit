@@ -15,29 +15,72 @@ import (
 	"time"
 )
 
-// swarmRFCExample is RFC 0013's example swarm file.
-func swarmRFCExample(t *testing.T) string {
-	t.Helper()
-	b, e := os.ReadFile(filepath.Join("..", "..", "docs", "rfcs", "0013-swarms.md"))
-	if e != nil {
-		t.Fatal(e)
-	}
-	_, rest, ok := strings.Cut(string(b), "`logfix.md`:\n\n```markdown\n")
-	if !ok {
-		t.Fatal("RFC example missing")
-	}
-	example, _, _ := strings.Cut(rest, "\n```\n")
-	return example + "\n"
-}
+const swarmFullExample = `---
+kind: swarm
+name: logfix
+goal: Replace every deprecated logging call in app with the structured logger, tests green, one draft PR.
+reply: owner-session
+host: build-1
+standby: [build-2]
+every: 30m
+max_lifetime: 2d
+harness: claude
+model: claude-opus-5-5
+budget: {concurrent_runs: 4, runs_per_day: 20}
+reconcile_every: 2m
+host_grace: 10m
+restart: {limit: 3, backoff: 2m, max_backoff: 30m, swarm_limit: 8}
+plans: {hold_at: 85, shrink_at: 95}
+max_runs: 24
+roles:
+  - name: migrate
+    shape: partition
+    replicas: 3
+    pieces: [api, worker, cli, storage, web]
+    stall: 45m
+    order: {repo: app, base: main, harness: codex, model: model-a, timeout: 90, class: code}
+    placement: {spread: true, os: linux}
+  - name: integrate
+    shape: single
+    after: [migrate]
+    effects: pr
+    order: {repo: app, base: main, harness: claude, model: claude-opus-5-5, timeout: 60}
+    placement: {hosts: [build-1]}
+---
+## Problem
 
-// swarmPhase1Example removes the RFC example's later-phase fields.
+app still calls log.Printf and the old logx helpers in five packages.
+Move each call to slog with structured fields. Keep messages and levels.
+
+## Acceptance
+- No call to the deprecated API remains (grep proof in the report).
+- go test ./... passes on the integration branch.
+- One draft PR against main.
+
+## Role: migrate
+
+Convert only your piece's package and its tests. Push after every commit.
+
+### Acceptance
+- Your package has no deprecated calls; its tests pass.
+
+## Role: integrate
+
+Merge the listed piece branches onto your branch in order, fix conflicts,
+run the whole test suite, open one draft PR.
+
+### Acceptance
+- All piece branches are merged; the whole suite passes; the PR lists each piece.
+`
+
+// swarmPhase1Example removes the full fixture's later-phase fields.
 func swarmPhase1Example(t *testing.T) string {
 	t.Helper()
-	text := swarmRFCExample(t)
+	text := swarmFullExample
 	for _, pat := range []string{`standby: .*\n`, `host_grace: .*\n`, `plans: .*\n`, `max_runs: .*\n`, `, swarm_limit: 8`, `    placement: \{spread: true, os: linux\}\n`} {
 		re := regexp.MustCompile(pat)
 		if !re.MatchString(text) {
-			t.Fatalf("RFC example lacks %s", pat)
+			t.Fatalf("swarm example lacks %s", pat)
 		}
 		text = re.ReplaceAllString(text, "")
 	}
@@ -226,13 +269,13 @@ func tick(t *testing.T, ops SwarmOps, now time.Time) {
 
 const partitionRole = "  - name: migrate\n    shape: partition\n    replicas: 3\n    pieces: [api, worker, cli, storage, web]\n    order: {repo: app, timeout: 30}\n"
 
-func TestSwarmRFCExampleDecodesAndCompiles(t *testing.T) {
+func TestSwarmExampleDecodesAndCompiles(t *testing.T) {
 	swarmHome(t)
-	if _, e := ParseSwarm(swarmRFCExample(t)); e != nil {
-		t.Fatalf("full RFC example must decode: %v", e)
+	if _, e := ParseSwarm(swarmFullExample); e != nil {
+		t.Fatalf("full swarm example must decode: %v", e)
 	}
-	if _, e := CompileSwarm(swarmRFCExample(t)); e == nil || !strings.Contains(e.Error(), "phase 4") {
-		t.Fatalf("full RFC example must be refused naming its phase: %v", e)
+	if _, e := CompileSwarm(swarmFullExample); e == nil || !strings.Contains(e.Error(), "phase 4") {
+		t.Fatalf("full swarm example must be refused naming its phase: %v", e)
 	}
 	plan, e := SwarmUp(swarmPhase1Example(t), true)
 	if e != nil {

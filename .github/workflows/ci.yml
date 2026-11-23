@@ -67,6 +67,12 @@ jobs:
       - name: Dispatch FIFO CLI acceptance
         run: python3 scripts/test-dispatch-queue.py "$RUNNER_TEMP/hev-orchestrators"
 
+      - name: E2E OSS -> Pro funnel (temporary homes, private tmux, loopback Pro stub)
+        run: python3 scripts/test-e2e-oss-pro.py "$RUNNER_TEMP/hev-orchestrators"
+
+      - name: Workspace CLI acceptance
+        run: python3 scripts/test-workspaces.py "$RUNNER_TEMP/hev-orchestrators"
+
       - name: Stats compact frontend path (no browser)
         run: node scripts/test-stats-path.cjs
 
@@ -83,12 +89,11 @@ jobs:
       - name: eval replay preservation checks
         run: python3 scripts/test-replay-eval-corpus.py
 
-      - name: Release train scripts (draft generator, preflight checks, advance, docs preview, edge builds)
+      - name: Release train scripts (draft generator, preflight checks, advance, edge builds)
         run: |
           python3 scripts/test-release-draft.py
           python3 scripts/test-release-check.py
           python3 scripts/test-release-advance.py
-          python3 scripts/test-docs-preview.py
           python3 scripts/test-edge-build.py
 
   # The updater's Windows path: a running hev.exe cannot be overwritten, so it
@@ -106,6 +111,8 @@ jobs:
           cache: true
       - name: Updater tests on Windows
         run: go test -count=1 ./internal/update/
+      - name: Cron schedules on Windows
+        run: go test -count=1 ./internal/cron/
 
   # Needs SKILLS_DEPLOY_KEY, a read-only deploy key for the private hev/skills.
   # Without it the job only posts a notice (not a required check: waived for

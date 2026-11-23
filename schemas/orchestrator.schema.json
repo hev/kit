@@ -51,9 +51,20 @@
     "harness": {
       "enum": [
         "codex",
-        "claude"
+        "claude",
+        "agy"
       ],
       "default": "codex"
+    },
+    "effort": {
+      "description": "Harness reasoning effort; omitted leaves the harness default.",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
     },
     "idle": {
       "enum": [
@@ -184,7 +195,7 @@
                   "uniqueItems": true,
                   "items": {
                     "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                    "pattern": "^([a-z0-9][a-z0-9-]*/)?[a-z0-9][a-z0-9-]*$"
                   }
                 }
               },
@@ -202,6 +213,14 @@
               ]
             }
           ]
+        },
+        "hosts": {
+          "description": "Required host inventory snapshots for orchestrator rounds.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
         },
         "repos": {
           "type": "array",
@@ -222,7 +241,8 @@
           "retry",
           "validate",
           "dispatch",
-          "stop"
+          "stop",
+          "merge"
         ]
       },
       "default": [

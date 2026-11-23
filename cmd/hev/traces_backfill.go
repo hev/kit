@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/index"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/platformops"
@@ -109,16 +110,18 @@ func newTracesBackfillCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sources := []trace.Source{
-				&trace.ClaudeSource{Root: trace.DefaultClaudeRoot()},
-				&trace.CodexSource{Root: trace.DefaultCodexRoot()},
-				&trace.DotSource{Root: trace.DefaultDotRoot()},
-				&trace.PiSource{Root: cfg.PiSessionsDir},
-				&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
-				&trace.AgySource{Root: cfg.AgyDataDir},
+			w, err := currentWorkspace()
+			if err != nil {
+				return err
 			}
+			sources := trace.Sources(map[string]string{harness.Pi: cfg.PiSessionsDir, harness.OpenCode: cfg.OpenCodeDataDir, harness.Agy: cfg.AgyDataDir})
 			home, _ := os.UserHomeDir()
 			journalPath := filepath.Join(home, ".hev", "traces-backfill.json")
+			if w.IsolatedStorage() {
+				sources = trace.WorkspaceSources(w)
+				journalPath = filepath.Join(w.Root(), "traces-backfill.json")
+			}
+
 			open := func() (index.Archive, *trace.ImageCapture, error) { return tracesWithImages(namespace) }
 			return runTracesBackfill(cmd.OutOrStdout(), cmd.ErrOrStderr(), sources, open, journalPath, namespace, window, apply, restart, asJSON, limit, time.Now())
 		},

@@ -32,12 +32,14 @@ type Reader = tracearchive.Reader
 type Server struct {
 	reviewEnabled bool
 	reader        Reader
-	// dispatchRoot holds the run records traces are derived from.
-	dispatchRoot string
 	// images is this host's blob store for transcript images; nil shows
 	// every image as a marker naming the host that captured it.
 	images        *blob.Store
 	factoryConfig *FactoryConfig
+	// board feeds the Board tab; nil hides it (hosted wrappers).
+	board *Board
+	// tabs are a wrapper's own navigation entries after Traces and Board.
+	tabs []Tab
 	// Shared across requests; timing and eval snapshots must not reset it.
 	baselines *baselineCache
 	// Shared across requests: the newest row per session for value pickers.
@@ -131,14 +133,14 @@ func (s *Server) Warm() *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for pattern, handler := range map[string]func(*Server, http.ResponseWriter, *http.Request){
-		"GET /": (*Server).page, "GET /api/sessions": (*Server).sessions,
+		"GET /{$}": (*Server).page, "GET /api/sessions": (*Server).sessions,
 		"GET /api/session/{id}": (*Server).session, "GET /api/stats": (*Server).stats,
 		"GET /api/search": (*Server).search, "GET /api/factory": (*Server).factory,
 		"GET /api/values": (*Server).values, "GET /api/image/{sha256}": (*Server).image,
-		"GET /api/asks": (*Server).asks, "GET /api/asks/{id}": (*Server).askTrace,
+		"GET /api/board/{path...}": (*Server).boardAPI,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, dispatchRoot: s.dispatchRoot}
+			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, board: s.board, tabs: s.tabs}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithContext(r.Context()).WithTiming(timing)
@@ -427,9 +429,6 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, 502)
 		return
 	}
-	if c := s.sessionTraceContext(row); c != nil {
-		data["trace_context"] = c
-	}
 	writeJSON(w, data)
 }
 
@@ -448,13 +447,14 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
-	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30, "storage": s.storage()})
+	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30, "storage": s.storage(), "board": s.boardPage()})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
 	link := ""
 	if s.reviewEnabled {
 		link = `<a href="/review">label review</a>`
 	}
 	body = strings.Replace(body, "<!--__REVIEW_LINK__-->", link, 1)
+	body = strings.Replace(body, "<!--__TABS__-->", s.tabsHTML(), 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	addTiming(w, nil)
 	_, _ = w.Write([]byte(body))
@@ -659,7 +659,7 @@ func buildSessionImages(s trace.SessionRow, rows []trace.BlockRow, local func(st
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": true, "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": s.RatesKnown(), "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow, host string, local func(string) bool) []map[string]any {
@@ -676,6 +676,7 @@ func buildAgents(groups map[string][]trace.BlockRow, host string, local func(str
 		toolRows := []map[string]any{}
 		toolByID := map[string]map[string]any{}
 		requests := []map[string]any{}
+		byRequest := map[string]map[string]any{}
 		for _, r := range rows {
 			if parentID == "" {
 				parentID = r.ParentAgentID
@@ -719,14 +720,30 @@ func buildAgents(groups map[string][]trace.BlockRow, host string, local func(str
 				if r.BlockType == "tool_use" {
 					block = map[string]any{"type": "tool_use", "ts": r.Start, "tool": r.ToolUseID}
 				}
-				req := map[string]any{"kind": "request", "id": r.RequestID, "start": r.Start, "first": r.End, "end": r.End, "ms": r.MS, "ttft": max64(0, r.End-r.Start), "model": r.Model, "effort": r.Effort, "usage": map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}, "blocks": []map[string]any{block}, "tools": []string{}, "cost": r.Cost, "context": r.InputTokens + r.CacheReadTokens + r.CacheCreationTokens, "uuid": r.TurnUUID}
-				requests = append(requests, req)
-				items = append(items, req)
-			}
-			if r.Role == "assistant" {
-				model = r.Model
-				cost += r.Cost
-				addUsage(u, map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens})
+				// Blocks() stamps the request's whole cost and usage on every
+				// block, so one request is counted once, as in the main timeline.
+				rid := r.RequestID
+				if rid == "" {
+					rid = r.TurnUUID
+				}
+				req := byRequest[rid]
+				if req == nil {
+					rowUsage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
+					req = map[string]any{"kind": "request", "id": rid, "start": r.Start, "first": r.End, "end": r.End, "ms": r.MS, "ttft": max64(0, r.End-r.Start), "model": r.Model, "effort": r.Effort, "usage": rowUsage, "blocks": []map[string]any{}, "tools": []string{}, "cost": r.Cost, "context": r.InputTokens + r.CacheReadTokens + r.CacheCreationTokens, "uuid": r.TurnUUID}
+					byRequest[rid] = req
+					requests = append(requests, req)
+					items = append(items, req)
+					model = r.Model
+					cost += r.Cost
+					addUsage(u, rowUsage)
+				} else if e, ok := req["end"].(int64); !ok || r.End > e {
+					req["end"] = r.End
+					req["ms"] = r.End - req["start"].(int64)
+				}
+				req["blocks"] = append(req["blocks"].([]map[string]any), block)
+				if r.BlockType == "tool_use" {
+					req["tools"] = append(req["tools"].([]string), r.ToolUseID)
+				}
 			}
 		}
 		out = append(out, map[string]any{"id": id, "parent_agent_id": parentID, "name": id, "type": "agent", "desc": "", "model": model, "start": start, "end": end, "ms": end - start, "call": "", "usage": u, "cost": cost, "n_tools": tools, "tools": nonNil(toolRows), "items": nonNil(items), "requests": nonNil(requests)})

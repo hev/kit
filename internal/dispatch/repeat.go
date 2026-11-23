@@ -58,7 +58,11 @@ func Supervise(name string) error {
 		_ = sweepQueue(name)
 	}()
 	if m.Every == "" && loadSchedule(dir).Rounds == 0 {
-		return superviseRound(name)
+		err := superviseRound(name)
+		if err == nil && m.Parent == "" {
+			autoCompactDone(dir)
+		}
+		return err
 	}
 	signals := make(chan os.Signal, 4)
 	signal.Notify(signals, terminationSignals()...)
@@ -274,7 +278,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 	if err != nil {
 		return err
 	}
-	if processRecordLive(filepath.Join(dir, "supervisor.json")) {
+	if processRecordMayBeLive(filepath.Join(dir, "supervisor.json")) {
 		unlock()
 		return fmt.Errorf("orchestrator already running")
 	}
@@ -387,7 +391,7 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 						continue
 					}
 					switch filepath.Base(event.Name) {
-					case "wake", "stop", "pause", "handoff.json":
+					case "wake", "stop", "pause", "handoff.json", adoptedFile:
 						return nil
 					}
 				}
@@ -426,6 +430,12 @@ func SuperviseOrchestrator(ctx context.Context, name string, d OrchestratorDrive
 			st.Error = ctx.Err().Error()
 			_ = persist()
 			return ctx.Err()
+		}
+		// An adopt changes only the owner; it never starts a round.
+		if refreshOrchestratorOwner(&s, &st) {
+			if err = persist(); err != nil {
+				return err
+			}
 		}
 		if exists(filepath.Join(dir, "stop")) {
 			notice("stopped", "stopped")

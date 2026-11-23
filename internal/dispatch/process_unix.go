@@ -196,7 +196,7 @@ var signalProcessGroup = func(pgid int) error { return syscall.Kill(-pgid, sysca
 // group kill: every signal targets a group number that is still reserved.
 func startSourceChild(c *exec.Cmd, cmdline string) (func(), error) {
 	if cmdline != "" {
-		return nil, fmt.Errorf("batch plugins require Windows")
+		return nil, fmt.Errorf("batch exec commands require Windows")
 	}
 	h, e := startGroupHolder()
 	if e != nil {
@@ -258,4 +258,19 @@ func (h *groupHolder) release() {
 	_ = h.keep.Close()
 	_ = h.cmd.Wait()
 	h.reaped = true
+}
+
+// processRecordMayBeLive is processRecordLive, except a process that is
+// there but cannot be signalled (another user's) also counts: unknown is not
+// gone.
+func processRecordMayBeLive(path string) bool {
+	if processRecordLive(path) {
+		return true
+	}
+	var p pidRecord
+	if readJSON(path, &p) != nil || p.PID <= 0 || p.Created == "" {
+		return false
+	}
+	identity, err := processIdentity(p.PID)
+	return err == nil && identity == p.Created && syscall.Kill(p.PID, 0) == syscall.EPERM
 }

@@ -314,7 +314,7 @@ func TestRetiredLaneExportsWhenItsContainersStart(t *testing.T) {
 	if !strings.Contains(got, "docker start c0ffee") || !strings.Contains(got, "docker stop c0ffee") || strings.Contains(got, "beef") || strings.Contains(got, "docker rm") || strings.Contains(got, "volume rm") {
 		t.Fatalf("docker calls:\n%s", got)
 	}
-	store, err := filearchive.Open(filepath.Join(home, ".hev", "archive"), "hev-traces")
+	store, err := filearchive.Open(filepath.Join(home, ".hev", "traces"), "hev-traces")
 	if err != nil {
 		t.Fatal(err)
 	}

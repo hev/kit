@@ -28,19 +28,17 @@ func TestPeersHelperAliasesNeverRunBackend(t *testing.T) {
 		}
 		t.Skip("tmux not installed")
 	}
-	// Holds the tmux socket. Canonical, because hev names itself by its
-	// resolved path (macOS /tmp is a symlink to /private/tmp).
-	root, err := filepath.EvalSymlinks(testenv.SocketDir(t))
+	// Keep the socket path short while letting TMPDIR control where the
+	// compiled executable goes. Resolve its path as hev does at startup.
+	root := testenv.SocketDir(t)
+	bin, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(root, "bin")
 	home := filepath.Join(root, "home")
 	state := filepath.Join(home, ".local/state")
-	for _, dir := range []string{bin, filepath.Join(state, "peers-v2")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.MkdirAll(filepath.Join(state, "peers-v2"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	// TMUX_TMPDIR's default socket, named explicitly for every tmux call here.
 	sock := filepath.Join(root, "tmux", fmt.Sprintf("tmux-%d", os.Getuid()), "default")

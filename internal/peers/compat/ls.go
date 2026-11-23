@@ -321,6 +321,9 @@ func (p *P) lsJSON(rows []*Row, showAll, everywhere bool) *Obj {
 			"inbox_status", status, "attached", r.Attached, "inbox", r.Agent != "" && on, "activity", orNone(r.Activity),
 			"you", mine != nil && r.ID == mine.ID))
 	}
+	if !p.scope.Workspace.AllowsHost(host) {
+		host = ""
+	}
 	doc := NewObj("version", 1, "host", host, "at", now(), "panes", out, "hosts", []any{})
 	if p.hostLabel != "" {
 		return doc
@@ -342,6 +345,9 @@ func (p *P) lsJSON(rows []*Row, showAll, everywhere bool) *Obj {
 		}
 	}
 	for _, snap := range p.snapshotList() {
+		if !p.scope.Workspace.AllowsHost(snap.Str("host")) {
+			continue
+		}
 		if everywhere && contains(p.peerHosts(), snap.Str("host")) {
 			continue
 		}
@@ -386,6 +392,15 @@ func (p *P) cmdLs(args []string) {
 	showAll := contains(args, "-a") || contains(args, "--all")
 	everywhere := contains(args, "--everywhere") || contains(args, "-e")
 	rows := p.panes(false)
+	if p.scope.Enabled {
+		kept := rows[:0]
+		for _, row := range rows {
+			if p.scope.Workspace.AllowsHost(p.selfLabel()) && p.scope.allowsLocal(row) {
+				kept = append(kept, row)
+			}
+		}
+		rows = kept
+	}
 	if contains(args, "--json") {
 		fmt.Fprintln(p.out, Dumps(p.lsJSON(rows, showAll, everywhere), 1))
 		return
@@ -397,7 +412,7 @@ func (p *P) cmdLs(args []string) {
 			listed = append(listed, r)
 		}
 	}
-	if len(listed) == 0 {
+	if len(listed) == 0 && p.scope.Workspace.AllowsHost(p.selfLabel()) {
 		host := p.hostLabel
 		if host == "" {
 			host = p.selfLabel()
@@ -477,6 +492,9 @@ func (p *P) cmdLs(args []string) {
 	}
 	if p.hostLabel == "" {
 		for _, snap := range p.snapshotList() {
+			if !p.scope.Workspace.AllowsHost(snap.Str("host")) {
+				continue
+			}
 			if contains(p.peerHosts(), snap.Str("host")) && everywhere {
 				continue // already listed live
 			}
@@ -609,7 +627,7 @@ func (p *P) cmdRead(args []string) {
 }
 
 func (p *P) cmdRole(args []string) {
-	usage := "role [SESSION] [foh|boh|offline]"
+	usage := "role [SESSION] [foh|local|boh|offline]"
 	if len(args) > 2 {
 		p.die(usage)
 	}
@@ -690,7 +708,16 @@ func (p *P) managedRegister(name, root string, replace bool) error {
 	if !ok {
 		return fmt.Errorf("No closing quotation")
 	}
-	if birth == 0 || len(words) < 3 || words[len(words)-2] != filepath.Join(root, "runner.py") || words[len(words)-1] != root {
+	// A root may declare its own entrypoint (Go deviation); without one it is ROOT/runner.py.
+	entry := filepath.Join(root, "runner.py")
+	if state.Has("entry") {
+		e, ok := state.Get("entry").(string)
+		if !ok || !filepath.IsAbs(e) || realpath(e) != e {
+			return refuse("state entry must be an absolute resolved path")
+		}
+		entry = e
+	}
+	if birth == 0 || len(words) < 3 || words[len(words)-2] != entry || words[len(words)-1] != root {
 		return refuse("state PID is not the live runner for this root")
 	}
 	if Equal(state.Get("phase"), "stopped") {

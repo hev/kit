@@ -268,3 +268,16 @@ func TestSyncRepairsUnstampedBaseDispatchSkill(t *testing.T) {
 		t.Fatal("sync did not install the steering-aware hev-dispatch skill")
 	}
 }
+
+// The files-board change to hev-board keeps the copy v0.7 shipped before it
+// recognizable, so sync updates an unstamped one instead of leaving it.
+func TestBoardSkillKeepsHistoricalHashes(t *testing.T) {
+	b, err := skills.FS.ReadFile("hev-board/historical-sha256.txt")
+	if err != nil || !strings.Contains(string(b), "71bb3e5dc9dce3d6dfc19b69440b796f1d23102f803c0e35638dd23014c3c0f5") {
+		t.Fatalf("hev-board: pre-files-board hash missing: %v", err)
+	}
+	current, _ := skills.FS.ReadFile("hev-board/SKILL.md")
+	if !strings.Contains(string(current), "search is\ngrep") {
+		t.Error("hev-board does not say Starter Kit search is grep")
+	}
+}

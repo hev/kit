@@ -13,6 +13,7 @@ import (
 
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/feed"
+	registry "github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/peers/compat"
@@ -301,7 +302,7 @@ func installHooks(out io.Writer, home string, hs []string, explicit bool) error 
 			verb = "installed"
 		}
 		fmt.Fprintf(out, "%s: %s %d events in %s\n", h, verb, len(hooks.Events), hooks.SettingsPath(home, h))
-		if h == "codex" && !hooks.CodexTrusted(home, hooks.SettingsPath(home, h)) {
+		if registry.HooksFor(h).TrustRequired && !hooks.CodexTrusted(home, hooks.SettingsPath(home, h)) {
 			fmt.Fprintln(out, "codex: Codex runs global hooks only after a person trusts them: open codex and review them with /hooks. Dispatch runs do not need this; their supervisor wires hooks per launch.")
 		}
 	}
@@ -335,7 +336,7 @@ func checkHooks(out io.Writer, home string, hs []string, explicit bool) error {
 			fmt.Fprintf(out, "%s: needs repair: missing %v, stale %v in %s (hev hooks install --harness %s)\n", h, st.Missing, st.Stale, st.Path, h)
 			bad = true
 		}
-		if h == "codex" && len(st.Kit) > 0 && !hooks.CodexTrusted(home, st.Path) {
+		if registry.HooksFor(h).TrustRequired && len(st.Kit) > 0 && !hooks.CodexTrusted(home, st.Path) {
 			fmt.Fprintln(out, "codex: global hooks not yet trusted; review them in codex with /hooks")
 		}
 	}

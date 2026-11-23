@@ -25,21 +25,7 @@ type migrationState struct {
 }
 
 func sourceScope(src trace.Source) (root, harness string) {
-	switch s := src.(type) {
-	case *trace.ClaudeSource:
-		return s.Root, "claude_code"
-	case *trace.CodexSource:
-		return s.Root, "codex"
-	case *trace.PiSource:
-		return s.Root, "pi"
-	case *trace.OpenCodeSource:
-		return s.Root, "opencode"
-	case *trace.DotSource:
-		return s.Root, "dot"
-	case *trace.AgySource:
-		return s.Root, "agy"
-	}
-	return "", ""
+	return trace.SourceInfo(src)
 }
 
 func Run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) {
@@ -51,7 +37,7 @@ func Run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 	if root == "" || opt.DryRun {
 		return run(src, cl, st, opt)
 	}
-	unlock, err := redact.LockArchive()
+	unlock, err := lockArchive(cl)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +99,7 @@ func Summarize(src trace.Source, cl Archive, batchRows int, repoURL func(string)
 	if root == "" {
 		return summarizeSource(src, cl, batchRows, repoURL, sessionIDs, summarize, progress)
 	}
-	unlock, err := redact.LockArchive()
+	unlock, err := lockArchive(cl)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +120,23 @@ func Summarize(src trace.Source, cl Archive, batchRows int, repoURL func(string)
 		rep.RemovedMissingSessions = upgrade.RemovedMissingSessions
 	}
 	return rep, err
+}
+
+// Index and migration share a lock for a destination regardless of the
+// originating harness, credentials, or model. A different destination can
+// continue while this one waits on its backend.
+func lockArchive(cl Archive) (func(), error) {
+	var destination string
+	switch a := cl.(type) {
+	case *layer.Client:
+		destination = strings.TrimRight(a.Endpoint, "/") + "\x00" + a.Namespace
+	case interface{ Dir() string }:
+		destination = a.Dir()
+	default:
+		return redact.LockArchive()
+	}
+	sum := sha256.Sum256([]byte(destination))
+	return redact.LockArchiveScope(hex.EncodeToString(sum[:]))
 }
 
 func archiveKey(cl Archive, root string) string {
@@ -165,8 +168,9 @@ func mergeScopedState(st, scoped *State, cl Archive, root string) {
 	if st.Units == nil {
 		st.Units = map[string]string{}
 	}
+	prefix := archiveKey(cl, root) + ":"
 	for key, sig := range scoped.Units {
-		st.Units[archiveKey(cl, root)+":"+key] = sig
+		st.Units[prefix+key] = sig
 	}
 }
 

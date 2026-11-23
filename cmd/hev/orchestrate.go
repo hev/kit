@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/hev/kit/internal/steer"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,9 +13,13 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/hostlabel"
+	"github.com/hev/kit/internal/workspace"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
+
+var orchestrateApplyRPC = dispatch.RPC
 
 func init() { rootCmd.AddCommand(newOrchestrateCommand()) }
 func newOrchestrateCommand() *cobra.Command {
@@ -46,8 +49,64 @@ func newOrchestrateCommand() *cobra.Command {
 			}
 		}
 		var s dispatch.OrchestratorSpec
+		parsed, parseErr := dispatch.ParseOrchestrator(string(b))
+		if parseErr != nil {
+			return parseErr
+		}
+		selected, e := currentWorkspace()
+		if e != nil {
+			return e
+		}
+		targetName := parsed.Host
+		if targetName == "" {
+			targetName = selfHostLabel()
+		}
+		if e = selected.RequireHost(targetName); e != nil {
+			return e
+		}
 		if scopeOwner != "" {
-			cfg, err := dispatch.Load(dispatch.ConfigPath(""))
+			if e = selected.RequireHost(scopeOwner); e != nil {
+				return e
+			}
+		}
+		if parsed.WorkspaceName != "" && parsed.WorkspaceName != selected.Name {
+			return fmt.Errorf("workspace boundary: orchestrator spec belongs to %q", parsed.WorkspaceName)
+		}
+		if parsed.WorkspaceName == "" && (selected.Name != workspace.Default || len(selected.Hosts) > 0) {
+			b = []byte(strings.Replace(strings.ReplaceAll(string(b), "\r\n", "\n"), "---\n", "---\nworkspace: "+selected.Name+"\n", 1))
+		}
+		if parsed.Host != "" && !hostlabel.Same(parsed.Host, selfHostLabel()) {
+			if cfg, cfgErr := loadWorkspaceDispatch(dispatch.ConfigPath("")); cfgErr == nil {
+				if target, ok := cfg.Hosts[parsed.Host]; ok && !target.Local {
+					if dry {
+						fmt.Fprintln(cmd.OutOrStdout(), "valid", parsed.Name)
+						return nil
+					}
+					if seed != "" {
+						return fmt.Errorf("--seed-checkpoint is not supported for remote host %s; run on %s directly", parsed.Host, parsed.Host)
+					}
+					req := dispatch.Request{Action: "orchestrator-apply", Name: parsed.Name, Order: string(b)}
+					if scopeOwner != "" {
+						owner, ok := cfg.Hosts[scopeOwner]
+						if !ok || owner.Local {
+							return fmt.Errorf("scope owner must name a configured remote host")
+						}
+						req.ScopeOwner = &owner
+						req.AdmissionOnly = true
+					}
+					if _, e = orchestrateApplyRPC(cmd.Context(), target, req); e != nil {
+						return e
+					}
+					if parsed.AllowNested {
+						fmt.Fprintln(cmd.ErrOrStderr(), "warning: nesting enabled; maximum depth is 2")
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "applied %s on %s\n", parsed.Name, parsed.Host)
+					return nil
+				}
+			}
+		}
+		if scopeOwner != "" {
+			cfg, err := loadWorkspaceDispatch(dispatch.ConfigPath(""))
 			if err != nil {
 				return err
 			}
@@ -89,6 +148,9 @@ func newOrchestrateCommand() *cobra.Command {
 	apply.Flags().StringVar(&seed, "seed-checkpoint", "", "Record FILE as round 000, the checkpoint round 001 reads")
 	c.AddCommand(apply)
 	c.AddCommand(&cobra.Command{Use: "say NAME MSG", Args: cobra.MinimumNArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireLocalOrchestrator(args[0]); err != nil {
+			return err
+		}
 		id, e := dispatch.SayOrchestratorReceipt(args[0], strings.Join(args[1:], " "), "", "")
 		if e != nil {
 			return e
@@ -99,12 +161,27 @@ func newOrchestrateCommand() *cobra.Command {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s note queued for o-%s: inbox.md and the next round's first prompt\n", id, args[0])
 		return nil
 	}})
-	var goal, runs, every, until, host, name, harness, model, reply, lifetime string
+	var goal, runs, every, until, host, name, harness, model, effort, reply, lifetime string
 	start := &cobra.Command{Use: "start --goal TEXT --runs SELECTOR", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if name == "" {
 			name = fmt.Sprintf("adhoc-%d", time.Now().UnixNano())
 		}
-		s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: name, Goal: goal, Host: host, Mode: "once", Harness: harness, Model: model, Reply: reply, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
+		selected, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
+		if err = selected.RequireHost(selfHostLabel()); err != nil {
+			return err
+		}
+		if host != "" {
+			if err = selected.RequireHost(host); err != nil {
+				return err
+			}
+		}
+		s := dispatch.OrchestratorSpec{WorkspaceName: scopedOrchestratorName(selected), Kind: "orchestrator", Name: name, Goal: goal, Host: host, Mode: "once", Harness: harness, Model: model, Effort: effort, Reply: reply, Idle: "skip", Agent: "on", Authority: []string{"say", "notify"}}
+		if harness == dispatch.DefaultOrchestratorHarness && !cmd.Flags().Changed("model") {
+			s.Model = dispatch.DefaultOrchestratorModel
+		}
 		s.Manages.Runs.Selector = runs
 		if runs != "mine" && !strings.HasPrefix(runs, "issue=") {
 			s.Manages.Runs.Selector = ""
@@ -141,117 +218,86 @@ func newOrchestrateCommand() *cobra.Command {
 	start.Flags().StringVar(&until, "until", "goal", "goal, date, or never")
 	start.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum loop lifetime")
 	start.Flags().StringVar(&host, "host", "", "Host label for this local supervisor")
-	start.Flags().StringVar(&harness, "harness", "codex", "Fresh-session harness")
+	start.Flags().StringVar(&harness, "harness", dispatch.DefaultOrchestratorHarness, "Fresh-session harness: codex, claude or agy")
 	start.Flags().StringVar(&model, "model", "", "Model")
+	start.Flags().StringVar(&effort, "effort", "", "Reasoning effort: low, medium, high, xhigh or max")
 	start.Flags().StringVar(&reply, "reply", "", "Owner session (required for mine)")
 	c.AddCommand(start)
-	var asJSON bool
+	var asJSON, orphaned bool
 	ls := &cobra.Command{Use: "ls", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		selected, e := currentWorkspace()
+		if e != nil {
+			return e
+		}
+		if orphaned {
+			inv := orphanInventory()
+			for name := range inv {
+				if !selected.AllowsHost(name) {
+					delete(inv, name)
+				}
+			}
+			return printOrphans(cmd.OutOrStdout(), orphanRows(cmd.Context(), inv, map[string]bool{"orch": true}), asJSON)
+		}
 		rows, e := dispatch.ListOrchestrators()
 		if e != nil {
 			return e
 		}
+		probe := newOwnerProber()
+		owned := make([]orchestratorOwnerRow, 0, len(rows))
+		for _, r := range rows {
+			label := r.Host
+			if label == "" {
+				label = selfHostLabel()
+			}
+			if !selected.AllowsHost(label) || !orchestratorWorkspaceMatches(selected, r.WorkspaceName) {
+				continue
+			}
+			owned = append(owned, orchestratorOwnerRow{OrchestratorState: r, Owner: r.Reply, OwnerStatus: probe.status(cmd.Context(), r.Reply, label)})
+		}
+		if len(selected.Hosts) > 0 {
+			if cfg, err := loadWorkspaceDispatch(dispatch.ConfigPath("")); err == nil {
+				for name, h := range cfg.Hosts {
+					if h.Local {
+						delete(cfg.Hosts, name)
+					}
+				}
+				inv := dispatch.Inventory(cfg, "")
+				for _, name := range dispatch.SortedHosts(inv) {
+					for _, row := range inv[name].Rows {
+						if row.Kind != "orch" || !orchestratorWorkspaceMatches(selected, row.WorkspaceName) {
+							continue
+						}
+						state := dispatch.OrchestratorState{Name: strings.TrimPrefix(row.Name, "o-"), Host: name, State: row.State, Rounds: row.Schedule.Rounds, Next: row.Schedule.Next, Reply: row.Reply, WorkspaceName: row.WorkspaceName}
+						owned = append(owned, orchestratorOwnerRow{OrchestratorState: state, Owner: row.Reply, OwnerStatus: probe.status(cmd.Context(), row.Reply, name)})
+					}
+				}
+			}
+		}
 		if asJSON {
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(rows)
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(owned)
 		}
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
 		defer w.Flush()
-		fmt.Fprintln(w, "NAME\tHOST\tMODE\tSTATE\tROUNDS\tNEXT\tRUNS\tTODAY\tSPEND\tGOAL")
-		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\tunknown\t%s\n", r.Name, r.Host, r.Mode, r.State, r.Rounds, roundTime(r.Next), r.ManagedRuns, r.RunsToday, r.Goal)
+		fmt.Fprintln(w, "NAME\tHOST\tMODE\tSTATE\tOWNER\tROUNDS\tNEXT\tRUNS\tTODAY\tSPEND\tGOAL")
+		for _, r := range owned {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%d\tunknown\t%s\n", r.Name, r.Host, r.Mode, r.State, ownerColumn(r.Owner, r.OwnerStatus), r.Rounds, roundTime(r.Next), r.ManagedRuns, r.RunsToday, r.Goal)
 		}
 		return nil
 	}}
 	ls.Flags().BoolVar(&asJSON, "json", false, "Print JSON")
+	ls.Flags().BoolVar(&orphaned, "orphaned", false, "List live orchestrators on reachable hosts whose owner session is gone, with the adopt command")
 	c.AddCommand(ls)
-	var round int
-	for _, action := range []string{"show", "logs", "wake", "pause", "resume", "stop", "handoff"} {
-		action := action
-		var to string
-		sub := &cobra.Command{Use: action + " NAME", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			if _, e := dispatch.LoadOrchestrator(name); e != nil {
-				return e
-			}
-			dir := dispatch.OrchestratorDir(name)
-			switch action {
-			case "show":
-				for _, f := range []string{"spec.md", "checkpoint.md", "state.json", "budget.json", "budget-owner.json", "last-notice.json", "attention.json"} {
-					b, e := os.ReadFile(filepath.Join(dir, f))
-					if e != nil && !os.IsNotExist(e) {
-						return e
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "--- %s ---\n%s\n", f, b)
-				}
-				entries, e := os.ReadDir(filepath.Join(dir, "rounds"))
-				if e != nil && !os.IsNotExist(e) {
-					return e
-				}
-				fmt.Fprint(cmd.OutOrStdout(), "Rounds:")
-				for _, f := range entries {
-					fmt.Fprint(cmd.OutOrStdout(), " "+f.Name())
-				}
-				fmt.Fprintln(cmd.OutOrStdout())
-				if store := steer.OrchestratorStore(dispatch.Root(), name); store.Counts().Total() > 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), store.Counts().Long())
-					ms, _ := store.List()
-					b, _ := json.Marshal(ms)
-					fmt.Fprint(cmd.OutOrStdout(), steerReceiptTable(string(b)))
-				}
-				var st dispatch.OrchestratorState
-				if b, e := os.ReadFile(filepath.Join(dir, "state.json")); e == nil && json.Unmarshal(b, &st) == nil {
-					if st.Deferred != "" {
-						fmt.Fprintln(cmd.OutOrStdout(), "Deferred: "+st.Deferred)
-					}
-					if sigs, e := dispatch.OrchestratorSignals(name); e == nil {
-						st.Signals = sigs
-					}
-					if len(st.Signals) > 0 {
-						fmt.Fprintln(cmd.OutOrStdout(), "Intake signals:")
-						for _, sig := range st.Signals {
-							fmt.Fprintf(cmd.OutOrStdout(), "  %s %s event=%s run=%s %s\n", sig.At.Format(time.RFC3339), sig.Kind, sig.Event, sig.Run, sig.Error)
-						}
-					}
-				}
-				return nil
-			case "logs":
-				p := filepath.Join(dir, "supervisor.log")
-				if round > 0 {
-					p = filepath.Join(dir, "rounds", fmt.Sprintf("%03d", round), "trace")
-				}
-				b, e := os.ReadFile(p)
-				if e != nil {
-					return e
-				}
-				_, e = cmd.OutOrStdout().Write(b)
-				return e
-			default:
-				if e := dispatch.OrchestratorControl(name, action, to); e != nil {
-					return e
-				}
-				if action == "wake" || action == "handoff" {
-					if e := dispatch.LaunchOrchestrator(name); e != nil {
-						return e
-					}
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), action, name)
-				return nil
-			}
-		}}
-		if action == "logs" {
-			sub.Flags().IntVar(&round, "round", 0, "Round trace number")
-		}
-		if action == "handoff" {
-			sub.Flags().StringVar(&to, "to", "", "New owner session")
-			_ = sub.MarkFlagRequired("to")
-		}
-		c.AddCommand(sub)
+	for _, action := range []string{"show", "logs", "wake", "pause", "resume", "stop", "adopt", "retire", "handoff"} {
+		c.AddCommand(newOrchestrateControl(action))
 	}
 	var event string
 	var admitted, notAdmitted bool
 	reconcile := &cobra.Command{Use: "reconcile NAME --event ID --admitted|--not-admitted", Short: "Resolve an uncertain source receipt after inspecting the target", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if admitted == notAdmitted {
 			return fmt.Errorf("choose exactly one of --admitted or --not-admitted")
+		}
+		if err := requireLocalOrchestrator(args[0]); err != nil {
+			return err
 		}
 		n, e := dispatch.ReconcileSourceReceipt(args[0], event, admitted)
 		if e != nil {
@@ -311,11 +357,22 @@ func newOrchestrateCommand() *cobra.Command {
 	_ = render.MarkFlagRequired("event")
 	c.AddCommand(render)
 	c.AddCommand(newOrchestrateNoticesCommand())
-	c.AddCommand(&cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	c.AddCommand(newSwarmCommand())
+	var scheduled bool
+	supervise := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		// A scheduled-task launch (Windows) carries its environment in a file.
+		done, err := dispatch.AdoptOrchestratorLaunch(args[0], scheduled)
+		if err != nil {
+			return err
+		}
 		// Only source plugins may see plugin-only values from here on.
 		dispatch.HoldPluginOnlyEnv()
-		return dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
-	}})
+		err = dispatch.SuperviseOrchestrator(cmd.Context(), args[0], dispatch.DefaultOrchestratorDriver())
+		done(err)
+		return err
+	}}
+	supervise.Flags().BoolVar(&scheduled, "scheduled", false, "Started by its scheduled task (Windows)")
+	c.AddCommand(supervise)
 	return c
 }
 
@@ -386,4 +443,36 @@ func resolveSpecPaths(file string, b []byte) ([]byte, error) {
 		return nil, e
 	}
 	return []byte("---\n" + string(front) + "---\n" + parsed.Brief + "\n"), nil
+}
+
+func scopedOrchestratorName(w workspace.Selection) string {
+	if w.Name == workspace.Default && len(w.Hosts) == 0 {
+		return ""
+	}
+	return w.Name
+}
+
+func orchestratorWorkspaceMatches(w workspace.Selection, name string) bool {
+	if name == "" {
+		name = workspace.Default
+	}
+	return w.Name == name
+}
+
+func requireLocalOrchestrator(name string) error {
+	selected, err := currentWorkspace()
+	if err != nil {
+		return err
+	}
+	if err = selected.RequireHost(selfHostLabel()); err != nil {
+		return err
+	}
+	spec, err := dispatch.LoadOrchestrator(name)
+	if err != nil {
+		return err
+	}
+	if !orchestratorWorkspaceMatches(selected, spec.WorkspaceName) {
+		return fmt.Errorf("workspace boundary: orchestrator is outside workspace %q", selected.Name)
+	}
+	return nil
 }

@@ -14,6 +14,10 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+
+	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/workspace"
 	"runtime"
 	"strconv"
 	"strings"
@@ -29,7 +33,9 @@ import (
 	"github.com/hev/kit/internal/storagemode"
 )
 
-func Run(args []string) (err error) {
+func Run(args []string) error { return RunWorkspace(args, workspace.Selection{}) }
+
+func RunWorkspace(args []string, w workspace.Selection) (err error) {
 	defer func() {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Print(usage)
@@ -38,6 +44,22 @@ func Run(args []string) (err error) {
 	}()
 	if err := settings.Load(); err != nil {
 		return err
+	}
+	if w.IsolatedStorage() {
+		_, namespace := w.Namespaces()
+		settings.Current.URLSet = w.Layer.BoardURL != ""
+		settings.Current.URL = w.Layer.BoardURL
+		if !settings.Current.URLSet {
+			settings.Current.URL = settings.DefaultURL
+		}
+		settings.Current.Dir = filepath.Join(w.Root(), "board")
+		settings.Current.CanvasDir = filepath.Join(w.Root(), "canvas")
+		settings.Current.PublicURL = w.Layer.BoardURL
+		settings.Current.Namespace = namespace
+		settings.Current.Endpoint = w.Layer.Endpoint
+		if settings.Current.Endpoint == "" {
+			settings.Current.Endpoint = layerenv.HostedEndpoint
+		}
 	}
 	cmd := ""
 	if len(args) > 0 {
@@ -49,7 +71,12 @@ func Run(args []string) (err error) {
 		fmt.Print(usage)
 		return nil
 	case "serve":
-		return runServe(args)
+		return runWorkspaceServe(args, w)
+	}
+	if err := connectWorkspace(w); err != nil {
+		return err
+	}
+	switch cmd {
 	case "", "ls", "list":
 		return runList(args)
 	case "boards":
@@ -79,7 +106,7 @@ func Run(args []string) (err error) {
 	return fmt.Errorf("unknown command %q\n\n%s", cmd, usage)
 }
 
-func runServe(args []string) error {
+func runWorkspaceServe(args []string, w workspace.Selection) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	readOnly := fs.Bool("read-only", settings.Current.ReadOnly, "reject writes and disable view counters")
@@ -89,6 +116,9 @@ func runServe(args []string) error {
 		return err
 	}
 	if *ns != "" {
+		if w.IsolatedStorage() && *ns != settings.Current.Namespace {
+			return fmt.Errorf("workspace boundary: board namespace is outside workspace %q", w.Name)
+		}
 		settings.Current.Namespace = *ns
 	}
 	if *addr == "" {
@@ -101,13 +131,17 @@ func runServe(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return serve(ctx, ln, os.Stderr)
+	return serveStore(ctx, ln, os.Stderr, func() (*store.Store, error) { return workspaceStore(w) })
 }
 
 // serve opens the store storagemode selects and serves it on ln until ctx
 // ends. The first line it writes says which mode the board is in.
 func serve(ctx context.Context, ln net.Listener, stderr io.Writer) error {
-	st, err := store.Open()
+	return serveStore(ctx, ln, stderr, store.Open)
+}
+
+func serveStore(ctx context.Context, ln net.Listener, stderr io.Writer, open func() (*store.Store, error)) error {
+	st, err := open()
 	if err != nil {
 		ln.Close()
 		return err
@@ -143,7 +177,7 @@ func logged(h http.Handler) http.Handler {
 
 func baseURL() string { return strings.TrimRight(settings.Current.URL, "/") }
 
-var client = &http.Client{Timeout: 10 * time.Second}
+var client = &http.Client{Timeout: 10 * time.Second, Transport: inProcess{}}
 
 func call(method, path string, in, out any) error {
 	var body io.Reader
@@ -688,6 +722,9 @@ func storageOf() storageView {
 	var got struct {
 		Mode string `json:"mode"`
 	}
+	if local != nil {
+		return storageView{Mode: string(storagemode.Filesystem), From: "this host's files, no server", Dir: localDir}
+	}
 	if err := call("GET", "/api/storage", nil, &got); err == nil && got.Mode != "" {
 		return storageView{Mode: got.Mode, From: "server"}
 	}
@@ -707,6 +744,9 @@ func storageOf() storageView {
 }
 
 func runOpen() error {
+	if local != nil && !reachable() {
+		return fmt.Errorf("the board here is files in %s and nothing is serving it at %s; run `hev board serve` to browse it", localDir, baseURL())
+	}
 	return openURL(baseURL())
 }
 
@@ -755,6 +795,12 @@ evidence: a rendered page, a UI state, a chart, a game frame. read lists each
 message's images with their URLs; read ID --images DIR saves them into DIR and
 prints each path, so you can open what another agent saw with your own image
 reader. ls and search mark threads that carry images.
+
+Storage: with no Layer API key (the Starter Kit) the board is files on this
+machine in ~/.hev/board (board.dir, $HEV_BOARD_DIR), and every command but
+open works on them directly, no server needed; search is grep, every word
+must match. With a Layer key, or when board.url / FACTORY_BOARD_URL names a
+server, commands talk to that board server; hosted search is semantic.
 
 Configure [board] in kit's config.toml. Legacy FACTORY_BOARD_* overrides are supported.
 `

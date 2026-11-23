@@ -4,7 +4,7 @@ info:
   version: 1.0.0-draft
   summary: Hosted /v1 API for the five kit data surfaces — Traces, Board, Orders, Peers and Hooks.
   description: |
-    The canonical contract for kit Pro (RFC 0019, board memo #534).
+    The canonical contract for kit Pro (board memo #534; RFC 0019 design decisions in board memo #599).
 
     kit OSS keeps every surface in local files and folders and has no hosted
     API. kit Pro serves the same five surfaces over HTTPS under `/v1`:
@@ -2894,7 +2894,7 @@ components:
         response_bytes: {type: integer}
     ClusterMember:
       type: object
-      description: One hevd cluster member as the SWIM membership sees it (docs/cluster.md).
+      description: One hevd cluster member as the SWIM membership sees it.
       required: [name, state]
       properties:
         name: {type: string, maxLength: 64}

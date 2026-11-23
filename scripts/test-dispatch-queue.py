@@ -60,6 +60,11 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
     def starts():
         p = root / "starts"
         return p.read_text().splitlines() if p.exists() else []
+    def sessions():
+        # Each supervisor is the only process of its private-tmux session
+        # d-<name>; the session (and the server, once empty) ends when it exits.
+        r = subprocess.run([real_tmux, "-S", socket, "list-sessions", "-F", "#{session_name}"], capture_output=True, text=True)
+        return r.stdout.split() if r.returncode == 0 else []
     def inventory():
         return json.loads(cli("ls", "--json"))["local"]["rows"]
     try:
@@ -77,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         # Kill the actual supervisor while its harness is still gated. A
         # backstop invocation must recover capacity and stop the orphan.
         assert "position 1" in submit("after-crash")
-        supervisor = json.loads((root / "dispatch/third/supervisor.json").read_text())["pid"]
+        supervisor = json.loads((root / ".hev/orders/third/supervisor.json").read_text())["pid"]
         os.kill(supervisor, signal.SIGKILL)
         wait_for(lambda: subprocess.run([real_tmux, "-S", socket, "has-session", "-t", "d-third"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0, "dead supervisor session")
         cli("sweep")
@@ -90,12 +95,20 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         assert "cancelled queued" in cli("stop", "cancel-two")
         assert not [r for r in inventory() if r["state"] == "queued"]
         (root / "release-after-crash").touch()
-        wait_for(lambda: (root / "dispatch/after-crash/result.json").exists() and json.loads((root / "dispatch/after-crash/result.json").read_text()).get("end", "0001").startswith("20"), "last result")
+        wait_for(lambda: (root / ".hev/orders/after-crash/result.json").exists() and json.loads((root / ".hev/orders/after-crash/result.json").read_text()).get("end", "0001").startswith("20"), "last result")
         assert starts() == ["first", "second", "third", "after-crash"], starts()
+        # result.json's end is not the supervisor's exit: it still writes the
+        # attention notice, removes its records and drains the queue in HOME.
+        # Removing HOME under it fails rmtree, so wait for every supervisor.
+        wait_for(lambda: not sessions(), "supervisors exit after the last result")
         print("PASS: FIFO completion, positions/list, killed-supervisor sweep, concurrent enqueue, cancel")
     finally:
         for name in ["first", "second", "third", "after-crash"]:
             (root / ("release-" + name)).touch()
+        # After a failure, let released supervisors finish before the backstop.
+        deadline = time.monotonic() + 30
+        while sessions() and time.monotonic() < deadline:
+            time.sleep(0.05)
         subprocess.run([real_tmux, "-S", socket, "kill-server"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Remove the temporary worktrees/branches through their owner repo.
         subprocess.run(["git", "-C", str(repo), "worktree", "prune"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -20,7 +20,7 @@ const Usage = `peers: see and talk to the other coding agents running in tmux.
   peers wait TARGET [--timeout S]  block until TARGET is no longer working
   peers chat new MEMBER... [--title T] [-m MESSAGE|-]
                                    a group chat; chat say/add/leave/ls/show (peers chat)
-  peers role [SESSION] [foh|boh|offline]  inspect/set local participation
+  peers role [SESSION] [foh|local|boh|offline]  inspect/set participation
   peers inbox [--peek|--count|--json|--all|--pending] [--limit N] [--session S]
                                    messages held for an inbox session (front of house);
                                    --all inspects history; --current-all inspects current;
@@ -76,9 +76,14 @@ type Message struct {
 	Chat                                         bool
 }
 
-func Main(argv []string, in io.Reader, out, errw io.Writer, observe func(Message)) (code int) {
+func Main(argv []string, in io.Reader, out, errw io.Writer, observe func(Message)) int {
+	return MainScoped(argv, in, out, errw, observe, Scope{})
+}
+
+func MainScoped(argv []string, in io.Reader, out, errw io.Writer, observe func(Message), scope Scope) (code int) {
 	p := newP(in, pyStream{w: out}, pyStream{w: errw, stderr: true})
 	p.observe = observe
+	p.scope = scope
 	defer func() {
 		if r := recover(); r != nil {
 			if c, ok := r.(exitCode); ok {

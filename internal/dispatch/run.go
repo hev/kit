@@ -6,33 +6,45 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/workspace"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 type Meta struct {
-	RequestedBy     string   `json:"requested_by,omitempty"`
-	Sender          string   `json:"sender,omitempty"`
-	Forward         *Host    `json:"forward,omitempty"`
-	Imported        bool     `json:"imported,omitempty"`
-	ResolvedRepo    string   `json:"resolved_repo,omitempty"`
-	BranchCreated   bool     `json:"branch_created,omitempty"`
-	WorktreeCreated bool     `json:"worktree_created,omitempty"`
-	LaunchEnv       []string `json:"launch_env,omitempty"`
-	LaunchResolved  bool     `json:"launch_resolved,omitempty"`
-	HarnessWrapper  []string `json:"harness_wrapper"`
-	SameHost        bool     `json:"same_host,omitempty"`
-	ReviewOnly      bool     `json:"review_only,omitempty"`
-	ParentHostName  string   `json:"parent_host_name,omitempty"`
-	Parent          string   `json:"parent,omitempty"`
-	ParentHost      Host     `json:"parent_host,omitempty"`
-	Revision        string   `json:"revision,omitempty"`
+	WorkspaceName   string          `json:"workspace,omitempty"`
+	Compacted       bool            `json:"compacted,omitempty"`
+	HeadSHA         string          `json:"head_sha,omitempty"`
+	WorkspaceBase   string          `json:"workspace_base,omitempty"`
+	WorkspaceCap    int             `json:"workspace_cap,omitempty"`
+	Implementer     *FallbackTarget `json:"implementer,omitempty"`
+	AllowSameModel  bool            `json:"allow_same_model,omitempty"`
+	RequestedBy     string          `json:"requested_by,omitempty"`
+	Sender          string          `json:"sender,omitempty"`
+	Forward         *Host           `json:"forward,omitempty"`
+	Imported        bool            `json:"imported,omitempty"`
+	ResolvedRepo    string          `json:"resolved_repo,omitempty"`
+	BranchCreated   bool            `json:"branch_created,omitempty"`
+	WorktreeCreated bool            `json:"worktree_created,omitempty"`
+	LaunchEnv       []string        `json:"launch_env,omitempty"`
+	LaunchResolved  bool            `json:"launch_resolved,omitempty"`
+	HarnessWrapper  []string        `json:"harness_wrapper"`
+	SameHost        bool            `json:"same_host,omitempty"`
+	ReviewOnly      bool            `json:"review_only,omitempty"`
+	ParentHostName  string          `json:"parent_host_name,omitempty"`
+	Parent          string          `json:"parent,omitempty"`
+	ParentHost      Host            `json:"parent_host,omitempty"`
+	Revision        string          `json:"revision,omitempty"`
 	Order
 	Branch string    `json:"branch"`
 	Start  time.Time `json:"start"`
@@ -71,6 +83,9 @@ type Meta struct {
 	Untraced     string    `json:"untraced,omitempty"`
 }
 type Result struct {
+	Harness  string           `json:"harness,omitempty"`
+	Model    string           `json:"model,omitempty"`
+	Attempts []HarnessAttempt `json:"fallbacks_tried,omitempty"`
 	// Halted is a run whose turn a halt or redirect steer ended (RFC 0013);
 	// HaltEscalated means the supervisor had to hard-stop it.
 	Halted        bool   `json:"halted,omitempty"`
@@ -113,11 +128,26 @@ type Result struct {
 	// result still joins its worker session to the right attempt span.
 	TraceID string `json:"trace_id,omitempty"`
 	SpanID  string `json:"span_id,omitempty"`
+	// ClosedAt, ClosedBy and ClosedReason record a person's terminal
+	// disposition (hev dispatch close): the work was finished elsewhere or
+	// superseded by SupersededBy ([HOST/]NAME). Reason and Outcome keep the
+	// worker's own marker. A rework, retry or amend writes a new result and
+	// so reopens the run. Older results have none of these.
+	ClosedAt     time.Time `json:"closed_at,omitzero"`
+	ClosedBy     string    `json:"closed_by,omitempty"`
+	ClosedReason string    `json:"closed_reason,omitempty"`
+	SupersededBy string    `json:"superseded_by,omitempty"`
 }
+
+// Closed reports whether a person closed the run (see hev dispatch close).
+func (r *Result) Closed() bool { return r != nil && !r.ClosedAt.IsZero() }
 
 func State(r *Result, live bool) string {
 	if live {
 		return "running"
+	}
+	if r.Closed() {
+		return "closed"
 	}
 	if r != nil && r.LaunchUnconfirmed {
 		return "launch-unconfirmed"
@@ -195,7 +225,7 @@ func workerPrompt(dir string, m Meta) string {
 
 // reviewNotesPrompt asks a worker for ../review-notes.json: anchored notes in
 // hunk's agent-context format that hev review shows beside the diff (see
-// internal/reviewnotes and docs/review.md).
+// internal/reviewnotes and https://hevkit.com/docs/review).
 func reviewNotesPrompt(m Meta) string {
 	author := strings.TrimSpace(m.Name + " " + m.Model)
 	if author == "" {
@@ -326,30 +356,6 @@ func superviseRound(name string) (superviseErr error) {
 	defer os.Remove(filepath.Join(dir, "harness.json"))
 	resultPath := filepath.Join(dir, "result.json")
 	wt := filepath.Join(dir, "wt")
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
-	if m.Harness == "claude" {
-		args = []string{"-p", "--verbose", "--output-format", "stream-json", "--dangerously-skip-permissions"}
-	}
-	if m.Model != "" {
-		args = append(args, "--model", m.Model)
-	}
-	prompt := workerPrompt(dir, m)
-	if m.Every != "" {
-		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
-	}
-	if m.Until == "all followed runs merged or abandoned" {
-		if m.Harness == "codex" {
-			args = append(args, "-c", `model_reasoning_effort="high"`)
-		} else {
-			args = append(args, "--effort", "high")
-		}
-	}
-	prompt = requestedPrompt(prompt, m) + skillsNote(m)
-	args = append(args, prompt)
-	var hookEnv []string
-	if m.Parent == "" {
-		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
-	}
 	log, e := os.OpenFile(filepath.Join(dir, "log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return e
@@ -358,129 +364,59 @@ func superviseRound(name string) (superviseErr error) {
 	if m.Every != "" {
 		_ = json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.round", "order": m.Name, "round": loadSchedule(dir).Rounds})
 	}
-	child := harnessCommand(harnessWrapper(m), m.Harness, args)
-	child.Dir = wt
-	child.Stdout = log
-	child.Stderr = log
-	env, err := launchEnvironment(dir)
-	if err != nil {
+	candidates := append(FallbackChain{{m.Harness, m.Model, m.Effort}}, m.Fallbacks...)
+	if err := m.Fallbacks.validate(); err != nil {
 		return err
 	}
-	child.Env = append(workerEnvironment(m, os.Environ(), env), hookEnv...)
-	if m.Namespace != "" {
-		child.Env = namespaceEnvironment(child.Env, m.Namespace)
-	}
-	// The assembled context reaches the harness on standard input; a recipe
-	// without its verified bundle fails here instead of launching without it.
-	input, startErr := contextInput(dir, m)
-	if input != nil {
-		defer input.Close()
-		child.Stdin = input
-	}
-	// Recipe-driven runs see their instruction files in the recipe's form
-	// for exactly as long as the harness runs (see instructions.go).
-	restoreFiles := func() []string { return nil }
-	if startErr == nil {
-		restoreFiles, startErr = applyInstructions(dir, m)
-	}
-	// Shelf skills the run enables are linked for exactly as long as the
-	// harness runs (see skills.go).
-	restoreSkillLinks := func() []string { return nil }
-	if startErr == nil {
-		restoreSkillLinks, startErr = applySkills(dir, m)
-	}
-	setupChild(child)
-	_ = WriteJSON(resultPath, r)
-	kill := func() {}
-	if startErr == nil {
-		kill, startErr = startChild(child)
-	}
-	if startErr == nil {
-		if err := recordHarness(dir, child); err != nil {
-			kill()
-			_ = child.Wait()
-			startErr = err
-		}
-	}
-	if e = startErr; e != nil {
-		r.Error = e.Error()
-	} else {
-		done := make(chan error, 1)
-		go func() { done <- child.Wait() }()
-		ticker := time.NewTicker(200 * time.Millisecond)
-		defer ticker.Stop()
-		roundLimit := time.Duration(m.Timeout) * time.Minute
-		if m.Every != "" {
-			lifetime, _ := time.ParseDuration(m.MaxLifetime)
-			remaining := time.Until(m.Start.Add(lifetime))
-			if remaining < roundLimit {
-				roundLimit = remaining
-			}
-		}
-		deadline := time.NewTimer(roundLimit)
-		defer deadline.Stop()
-		finished := false
-		ticks := 0
-		for !finished {
+	for i, target := range candidates {
+		if i > 0 {
 			select {
-			case e = <-done:
-				finished = true
-			case <-ticker.C:
-				reloadAttemptOrder(dir, &m, r.Start, deadline)
-				if r.Session == "" {
-					if id := sessionFromLog(filepath.Join(dir, "log")); id != "" {
-						r.Session = id
-						_ = WriteJSON(resultPath, r)
-					}
-				}
-				if _, err := os.Stat(filepath.Join(dir, "stop")); err == nil {
-					r.Stopped = true
-					kill()
-					e = <-done
-					finished = true
-				} else if ticks++; ticks%5 == 0 && escalateHalt(dir) {
-					// A halt that has not ended its turn in time becomes a
-					// hard stop, and the result says so.
-					r.HaltEscalated = true
-					kill()
-					e = <-done
-					finished = true
-				}
 			case sig := <-signals:
-				r.Stopped = true
 				r.Signal = sig.String()
-				kill()
-				e = <-done
-				finished = true
-			case <-deadline.C:
-				r.Timeout = true
-				kill()
-				e = <-done
-				finished = true
+				r.Stopped = true
+			default:
 			}
-		}
-		// Also remove descendants left behind by an exited harness.
-		kill()
-		r.ExitCode = 0
-		if e != nil {
-			r.ExitCode = 1
-			if ee, ok := e.(*exec.ExitError); ok {
-				r.ExitCode = ee.ExitCode()
-				if r.ExitCode < 0 {
-					r.ExitCode = 137
+			if r.Stopped || exists(filepath.Join(dir, "stop")) {
+				r.ExitCode = 143
+				r.Stopped = true
+				break
+			}
+			if m.Parent != "" && !m.AllowSameModel && (m.Implementer == nil || CheckValidator(Order{Harness: m.Implementer.Harness, Model: m.Implementer.Model}, ValidationConfig{Harness: target.Harness, Model: target.Model}, false) != nil) {
+				continue
+			}
+			reloadAttemptOrder(dir, &m, r.Start, nil)
+			if workerRemaining(m, r.Start) <= 0 {
+				r.Timeout = true
+				break
+			}
+			if err := json.NewEncoder(log).Encode(map[string]any{"type": "dispatch.fallback", "target": target, "previous": r.Attempts[len(r.Attempts)-1]}); err != nil {
+				return err
+			}
+			if m.Parent != "" {
+				if err := os.Remove(filepath.Join(dir, "verdict.json")); err != nil && !os.IsNotExist(err) {
+					return err
 				}
 			}
 		}
-		if r.Stopped {
-			r.ExitCode = 143
+		attempt := m
+		attempt.Harness, attempt.Model, attempt.Effort = target.Harness, target.Model, target.Effort
+		r.Harness, r.Model, r.Error, r.Session, r.ExitCode = target.Harness, target.Model, "", "", 1
+		setupErr := workerAttempt(dir, wt, resultPath, attempt, &r, log, signals)
+		if setupErr != nil {
+			r.Error = setupErr.Error()
 		}
-	}
-	r.InstructionWarnings = append(restoreFiles(), restoreSkillLinks()...)
-	if m.Parent == "" {
-		afterHalt(dir, m.Name, &r)
-	}
-	if r.Session == "" {
-		r.Session = sessionFromLog(filepath.Join(dir, "log"))
+		a := HarnessAttempt{FallbackTarget: target, Status: "succeeded"}
+		if r.ExitCode != 0 {
+			a.Status = "failed"
+			a.Error = r.Error
+			if a.Error == "" {
+				a.Error = fmt.Sprintf("exit %d", r.ExitCode)
+			}
+		}
+		r.Attempts = append(r.Attempts, a)
+		if setupErr != nil || r.ExitCode == 0 || r.Stopped || r.Timeout || r.Halted || r.HaltEscalated {
+			break
+		}
 	}
 	reloadAttemptOrder(dir, &m, r.Start, nil)
 	r.End = time.Now().UTC()
@@ -535,6 +471,14 @@ func superviseRound(name string) (superviseErr error) {
 		}
 	}
 	cfg, configErr := Load(m.ConfigPath)
+	if configErr == nil && m.WorkspaceName != "" {
+		selected, err := workspace.Named(m.WorkspaceName)
+		if err != nil {
+			configErr = err
+		} else {
+			cfg.ScopeWorkspace(selected)
+		}
+	}
 	if configErr != nil && m.Parent == "" {
 		r.NotifyError = "target notification config: " + configErr.Error()
 		noticeRunEnd(dir, m, r)
@@ -602,8 +546,30 @@ func workerEnvironment(m Meta, base, launch []string) []string {
 	return append(env, traceEnvironment(m)...)
 }
 
+// runArgs is one attempt's harness argv, prompt last. A follow-through
+// orchestrator without an explicit effort runs at high effort.
+func runArgs(m Meta, prompt string) []string {
+	effort := m.Effort
+	if effort == "" && m.Until == "all followed runs merged or abandoned" {
+		effort = "high"
+	}
+	return harnessArgs(m.Harness, m.Model, effort, prompt)
+}
+
 func sessionFromLog(path string) string {
-	b, _ := os.ReadFile(path)
+	return sessionFromLogAt(path, 0)
+}
+
+func sessionFromLogAt(path string, offset int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	if _, err = f.Seek(offset, io.SeekStart); err != nil {
+		return ""
+	}
+	b, _ := io.ReadAll(f)
 	for _, line := range strings.Split(string(b), "\n") {
 		var v map[string]any
 		if json.Unmarshal([]byte(line), &v) != nil {
@@ -614,6 +580,12 @@ func sessionFromLog(path string) string {
 		}
 		if s, ok := v["session_id"].(string); ok {
 			return s
+		}
+		// agy's stream-json result event: {"event":"result","result":{"conversation_id":...}}
+		if res, ok := v["result"].(map[string]any); ok {
+			if s, ok := res["conversation_id"].(string); ok && s != "" {
+				return s
+			}
 		}
 	}
 	return ""
@@ -733,4 +705,195 @@ func namespaceEnvironment(env []string, namespace string) []string {
 		}
 	}
 	return append(out, "HEVLAYER_NAMESPACE="+namespace)
+}
+
+func workerRemaining(m Meta, start time.Time) time.Duration {
+	roundLimit := time.Until(start.Add(time.Duration(m.Timeout) * time.Minute))
+	if m.Every != "" {
+		lifetime, _ := time.ParseDuration(m.MaxLifetime)
+		remaining := time.Until(m.Start.Add(lifetime))
+		if remaining < roundLimit {
+			roundLimit = remaining
+		}
+	}
+	return roundLimit
+}
+func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, signals <-chan os.Signal) error {
+	logStart, err := log.Seek(0, io.SeekEnd)
+	if err != nil {
+		return err
+	}
+	descriptor, ok := harness.DispatchFor(m.Harness)
+	if !ok {
+		return fmt.Errorf("unsupported dispatch harness %q", m.Harness)
+	}
+	prompt := workerPrompt(dir, m)
+	if m.Every != "" {
+		prompt = fmt.Sprintf("Order %s: start by reading ../inbox.md and ../round-notes.md. %s End this round by updating ../round-notes.md. Evaluate until: %s. Only when it is met, write ../until-met.json containing {\"met\":true,\"reason\":\"your evidence\"}. Round %d.", m.Name, prompt, m.Until, loadSchedule(dir).Rounds)
+	}
+	args := runArgs(m, requestedPrompt(prompt, m)+skillsNote(m))
+	var hookEnv []string
+	if m.Parent == "" {
+		args, hookEnv = wireHooks(m.Harness, filepath.Join(dir, "steer"), "dispatch:"+m.Name, args, nil)
+	}
+	env, err := launchEnvironment(dir)
+	if err != nil {
+		return err
+	}
+	childEnv := append(workerEnvironment(m, os.Environ(), env), descriptor.Dispatch.Env...)
+	childEnv = append(childEnv, hookEnv...)
+	if m.Namespace != "" {
+		childEnv = namespaceEnvironment(childEnv, m.Namespace)
+	}
+	// [harnesses.NAME] adds resolved secret env and agy's model provider.
+	// Values live only in this process and the child's environment.
+	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
+	childEnv, args, secretValues, harnessErr := workspaceHarnessLaunch(m.WorkspaceName, harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
+	harnessCancel()
+	var slotLock *os.File
+	var workspaceCap int
+	if m.WorkspaceCap > 0 && harnessErr == nil {
+		workspaceCap, err = dispatchWorkspaceCap()
+		if err != nil {
+			return err
+		}
+	}
+	if workspaceCap > 0 {
+		pool, err := workspacePool(wt)
+		if err != nil {
+			return err
+		}
+		slot, lock, release, err := leaseWorkspaceSlot(pool, workspaceCap)
+		if err != nil {
+			return err
+		}
+		defer release()
+		slotLock = lock
+		childEnv = cargoWorkspaceEnvironment(childEnv, wt, slot)
+	}
+	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
+	child.Dir = wt
+	// On Unix the harness keeps the flock if the supervisor is killed first.
+	// Windows launches the harness in a kill-on-close job.
+	if slotLock != nil && runtime.GOOS != "windows" {
+		child.ExtraFiles = append(child.ExtraFiles, slotLock)
+	}
+	// Output reaches the log with resolved env_refs values redacted.
+	waitChild := harnessOutput(child, log, secretValues)
+	child.Env = childEnv
+	// The assembled context reaches the harness on standard input; a recipe
+	// without its verified bundle fails here instead of launching without it.
+	input, startErr := contextInput(dir, m)
+	if startErr == nil && harnessErr != nil {
+		r.Error = harnessErr.Error()
+		_ = WriteJSON(resultPath, r)
+		return nil
+	}
+	if input != nil {
+		defer input.Close()
+		child.Stdin = input
+	}
+	// Recipe-driven runs see their instruction files in the recipe's form
+	// for exactly as long as the harness runs (see instructions.go).
+	restoreFiles := func() []string { return nil }
+	if startErr == nil {
+		restoreFiles, startErr = applyInstructions(dir, m)
+	}
+	// Shelf skills the run enables are linked for exactly as long as the
+	// harness runs (see skills.go).
+	restoreSkillLinks := func() []string { return nil }
+	if startErr == nil {
+		restoreSkillLinks, startErr = applySkills(dir, m)
+	}
+	defer func() {
+		r.InstructionWarnings = append(r.InstructionWarnings, restoreFiles()...)
+		r.InstructionWarnings = append(r.InstructionWarnings, restoreSkillLinks()...)
+	}()
+	if startErr != nil {
+		return startErr
+	}
+	setupChild(child)
+	_ = WriteJSON(resultPath, r)
+	kill, startErr := startChild(child)
+	if startErr == nil {
+		if err := recordHarness(dir, child); err != nil {
+			kill()
+			_ = waitChild()
+			startErr = err
+		}
+	}
+	var e error
+	if e = startErr; e != nil {
+		r.Error = e.Error()
+	} else {
+		done := make(chan error, 1)
+		go func() { done <- waitChild() }()
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		deadline := time.NewTimer(workerRemaining(m, r.Start))
+		defer deadline.Stop()
+		finished := false
+		ticks := 0
+		for !finished {
+			select {
+			case e = <-done:
+				finished = true
+			case <-ticker.C:
+				reloadAttemptOrder(dir, &m, r.Start, deadline)
+				if r.Session == "" {
+					if id := sessionFromLogAt(filepath.Join(dir, "log"), logStart); id != "" {
+						r.Session = id
+						_ = WriteJSON(resultPath, r)
+					}
+				}
+				if _, err := os.Stat(filepath.Join(dir, "stop")); err == nil {
+					r.Stopped = true
+					kill()
+					e = <-done
+					finished = true
+				} else if ticks++; ticks%5 == 0 && escalateHalt(dir) {
+					// A halt that has not ended its turn in time becomes a
+					// hard stop, and the result says so.
+					r.HaltEscalated = true
+					kill()
+					e = <-done
+					finished = true
+				}
+			case sig := <-signals:
+				r.Stopped = true
+				r.Signal = sig.String()
+				kill()
+				e = <-done
+				finished = true
+			case <-deadline.C:
+				r.Timeout = true
+				kill()
+				e = <-done
+				finished = true
+			}
+		}
+		// Also remove descendants left behind by an exited harness.
+		kill()
+		r.ExitCode = 0
+		if e != nil {
+			r.ExitCode = 1
+			if ee, ok := e.(*exec.ExitError); ok {
+				r.ExitCode = ee.ExitCode()
+				if r.ExitCode < 0 {
+					r.ExitCode = 137
+				}
+			}
+		}
+		if r.Stopped {
+			r.ExitCode = 143
+		}
+	}
+
+	if m.Parent == "" {
+		afterHalt(dir, m.Name, r)
+	}
+	if r.Session == "" {
+		r.Session = sessionFromLogAt(filepath.Join(dir, "log"), logStart)
+	}
+	return nil
 }

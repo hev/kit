@@ -10,7 +10,7 @@ import (
 
 func init() {
 	var root, host, executor string
-	cmd := &cobra.Command{Use: "native-job", Short: "Run one opt-in local native-jobs/v1 journal call from stdin", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "native-job", Short: "Run one opt-in local native-jobs/v1 journal call from stdin", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if root == "" || host == "" || executor == "" {
 			return errors.New("explicit --root, --host and --executor required")
 		}

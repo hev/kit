@@ -9,14 +9,14 @@ import (
 
 // The supervisor occupies the same pane during rounds and rest. While resting
 // it blocks on filesystem controls and a deadline, with no shell polling loop.
-func launchOrchestratorTmux(exe, name string) (bool, error) {
+func launchOrchestratorDetached(exe, name string) (bool, error) {
 	s, err := LoadOrchestrator(name)
 	if err != nil {
 		return true, err
 	}
 	args := []string{"new-session", "-d", "-s", "o-" + name, "-c", OrchestratorDir(name)}
 	// A pre-existing tmux server may carry another HOME or identity.
-	for _, key := range []string{"HOME", "USERPROFILE", "PATH", "HEV_DISPATCH_CONFIG"} {
+	for _, key := range []string{"HOME", "USERPROFILE", "PATH", "HEV_DISPATCH_CONFIG", "HEV_ORDERS_DIR"} {
 		if v, ok := os.LookupEnv(key); ok {
 			args = append(args, "-e", key+"="+v)
 		}

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/skillsources"
 )
@@ -19,7 +20,7 @@ import (
 // own shelf before the run is accepted, so an unknown skill or a second mode
 // pack is refused at dispatch, and links exactly those skills into the
 // worktree's project skill root for the harness (.claude/skills for Claude
-// Code, .agents/skills for Codex) for as long as the harness runs. Bundled
+// Code, .agents/skills for Codex and agy) for as long as the harness runs. Bundled
 // kit skills and the operator's own skills in the home roots are untouched.
 //
 // The links are kept out of git by a .gitignore dispatch writes in the skill
@@ -33,11 +34,11 @@ const skillsState = "skills.json"
 type RunSkill = skillsources.Enabled
 
 // harnessSkillRoot is the worktree skill directory a harness reads.
-func harnessSkillRoot(harness string) string {
-	if harness == "codex" {
-		return filepath.Join(".agents", "skills")
+func harnessSkillRoot(name string) string {
+	if d, ok := harness.DispatchFor(name); ok {
+		return filepath.FromSlash(d.Dispatch.ProjectSkills)
 	}
-	return filepath.Join(".claude", "skills")
+	return ""
 }
 
 // shelfHome and shelfConfig locate the target's shelf; tests replace them.
@@ -117,6 +118,9 @@ func applySkills(dir string, m Meta) (func() []string, error) {
 	}
 	wt := filepath.Join(dir, "wt")
 	rel := harnessSkillRoot(m.Harness)
+	if rel == "" {
+		return noop, fmt.Errorf("harness %q has no dispatch skill directory", m.Harness)
+	}
 	root := filepath.Join(wt, rel)
 	var rec skillsRecord
 	save := func() error { return WriteJSON(filepath.Join(dir, skillsState), rec) }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/workspace"
 	"maps"
 	"os"
 	"path/filepath"
@@ -60,12 +61,12 @@ func (s *OrchestratorSource) UnmarshalYAML(n *yaml.Node) error {
 func (s OrchestratorSource) Validate() error {
 	if s.Plugin == "" {
 		if len(s.Rules) > 0 || s.Team != "" || len(s.Args) > 0 || len(s.Env) > 0 {
-			return fmt.Errorf("source plugin required")
+			return fmt.Errorf("source.plugin required")
 		}
 		return nil
 	}
 	if !ValidName(s.Plugin) {
-		return fmt.Errorf("invalid source plugin")
+		return fmt.Errorf("invalid source.plugin")
 	}
 	if e := validatePluginEnv("source.env", s.Env); e != nil {
 		return e
@@ -160,7 +161,7 @@ func fetchSource(ctx context.Context, s OrchestratorSpec) (SourceBatch, error) {
 		return batch, e
 	}
 	if !desc.Source {
-		return batch, fmt.Errorf("plugin does not advertise source support")
+		return batch, fmt.Errorf("source exec command does not advertise source support")
 	}
 	batch.Ack, batch.AckBatch = desc.Ack, desc.Ack && desc.AckBatch
 	var cursor struct {
@@ -705,6 +706,14 @@ func runSourceRules(ctx context.Context, s OrchestratorSpec, st *OrchestratorSta
 	if e != nil {
 		return out, e
 	}
+	if s.WorkspaceName != "" {
+		w, err := workspace.Named(s.WorkspaceName)
+		if err != nil {
+			return out, err
+		}
+		cfg.ScopeWorkspace(w)
+		ctx = WorkspaceContext(ctx, w)
+	}
 	r := &sourceRunner{ctx: ctx, s: s, st: st, cfg: cfg, ev: ev, roundDir: roundDir, now: sourceNow().UTC(), poll: sourcePoll(s), seen: map[string]bool{}}
 	for _, v := range ev {
 		if v.Row.State == "running" {
@@ -1057,7 +1066,7 @@ func (r *sourceRunner) dispatch(rule SourceRule, events []SourceEvent, keys []st
 		return r.reject(rule, events, keys, name, host, attempts, fmt.Errorf("unknown source target %s", host))
 	}
 	// A source event has no ask behind it, so the run is recorded untraced.
-	q := Request{Action: "start", Name: name, Order: rendered, Orchestrator: s.Name, Meta: Meta{Order: order, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath, Untraced: "orchestrator " + s.Name + " source event"}, Cap: h.Cap, Workspace: h.Workspace}
+	q := Request{Action: "start", Name: name, Order: rendered, Orchestrator: s.Name, Meta: Meta{WorkspaceName: s.WorkspaceName, Order: order, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper, ConfigPath: h.ConfigPath, Untraced: "orchestrator " + s.Name + " source event"}, Cap: h.Cap, Workspace: h.Workspace}
 	check := q
 	check.AdmissionOnly = true
 	// The probe also admits and reserves a classed order's slot on the

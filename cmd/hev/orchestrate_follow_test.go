@@ -147,6 +147,54 @@ func TestFollowPresetParity(t *testing.T) {
 	if e != nil || snapshot.Authority != p.Authority || len(snapshot.Runs) != 1 || snapshot.Runs[0].Name != "task" {
 		t.Fatal(snapshot, e)
 	}
+	pMerge := followthrough.Plan{Name: "follow-merge", Reply: "desk/owner", Authority: "merge-on-green", Runs: []followthrough.Run{{Host: "worker", Name: "task", Repo: "sample"}}}
+	om, tm, e := followOrder(dispatch.Order{Name: pMerge.Name, Host: "worker", Repo: "sample", Reply: pMerge.Reply, Every: "7m", MaxLifetime: "2h"}, pMerge)
+	if e != nil {
+		t.Fatal(e)
+	}
+	sm := followPreset(om, tm)
+	if e = sm.Validate(); e != nil {
+		t.Fatal(e)
+	}
+	if strings.Join(sm.Authority, ",") != "say,rework,notify,validate,merge" {
+		t.Fatalf("expected merge authority for merge-on-green, got %v", sm.Authority)
+	}
+}
+
+func TestOrchestrateApplyRoutesRemoteHost(t *testing.T) {
+	oldRPC := orchestrateApplyRPC
+	t.Cleanup(func() { orchestrateApplyRPC = oldRPC })
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "dispatch.toml")
+	if err := os.WriteFile(cfgPath, []byte("[hosts.oven]\nssh = 'oven'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_DISPATCH_CONFIG", cfgPath)
+	t.Setenv("PEERS_SELF", "macbook")
+	specPath := filepath.Join(dir, "spec.md")
+	spec := "---\nkind: orchestrator\nname: remote-test\ngoal: Verify remote apply\nhost: oven\nmode: once\nmanages:\n  runs: {names: [task-1]}\n---\nCheck task-1.\n"
+	if err := os.WriteFile(specPath, []byte(spec), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var gotHost dispatch.Host
+	var gotReq dispatch.Request
+	orchestrateApplyRPC = func(_ context.Context, h dispatch.Host, q dispatch.Request) (dispatch.Response, error) {
+		gotHost, gotReq = h, q
+		return dispatch.Response{}, nil
+	}
+	c := newOrchestrateCommand()
+	var out bytes.Buffer
+	c.SetOut(&out)
+	c.SetArgs([]string{"apply", "-f", specPath})
+	if err := c.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if gotHost.SSH != "oven" || gotReq.Action != "orchestrator-apply" || gotReq.Name != "remote-test" {
+		t.Fatalf("expected remote orchestrator-apply to oven, got host=%+v req=%+v", gotHost, gotReq)
+	}
+	if !strings.Contains(out.String(), "applied remote-test on oven") {
+		t.Fatalf("unexpected output: %s", out.String())
+	}
 }
 
 func TestFollowCrossHostAdmission(t *testing.T) {
@@ -223,7 +271,7 @@ func TestFollowStatusUndeliveredNotices(t *testing.T) {
 func TestFollowHarnessModelPrecedence(t *testing.T) {
 	var cfg dispatch.Config
 	h, m := followModel(cfg, "", "")
-	if h != "claude" || m != "claude-fable-5-2" {
+	if h != "agy" || m != "gemini-4-neon-medium" {
 		t.Fatal(h, m)
 	}
 	cfg.Orchestrate.Follow.Harness = "codex"

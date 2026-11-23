@@ -112,7 +112,7 @@ func packAttempt(dir, branch string, h History) ([]byte, error) {
 			}
 			return nil
 		}
-		if rel == "meta.json" || rel == "history.json" || rel == "order.md" || rel == "stop" || rel == "admission.json" || rel == "supervisor.json" || rel == "harness.json" {
+		if rel == "meta.json" || rel == "history.json" || rel == "order.md" || rel == "stop" || rel == "admission.json" || rel == "supervisor.json" || rel == "harness.json" || rel == supervisorLaunchFile || rel == supervisorExitFile {
 			return nil
 		}
 		link := ""
@@ -247,6 +247,11 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	dirCreated = true
 	next := q.Meta
 	next.ResolvedRepo = repo
+	next.Compacted, next.HeadSHA, next.WorkspaceBase = false, "", ""
+	next.WorkspaceCap, err = dispatchWorkspaceCap()
+	if err != nil {
+		return r, err
+	}
 	next.WorktreeCreated = false
 	next.BranchCreated = true
 	resolveLaunch(&next, cfg)

@@ -5,7 +5,7 @@
 # pre-release tagged edge-X.Y.Z-edge.<sha>, with checksums.txt and
 # manifest.json (version, commit, sequence and each archive's sha256), where
 # any host can fetch them without credentials. `hev update --channel edge`
-# reads them; see site/src/content/docs/updating.mdx.
+# reads them; see https://hevkit.com/docs/updating.
 #
 # Why per-commit pre-releases rather than one rolling release: each build
 # keeps an immutable tag and URL, so `hev update --to X.Y.Z-edge.<sha>` and a

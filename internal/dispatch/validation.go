@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 // ValidatorPrompt deliberately supersedes the implementation worker defaults.
@@ -74,8 +76,11 @@ func ParseVerdict(b []byte) (*Verdict, error) {
 	return &v, nil
 }
 func CheckValidator(o Order, v ValidationConfig, allow bool) error {
-	if v.Harness != "codex" && v.Harness != "claude" {
+	if _, ok := harness.DispatchFor(v.Harness); !ok {
 		return fmt.Errorf("invalid validation harness %q", v.Harness)
+	}
+	if e := checkEffort(v.Effort); e != nil {
+		return fmt.Errorf("validation: %w", e)
 	}
 	if !allow && o.Model == v.Model && (o.Model != "" || o.Harness == v.Harness) {
 		return fmt.Errorf("validator %s/%s equals implementer %s/%s; use --allow-same-model", v.Harness, v.Model, o.Harness, o.Model)
@@ -120,7 +125,7 @@ func validationRecords(dir string) []ValidationRecord {
 func Validate(ctx context.Context, c Config, name, target string, allow bool) (Response, error) {
 	caller := DetectCaller()
 	if currentOrchestratorIdentity() != "" {
-		return validateAs(ctx, c, name, "", false, target, &caller)
+		return validateAs(ctx, c, name, "", allow, target, &caller)
 	}
 	return validateAs(ctx, c, name, target, allow, "", &caller)
 }
@@ -132,9 +137,24 @@ func validateFrom(ctx context.Context, c Config, name, target string, allow bool
 // recorded on the source run; without one it is the run's own follow-through.
 func validateAs(ctx context.Context, c Config, name, target string, allow bool, source string, caller *Caller) (Response, error) {
 	var empty Response
+	if label, run, err := SplitRunAddress(name); err == nil && label != "" {
+		if source != "" && source != label {
+			return empty, fmt.Errorf("validation source and run address disagree")
+		}
+		source, name = label, run
+	}
 	if target == "" {
 		target = c.Validation.Host
 	}
+	if err := c.SelectedWorkspace.RequireHost(target); err != nil {
+		return empty, err
+	}
+	if source != "" {
+		if err := c.SelectedWorkspace.RequireHost(source); err != nil {
+			return empty, err
+		}
+	}
+	ctx = WorkspaceContext(ctx, c.SelectedWorkspace)
 	h, ok := c.Hosts[target]
 	if !ok {
 		return empty, fmt.Errorf("unknown validation host %s", target)
@@ -174,11 +194,17 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	if err = json.Unmarshal([]byte(show.Files["meta.json"]), &m); err != nil {
 		return empty, err
 	}
+	if err := checkRunWorkspace(c.SelectedWorkspace.Name, m); err != nil {
+		return empty, err
+	}
 	if m.Parent != "" {
 		return empty, fmt.Errorf("validation requires an implementation order")
 	}
 	if err = json.Unmarshal([]byte(show.Files["result.json"]), &result); err != nil || (State(&result, false) != "done" && State(&result, false) != "needs-review") || OpenDecision(&result) {
 		return empty, fmt.Errorf("validation requires a done run")
+	}
+	if result.Harness != "" {
+		m.Harness, m.Model = result.Harness, result.Model
 	}
 	if err = CheckValidator(m.Order, c.Validation, allow); err != nil {
 		return empty, err
@@ -192,7 +218,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	save := func() {
 		_, _ = RPC(ctx, parent, Request{Action: "validation-result", Name: name, ValidationRecord: record})
 	}
-	vm := Meta{ReviewOnly: m.Validation != "browser", Sender: m.Sender, RequestedBy: requester(m), SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
+	vm := Meta{WorkspaceName: m.WorkspaceName, AllowSameModel: allow, Implementer: &FallbackTarget{Harness: m.Harness, Model: m.Model}, ReviewOnly: m.Validation != "browser", Sender: m.Sender, RequestedBy: requester(m), SameHost: sameHost, ParentHostName: source, Order: m.Order, Parent: name, ParentHost: parent, Revision: result.Head, ConfigPath: h.ConfigPath, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}
 	if h.Local && vm.ConfigPath == "" {
 		vm.ConfigPath = m.ConfigPath
 	}
@@ -209,6 +235,7 @@ func validateAs(ctx context.Context, c Config, name, target string, allow bool, 
 	vm.Host = target
 	vm.Harness = c.Validation.Harness
 	vm.Model = c.Validation.Model
+	vm.Effort = c.Validation.Effort
 	vm.Validation = "none"
 	vm.Branch = result.Branch
 	workspace := h.Workspace
@@ -342,7 +369,7 @@ func VerifyVerdict(dir string, v *Verdict) error {
 	}
 	seen := map[string]bool{}
 	for _, item := range v.Items {
-		key := strings.Join(strings.Fields(item.Item), " ")
+		key := normalizeAcceptanceText(item.Item)
 		if !items[key] || seen[key] {
 			return fmt.Errorf("unknown or duplicate Acceptance item %q", item.Item)
 		}
@@ -376,7 +403,14 @@ func VerifyVerdict(dir string, v *Verdict) error {
 	return nil
 }
 
-var acceptanceBullet = regexp.MustCompile(`^(?:[-*+]|[0-9]+[.)])\s+`)
+var acceptanceBullet = regexp.MustCompile(`^(?:[-*+]|[0-9]+[.)])\s+(?:\[[ xX]\]\s+)?`)
+var acceptanceCheckbox = regexp.MustCompile(`^\[[ xX]\]\s+`)
+
+func normalizeAcceptanceText(s string) string {
+	s = strings.TrimSpace(s)
+	s = acceptanceCheckbox.ReplaceAllString(s, "")
+	return strings.Join(strings.Fields(s), " ")
+}
 
 func acceptanceItems(order string) map[string]bool {
 	result := map[string]bool{}
@@ -384,7 +418,7 @@ func acceptanceItems(order string) map[string]bool {
 	current := ""
 	flush := func() {
 		if current != "" {
-			result[strings.Join(strings.Fields(current), " ")] = true
+			result[normalizeAcceptanceText(current)] = true
 			current = ""
 		}
 	}

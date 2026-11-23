@@ -38,9 +38,15 @@ func launchEnvironment(dir string) ([]string, error) {
 }
 
 func resolveLaunch(m *Meta, cfg Config) {
-	keys := []string{"PATH", "HOME", "USERPROFILE", "SHELL", "LANG", "LC_ALL", "TMPDIR", "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEVLAYER_API_KEY", "HEVLAYER_API_KEY_OP_REF", "HEVLAYER_API_KEY_REF", "LAYER_API_KEY_OP_REF", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT", "HEVLAYER_STORE", "FACTORY_BOARD_URL", "HEV_CONFIG", "HEV_PEERS_BACKEND", "HEV_PEERS_STATE", "PEERS_SELF", "HEV_DISPATCH_CONFIG"}
+	if m.Fallbacks == nil {
+		m.Fallbacks = cfg.Fallbacks
+	}
+	keys := []string{"PATH", "HOME", "USERPROFILE", "SHELL", "LANG", "LC_ALL", "TMPDIR", "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "HEVLAYER_API_KEY", "HEVLAYER_API_KEY_OP_REF", "HEVLAYER_API_KEY_REF", "LAYER_API_KEY_OP_REF", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT", "HEVLAYER_STORE", "FACTORY_BOARD_URL", "HEV_CONFIG", "HEV_PEERS_BACKEND", "HEV_PEERS_STATE", "PEERS_SELF", "HEV_DISPATCH_CONFIG", "HEV_ORDERS_DIR"}
 	for _, name := range []string{"HEVLAYER_API_KEY", "HEVLAYER_NAMESPACE", "HEVLAYER_ENDPOINT", "HEVLAYER_STORE"} {
 		keys = append(keys, "LAYER_"+strings.TrimPrefix(name, "HEVLAYER_"))
+	}
+	if m.WorkspaceCap > 0 {
+		keys = append(keys, "CARGO_TARGET_DIR")
 	}
 	names := map[string]bool{}
 	for _, key := range keys {
@@ -147,7 +153,15 @@ func reconcileLaunch(dir string, r *Result) {
 	}
 	r.LaunchUnconfirmed = false
 	r.End = time.Now().UTC()
+	// The launch has lapsed: withdraw whatever it left (Windows task, launch
+	// file and its environment) so a late start cannot run it.
+	clearRunLaunch(dir)
+	// Keep the launch's own reason (task, exit code, log) when it gave one.
+	reason := strings.TrimPrefix(strings.TrimPrefix(r.Error, errLaunchUnconfirmed.Error()), ": ")
 	r.Error = "supervisor did not confirm launch"
+	if reason != "" {
+		r.Error += ": " + reason
+	}
 	_ = WriteJSON(filepath.Join(dir, "result.json"), r)
 }
 

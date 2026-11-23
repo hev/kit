@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hevpaths"
 	"io"
 	"os"
 	"os/exec"
@@ -18,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/internal/harness"
 )
 
 const (
@@ -58,6 +61,7 @@ const sandboxed = "can't reach tmux or ps: this looks like a sandboxed shell (Co
 
 // P is one invocation: the reference's module globals.
 type P struct {
+	scope                                         Scope
 	observe                                       func(Message)
 	home, stateDir                                string
 	snapshots, outbox, pending, sentLog, relayLog string
@@ -70,7 +74,8 @@ type P struct {
 	self                                          string // the executable remote() and hooks re-run
 	sleep                                         func(time.Duration)
 	exe                                           string
-	tmuxQuoted                                    bool // tmux vis-encodes its output (3.4): use tmuxFields' q form
+	tmuxQuoted                                    bool   // tmux vis-encodes its output (3.4): use tmuxFields' q form
+	untagged                                      string // resolved [peers] untagged_role, read once
 }
 
 func newP(in io.Reader, out, errw io.Writer) *P {
@@ -84,10 +89,7 @@ func newP(in io.Reader, out, errw io.Writer) *P {
 	p.hostLabel = os.Getenv("PEERS_HOST_LABEL")
 	// HEV_PEERS_STATE is the native engine's isolation override; honouring it
 	// keeps compat and native (dispatch notifications) on one inbox tree.
-	p.stateDir = os.Getenv("HEV_PEERS_STATE")
-	if p.stateDir == "" {
-		p.stateDir = filepath.Join(home, ".local/state/peers-v2")
-	}
+	p.stateDir = hevpaths.Dir(hevpaths.Peers)
 	p.snapshots = filepath.Join(p.stateDir, "hosts")
 	p.outbox = filepath.Join(p.stateDir, "outbox")
 	p.pending = filepath.Join(p.stateDir, "pending")
@@ -297,12 +299,14 @@ func (p *P) selfLabel() string {
 func (p *P) peerHosts() []string {
 	me := map[string]bool{p.selfLabel(): true, p.hostname(): true, "localhost": true}
 	hosts, ok := os.LookupEnv("PEERS_HOSTS")
-	if !ok {
+	if len(p.scope.Workspace.Hosts) > 0 {
+		hosts = strings.Join(p.scope.Workspace.Hosts, " ")
+	} else if !ok {
 		hosts = "mini oven"
 	}
 	out := []string{}
 	for _, h := range strings.Fields(hosts) {
-		if !me[strings.ToLower(h)] {
+		if !me[strings.ToLower(h)] && p.scope.Workspace.AllowsHost(h) {
 			out = append(out, h)
 		}
 	}
@@ -320,8 +324,6 @@ func contains(list []string, s string) bool {
 
 // --- which panes hold an agent ------------------------------------------------
 
-var piCLI = regexp.MustCompile(`(?:^|/)@earendil-works/pi-coding-agent/dist/(?:bundle/)?cli\.js$`)
-
 func classify(command string) string {
 	words := strings.Fields(command)
 	if len(words) == 0 {
@@ -332,27 +334,17 @@ func classify(command string) string {
 	if len(words) > 1 {
 		entry = words[1]
 	}
-	base := func(s string) string {
-		if s == "" {
-			return ""
+	base := filepath.Base(entry)
+	for _, name := range harness.CompatDetectionOrder() {
+		d, _ := harness.Lookup(name)
+		if d.Peers != nil && d.Peers.MatchProcess != nil && d.Peers.MatchProcess(words, exe, entry, base) {
+			return d.Name
 		}
-		return filepath.Base(s)
 	}
-	if len(words) == 1 && words[0] == "pi" {
-		return "pi"
-	}
-	if exe == "node" && piCLI.MatchString(entry) {
-		return "pi"
-	}
-	if exe == "claude" || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base(entry) == "claude" {
-		return "claude"
-	}
-	if exe == "codex" || base(entry) == "codex" || base(entry) == "codex.js" {
-		return "codex"
-	}
-	if exe == "gemini" || exe == "opencode" || exe == "cursor-agent" || base(entry) == "gemini" || base(entry) == "opencode" {
+	// Gemini and Cursor were already visible here without kit capabilities.
+	if exe == "gemini" || exe == "cursor-agent" || exe == harness.OpenCode || base == "gemini" || base == harness.OpenCode {
 		if exe == "node" {
-			return base(entry)
+			return base
 		}
 		return exe
 	}
@@ -360,18 +352,8 @@ func classify(command string) string {
 }
 
 func headless(agent, command string) bool {
-	words := strings.Fields(command)
-	switch agent {
-	case "claude":
-		return contains(words, "-p") || contains(words, "--print")
-	case "codex":
-		end := 3
-		if len(words) < end {
-			end = len(words)
-		}
-		return len(words) > 1 && contains(words[1:end], "exec")
-	}
-	return false
+	d, _ := harness.Lookup(agent)
+	return d.Peers != nil && d.Name == agent && d.Peers.Headless != nil && d.Peers.Headless(strings.Fields(command))
 }
 
 type procTable struct {

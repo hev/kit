@@ -12,23 +12,58 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// rfcSwarmExample is RFC 0013's example with its later-phase fields removed.
-func rfcSwarmExample(t *testing.T) string {
-	t.Helper()
-	b, e := os.ReadFile("../../docs/rfcs/0013-swarms.md")
-	if e != nil {
-		t.Fatal(e)
-	}
-	_, rest, ok := strings.Cut(string(b), "`logfix.md`:\n\n```markdown\n")
-	if !ok {
-		t.Fatal("RFC example missing")
-	}
-	text, _, _ := strings.Cut(rest, "\n```\n")
-	for _, pat := range []string{`standby: .*\n`, `host_grace: .*\n`, `plans: .*\n`, `max_runs: .*\n`, `, swarm_limit: 8`, `    placement: \{spread: true, os: linux\}\n`} {
-		text = regexp.MustCompile(pat).ReplaceAllString(text, "")
-	}
-	return text + "\n"
-}
+const swarmExample = `---
+kind: swarm
+name: logfix
+goal: Replace every deprecated logging call in app with the structured logger, tests green, one draft PR.
+reply: owner-session
+host: build-1
+every: 30m
+max_lifetime: 2d
+harness: claude
+model: claude-opus-5-5
+budget: {concurrent_runs: 4, runs_per_day: 20}
+reconcile_every: 2m
+restart: {limit: 3, backoff: 2m, max_backoff: 30m}
+roles:
+  - name: migrate
+    shape: partition
+    replicas: 3
+    pieces: [api, worker, cli, storage, web]
+    stall: 45m
+    order: {repo: app, base: main, harness: codex, model: model-a, timeout: 90, class: code}
+  - name: integrate
+    shape: single
+    after: [migrate]
+    effects: pr
+    order: {repo: app, base: main, harness: claude, model: claude-opus-5-5, timeout: 60}
+    placement: {hosts: [build-1]}
+---
+## Problem
+
+app still calls log.Printf and the old logx helpers in five packages.
+Move each call to slog with structured fields. Keep messages and levels.
+
+## Acceptance
+- No call to the deprecated API remains (grep proof in the report).
+- go test ./... passes on the integration branch.
+- One draft PR against main.
+
+## Role: migrate
+
+Convert only your piece's package and its tests. Push after every commit.
+
+### Acceptance
+- Your package has no deprecated calls; its tests pass.
+
+## Role: integrate
+
+Merge the listed piece branches onto your branch in order, fix conflicts,
+run the whole test suite, open one draft PR.
+
+### Acceptance
+- All piece branches are merged; the whole suite passes; the PR lists each piece.
+`
 
 func TestSwarmUpDryRunIsAcceptedDownstream(t *testing.T) {
 	home := t.TempDir()
@@ -39,7 +74,7 @@ func TestSwarmUpDryRunIsAcceptedDownstream(t *testing.T) {
 	t.Setenv("HEV_ORCHESTRATOR", "")
 	dir := t.TempDir()
 	file := filepath.Join(dir, "logfix.md")
-	if e := os.WriteFile(file, []byte(rfcSwarmExample(t)), 0600); e != nil {
+	if e := os.WriteFile(file, []byte(swarmExample), 0600); e != nil {
 		t.Fatal(e)
 	}
 	cmd := newSwarmCommand()
@@ -78,7 +113,7 @@ func TestSwarmUpDryRunIsAcceptedDownstream(t *testing.T) {
 		}
 	}
 	// A later-phase field is refused by name, without a usage dump.
-	full := strings.Replace(rfcSwarmExample(t), "every: 30m", "every: 30m\nstandby: [build-2]", 1)
+	full := strings.Replace(swarmExample, "every: 30m", "every: 30m\nstandby: [build-2]", 1)
 	if e := os.WriteFile(file, []byte(full), 0600); e != nil {
 		t.Fatal(e)
 	}
@@ -103,13 +138,19 @@ func TestSwarmSurfaceAndHelp(t *testing.T) {
 	if ps.Flags().Lookup("json") == nil {
 		t.Fatal("ps lacks --json")
 	}
-	root := &cobra.Command{Use: "hev"}
-	root.AddCommand(newSwarmCommand())
-	groupFactoryCommands(root)
-	if root.Commands()[0].GroupID != "factory" {
-		t.Fatal("hev swarm outside the Factory group")
+	root := &cobra.Command{Use: "hev", Long: rootCmd.Long}
+	orch := newOrchestrateCommand()
+	root.AddCommand(orch)
+	groupClusterCommands(root)
+	var out bytes.Buffer
+	orch.SetOut(&out)
+	if err := orch.Help(); err != nil || !strings.Contains(out.String(), "swarm") {
+		t.Fatalf("orchestrate help missing swarm: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(rootCmd.Long, "hev swarm") {
-		t.Fatal("bare hev --help does not list hev swarm")
+	out.Reset()
+	root.SetOut(&out)
+	root.SetArgs([]string{"orchestrate", "swarm", "up", "--help"})
+	if err := root.Execute(); err != nil || !strings.Contains(out.String(), "hev orchestrate swarm up") {
+		t.Fatalf("direct orchestrate swarm help failed: %v\n%s", err, out.String())
 	}
 }

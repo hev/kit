@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/store"
 	tracepkg "github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/pkg/search"
@@ -27,7 +28,7 @@ var lsCmd = &cobra.Command{
 	Use:   "ls [date]",
 	Short: "List captured traces",
 	Long: `List captured sessions: from your Layer namespace with a key, from the
-file archive (~/.hev/archive) without one.
+file archive (~/.hev/traces; legacy ~/.hev/archive) without one.
 
 By default lists sessions started in the last 24h. Use --since to widen
 or narrow the window (e.g. --since 1h, --since 5d, --since 30m), or -A
@@ -326,18 +327,11 @@ func countImageMarkers(turns []tracepkg.Turn) int {
 	return n
 }
 
-func formatHarness(harness string) string {
-	switch harness {
-	case "claude_code":
-		return "claude"
-	case "codex_cli":
-		return "codex"
-	default:
-		if harness == "" {
-			return ""
-		}
-		return harness
+func formatHarness(name string) string {
+	if d, ok := harness.Lookup(name); ok {
+		return d.Name
 	}
+	return name
 }
 
 // formatModel renders a raw model id like "claude-opus-4-7" into a short

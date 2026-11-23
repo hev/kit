@@ -39,7 +39,7 @@ func (e *Engine) relayAlias(target string, local []Peer) (string, error) {
 			continue
 		}
 		for _, p := range snapshot.Panes {
-			if p.Address == target && (p.Role == "" || p.Role == "foh" || p.Role == "boh") {
+			if p.Address == target && (p.Role == "" || p.Role == "foh" || p.Role == "local" || p.Role == "boh") {
 				hosts[snapshot.Host] = true
 			}
 		}

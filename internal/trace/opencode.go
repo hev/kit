@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/harness"
 	_ "modernc.org/sqlite"
 )
 
@@ -40,14 +41,7 @@ type OpenCodeSource struct{ Root string }
 // ~/.local/share, on every OS (including macOS and Windows), joined with
 // "opencode" (1.x through xdg-basedir, 2.x in packages/util/src/global-roots.ts).
 func DefaultOpenCodeRoot() string {
-	if root := os.Getenv("HEV_OPENCODE_DATA_DIR"); root != "" {
-		return root
-	}
-	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
-		return filepath.Join(xdg, "opencode")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "opencode")
+	return defaultRoot(harness.OpenCode)
 }
 
 func (s *OpenCodeSource) Describe() string { return "OpenCode sessions in " + s.Root }
@@ -335,7 +329,7 @@ type openCodeMessage struct {
 	Path struct {
 		Cwd string `json:"cwd"`
 	} `json:"path"`
-	Cost   float64        `json:"cost"`
+	Cost   *float64       `json:"cost"`
 	Tokens openCodeTokens `json:"tokens"`
 	Error  *struct {
 		Name string `json:"name"`
@@ -677,7 +671,9 @@ func (b *openCodeBuilder) v1(messages []openCodeRow, parts map[string][]openCode
 			t.RequestID = mr.id
 			// OpenCode reports reasoning tokens separately; they bill as output.
 			t.Usage = Usage{Input: m.Tokens.Input, Output: m.Tokens.Output + m.Tokens.Reasoning, CacheRead: m.Tokens.Cache.Read, CacheCreation: m.Tokens.Cache.Write}
-			t.Cost = m.Cost
+			if m.Cost != nil {
+				t.Cost, t.NativeCost = *m.Cost, true
+			}
 		}
 		b.add(t)
 		for _, r := range after {

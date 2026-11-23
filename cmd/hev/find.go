@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -324,6 +326,10 @@ it is opt-in.
 		if indexSummarize && indexDryRun {
 			return fmt.Errorf("--summarize and --dry-run cannot be used together")
 		}
+		w, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
 		claudeRoot := indexRoot
 		if claudeRoot == "" {
 			claudeRoot = trace.DefaultClaudeRoot()
@@ -358,13 +364,13 @@ it is opt-in.
 			return err
 		}
 		piRoot := cfg.PiSessionsDir
-		sources := []trace.Source{
-			&trace.ClaudeSource{Root: claudeRoot},
-			&trace.CodexSource{Root: trace.DefaultCodexRoot()},
-			&trace.DotSource{Root: trace.DefaultDotRoot()},
-			&trace.PiSource{Root: piRoot},
-			&trace.OpenCodeSource{Root: cfg.OpenCodeDataDir},
-			&trace.AgySource{Root: cfg.AgyDataDir},
+		sources := trace.Sources(map[string]string{harness.Claude: claudeRoot, harness.Pi: piRoot, harness.OpenCode: cfg.OpenCodeDataDir, harness.Agy: cfg.AgyDataDir})
+		if w.IsolatedStorage() {
+			if indexRoot != "" {
+				return fmt.Errorf("workspace boundary: configure the workspace's Claude profile instead of passing --root")
+			}
+			sources = trace.WorkspaceSources(w)
+			st = index.LoadStateAt(filepath.Join(w.Root(), "index-state.json"))
 		}
 		rep := &index.Report{}
 		existingSummaries := map[string]string{}
@@ -475,7 +481,7 @@ it is opt-in.
 			// This host's dispatch runs, as trace facts for the Asks view on
 			// other hosts sharing the archive. An archive in files is this
 			// host's alone; its dashboard reads the run records directly.
-			spans, err := index.RunTraceSpans(dispatch.Root(), sw, st, indexDryRun)
+			spans, err := index.RunWorkspaceTraceSpans(dispatch.Root(), w.Name, sw, st, indexDryRun)
 			if err != nil {
 				return err
 			}
@@ -515,41 +521,16 @@ it is opt-in.
 }
 
 func sourceRoot(src trace.Source) string {
-	switch s := src.(type) {
-	case *trace.ClaudeSource:
-		return s.Root
-	case *trace.CodexSource:
-		return s.Root
-	case *trace.PiSource:
-		return s.Root
-	case *trace.OpenCodeSource:
-		return s.Root
-	case *trace.DotSource:
-		return s.Root
-	case *trace.AgySource:
-		return s.Root
-	default:
-		return ""
-	}
+	root, _ := trace.SourceInfo(src)
+	return root
 }
 
 func sourceHarness(src trace.Source) string {
-	switch src.(type) {
-	case *trace.ClaudeSource:
-		return "claude_code"
-	case *trace.CodexSource:
-		return "codex"
-	case *trace.PiSource:
-		return "pi"
-	case *trace.OpenCodeSource:
-		return "opencode"
-	case *trace.DotSource:
-		return "dot"
-	case *trace.AgySource:
-		return "agy"
-	default:
+	_, name := trace.SourceInfo(src)
+	if name == "" {
 		return "unknown"
 	}
+	return name
 }
 
 func addIndexReport(dst, src *index.Report) {

@@ -3,7 +3,9 @@ package dispatch
 import (
 	"fmt"
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/hevpaths"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/workspace"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,12 +29,14 @@ type ValidationConfig struct {
 	Host          string `toml:"host"`
 	Harness       string `toml:"harness"`
 	Model         string `toml:"model"`
+	Effort        string `toml:"effort"`
 }
 
 // FollowConfig holds follow-through orchestrator round defaults.
 type FollowConfig struct {
-	Harness string `toml:"harness"`
-	Model   string `toml:"model"`
+	Fallbacks FallbackChain `toml:"fallbacks"`
+	Harness   string        `toml:"harness"`
+	Model     string        `toml:"model"`
 }
 
 // FollowDefaults merges [orchestrate.follow] over the legacy [expedite] table.
@@ -47,24 +51,40 @@ func (c Config) FollowDefaults() FollowConfig {
 	return f
 }
 
+type OrchestrationConfig struct {
+	Follow    FollowConfig  `toml:"follow"`
+	Fallbacks FallbackChain `toml:"fallbacks"`
+}
+
+func (c Config) OrchestratorFallbacks() FallbackChain {
+	if c.Orchestrate.Fallbacks != nil {
+		return c.Orchestrate.Fallbacks
+	}
+	return c.Fallbacks
+}
+
 type Config struct {
-	Cap int `toml:"cap"`
+	SelectedWorkspace workspace.Selection `toml:"-"`
+	Fallbacks         FallbackChain       `toml:"fallbacks"`
+	Cap               int                 `toml:"cap"`
 	// Classes caps concurrent runs per order class on this target.
 	Classes    map[string]int   `toml:"classes"`
 	Admission  Admission        `toml:"admission"`
 	Validation ValidationConfig `toml:"validation"`
 	// Orchestrate.Follow sets the follow-through orchestrator's round
 	// harness and model ([orchestrate.follow]).
-	Orchestrate struct {
-		Follow FollowConfig `toml:"follow"`
-	} `toml:"orchestrate"`
+	Orchestrate OrchestrationConfig `toml:"orchestrate"`
 	// LegacyExpedite is the [expedite] table written before the orchestrator
 	// rename. It is read only when [orchestrate.follow] leaves a field empty.
-	LegacyExpedite FollowConfig    `toml:"expedite"`
-	Notify         []string        `toml:"notify"`
-	Workspace      string          `toml:"workspace"`
-	Hosts          map[string]Host `toml:"hosts"`
-	DefaultHost    string          `toml:"default_host"`
+	LegacyExpedite  FollowConfig    `toml:"expedite"`
+	Notify          []string        `toml:"notify"`
+	Workspace       string          `toml:"-"`
+	WorkspacePolicy WorkspaceConfig `toml:"-"`
+	Hosts           map[string]Host `toml:"hosts"`
+	DefaultHost     string          `toml:"default_host"`
+	// Harnesses holds optional per-harness launch settings
+	// ([harnesses.NAME]); see HarnessConfig.
+	Harnesses map[string]HarnessConfig `toml:"harnesses"`
 }
 
 func Expand(s string) string {
@@ -96,28 +116,33 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		host, _ = os.Hostname()
 	}
 	var md toml.MetaData
+	var workspace toml.Primitive
 	var e error
 	if target {
 		var raw struct {
-			Cap         *int                      `toml:"cap"`
-			Classes     map[string]int            `toml:"classes"`
-			Admission   Admission                 `toml:"admission"`
-			Workspace   string                    `toml:"workspace"`
-			Hosts       map[string]toml.Primitive `toml:"hosts"`
-			Notify      toml.Primitive            `toml:"notify"`
-			Validation  toml.Primitive            `toml:"validation"`
-			DefaultHost toml.Primitive            `toml:"default_host"`
+			Fallbacks      FallbackChain             `toml:"fallbacks"`
+			Orchestrate    OrchestrationConfig       `toml:"orchestrate"`
+			LegacyExpedite FollowConfig              `toml:"expedite"`
+			Cap            *int                      `toml:"cap"`
+			Classes        map[string]int            `toml:"classes"`
+			Admission      Admission                 `toml:"admission"`
+			Workspace      toml.Primitive            `toml:"workspace"`
+			Hosts          map[string]toml.Primitive `toml:"hosts"`
+			Notify         toml.Primitive            `toml:"notify"`
+			Validation     toml.Primitive            `toml:"validation"`
+			DefaultHost    toml.Primitive            `toml:"default_host"`
+			Harnesses      map[string]HarnessConfig  `toml:"harnesses"`
 		}
 		md, e = toml.DecodeFile(path, &raw)
 		if e == nil {
 			c.Admission = raw.Admission
 			c.Classes = raw.Classes
+			c.Fallbacks, c.Orchestrate, c.LegacyExpedite = raw.Fallbacks, raw.Orchestrate, raw.LegacyExpedite
+			c.Harnesses = raw.Harnesses
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}
-			if raw.Workspace != "" {
-				c.Workspace = raw.Workspace
-			}
+			workspace = raw.Workspace
 			c.Hosts = map[string]Host{}
 			for n, primitive := range raw.Hosts {
 				var h Host
@@ -133,10 +158,35 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			}
 		}
 	} else {
-		md, e = toml.DecodeFile(path, &c)
+		var raw struct {
+			*Config
+			Workspace toml.Primitive `toml:"workspace"`
+		}
+		raw.Config = &c
+		md, e = toml.DecodeFile(path, &raw)
+		workspace = raw.Workspace
 	}
 	if e != nil {
 		return c, configDecodeError(e)
+	}
+	if md.IsDefined("workspace") {
+		if md.Type("workspace") == "String" {
+			e = md.PrimitiveDecode(workspace, &c.Workspace)
+			if c.Workspace == "" {
+				c.Workspace = "~/workspace"
+			}
+		} else {
+			e = md.PrimitiveDecode(workspace, &c.WorkspacePolicy)
+			if c.WorkspacePolicy.Root != "" {
+				c.Workspace = c.WorkspacePolicy.Root
+			}
+		}
+		if e != nil {
+			return c, fmt.Errorf("invalid workspace configuration")
+		}
+		if e = c.WorkspacePolicy.validate(); e != nil {
+			return c, e
+		}
 	}
 	if target {
 		host = legacyTargetHost(c.Hosts, host)
@@ -149,6 +199,11 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			}
 		}
 	}
+	for _, chain := range []FallbackChain{c.Fallbacks, c.Orchestrate.Fallbacks, c.Orchestrate.Follow.Fallbacks, c.LegacyExpedite.Fallbacks} {
+		if err := chain.validate(); err != nil {
+			return c, err
+		}
+	}
 	if c.Cap < 1 {
 		return c, fmt.Errorf("cap must be at least 1")
 	}
@@ -156,6 +211,9 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		if !ValidLabel(class) || n < 1 {
 			return c, fmt.Errorf("classes.%s must name a valid class with a cap of at least 1", class)
 		}
+	}
+	if err := checkHarnesses(c.Harnesses); err != nil {
+		return c, err
 	}
 	for _, key := range md.Keys() {
 		if len(key) >= 3 && key[0] == "hosts" && key[2] == "admission" {
@@ -201,7 +259,11 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	}
 	return c, nil
 }
-func Root() string { return Expand("~/dispatch") }
+
+// Root is where run records live: HEV_ORDERS_DIR, else ~/.hev/orders, or the
+// legacy ~/dispatch on a machine that has it and no ~/.hev/orders (see
+// internal/hevpaths).
+func Root() string { return hevpaths.Dir(hevpaths.Orders) }
 
 // ConfigPath resolves the flag, environment and default in one place.
 func ConfigPath(path string) string {

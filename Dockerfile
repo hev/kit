@@ -4,7 +4,7 @@
 #
 # The image carries the whole `hev` binary. Two commands are meant to run
 # here: `serve` (the default CMD) and `collect`, app capture for a host app
-# (docs/app-traces.md). Coding-agent capture reads transcripts off the host and
+# (https://hevkit.com/docs/app-traces). Coding-agent capture reads transcripts off the host and
 # runs there under launchd or systemd, never in this image.
 #
 # The `collect` variant: the service key and Layer target come from the
@@ -13,7 +13,7 @@
 # account also pass HEVLAYER_ENDPOINT=<its gateway> and HEVLAYER_STORE=turbopuffer.
 # With no HEVLAYER_API_KEY, collect uses the file archive instead: pass
 # HEV_ARCHIVE_DIR=/data/archive so turns, boards and envelopes stay on the
-# volume (docs/app-traces.md). There is no local Postgres store on v0.7.
+# volume (https://hevkit.com/docs/app-traces). There is no local Postgres store on v0.7.
 #
 #   docker run -d --name hev-collect -p 127.0.0.1:4318:4318 -v hev-collect:/data \
 #     -e HEV_CONFIG=/data/config.toml -e HEV_COLLECT_ENVELOPES_DIR=/data/envelopes \
@@ -25,6 +25,7 @@ ARG TARGETOS TARGETARCH VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
+COPY prices.go prices.toml ./
 COPY cmd ./cmd
 COPY internal ./internal
 COPY pkg ./pkg
