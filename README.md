@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hev-head.png" alt="hev kit" width="120" height="120" />
+  <img src=".github/hev-head.png" alt="hev kit" width="120" height="120" />
 </p>
 
 # hev kit
