@@ -52,7 +52,8 @@
       "enum": [
         "codex",
         "claude",
-        "agy"
+        "agy",
+        "grok"
       ],
       "default": "codex"
     },
@@ -195,7 +196,7 @@
                   "uniqueItems": true,
                   "items": {
                     "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                    "pattern": "^([a-z0-9][a-z0-9-]*/)?[a-z0-9][a-z0-9-]*$"
                   }
                 }
               },
@@ -213,6 +214,14 @@
               ]
             }
           ]
+        },
+        "hosts": {
+          "description": "Required host inventory snapshots for orchestrator rounds.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
         },
         "repos": {
           "type": "array",

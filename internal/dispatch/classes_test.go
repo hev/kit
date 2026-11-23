@@ -256,3 +256,16 @@ func TestReviewLiveAmendClassBypass(t *testing.T) {
 		t.Fatalf("live amend into occupied code class must reject; got %v", e)
 	}
 }
+
+func TestGrokHarnessAdmission(t *testing.T) {
+	for _, name := range []string{"grok", "grok-build"} {
+		raw := strings.Replace(agyOrder("model: grok-build\n"), "harness: agy", "harness: "+name, 1)
+		order, err := Parse(raw)
+		if name == "grok" && (err != nil || order.Harness != name || order.Model != "grok-build") {
+			t.Fatalf("canonical harness: %+v %v", order, err)
+		}
+		if name != "grok" && err == nil {
+			t.Fatal("model ID accepted as a harness")
+		}
+	}
+}

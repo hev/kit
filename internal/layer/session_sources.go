@@ -2,7 +2,6 @@ package layer
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -25,7 +24,7 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 	if !c.Caps.Feature(FeatureConditionalWrites).usable() {
 		return result, fmt.Errorf("session ingestion requires conditional writes")
 	}
-	unlock, err := lockSessionEnrichment(false)
+	unlock, err := c.lockSessionEnrichment(false)
 	if err != nil {
 		return result, err
 	}
@@ -72,7 +71,7 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 			existing := current != nil
 			var old trace.SessionRow
 			if existing {
-				if err = c.summariesServedContext(context.Background()); err != nil {
+				if err = c.SummariesServed(); err != nil {
 					return result, err
 				}
 				typedLinkage := map[string]json.RawMessage{}

@@ -218,7 +218,7 @@ func newOrchestrateCommand() *cobra.Command {
 	start.Flags().StringVar(&until, "until", "goal", "goal, date, or never")
 	start.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum loop lifetime")
 	start.Flags().StringVar(&host, "host", "", "Host label for this local supervisor")
-	start.Flags().StringVar(&harness, "harness", dispatch.DefaultOrchestratorHarness, "Fresh-session harness: codex, claude or agy")
+	start.Flags().StringVar(&harness, "harness", dispatch.DefaultOrchestratorHarness, "Fresh-session harness: codex, claude, agy or grok")
 	start.Flags().StringVar(&model, "model", "", "Model")
 	start.Flags().StringVar(&effort, "effort", "", "Reasoning effort: low, medium, high, xhigh or max")
 	start.Flags().StringVar(&reply, "reply", "", "Owner session (required for mine)")
@@ -357,6 +357,7 @@ func newOrchestrateCommand() *cobra.Command {
 	_ = render.MarkFlagRequired("event")
 	c.AddCommand(render)
 	c.AddCommand(newOrchestrateNoticesCommand())
+	c.AddCommand(newSwarmCommand())
 	var scheduled bool
 	supervise := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		// A scheduled-task launch (Windows) carries its environment in a file.

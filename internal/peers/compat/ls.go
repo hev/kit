@@ -166,6 +166,8 @@ func (p *P) cleanTitle(r *Row) string {
 
 func kind(r *Row) string {
 	switch {
+	case r.Native != nil:
+		return "native inbox"
 	case r.Managed != nil:
 		return "managed, inbox"
 	case r.Dispatch != "":
@@ -282,6 +284,9 @@ func (p *P) agentStarted(pid int) any {
 }
 
 func (p *P) inboxStatus(r *Row) (bool, *Obj) {
+	if r.Native != nil {
+		return true, nil
+	}
 	if (r.Managed != nil || !r.Headless) && p.inboxOn(r.Session) {
 		expected := r.TmuxIdentity
 		if r.Managed != nil {
@@ -315,8 +320,8 @@ func (p *P) lsJSON(rows []*Row, showAll, everywhere bool) *Obj {
 		}
 		out = append(out, NewObj(
 			"address", host+"/"+addr, "pane", r.ID, "session", r.Session, "agent", nullable(r.Agent), "agent_pid", nullInt(r.AgentPID),
-			"agent_started", p.agentStarted(r.AgentPID), "session_id", p.sessionID(r), "state", p.state(r), "cwd", r.Cwd,
-			"branch", p.branch(r.Cwd), "title", p.cleanTitle(r), "dispatch", nullable(r.Dispatch), "headless", r.Headless,
+			"agent_started", p.rowStarted(r), "session_id", p.sessionID(r), "state", p.state(r), "cwd", r.Cwd,
+			"branch", p.rowBranch(r), "title", p.cleanTitle(r), "dispatch", nullable(r.Dispatch), "headless", r.Headless,
 			"role", peerRole(r.Role), "tmux_identity", nullable(r.TmuxIdentity), "recipient_incarnation", nullable(p.paneIncarnation(r)),
 			"inbox_status", status, "attached", r.Attached, "inbox", r.Agent != "" && on, "activity", orNone(r.Activity),
 			"you", mine != nil && r.ID == mine.ID))
@@ -391,7 +396,7 @@ func lastLine(s, fallback string) string {
 func (p *P) cmdLs(args []string) {
 	showAll := contains(args, "-a") || contains(args, "--all")
 	everywhere := contains(args, "--everywhere") || contains(args, "-e")
-	rows := p.panes(false)
+	rows := p.withNative(p.panes(false))
 	if p.scope.Enabled {
 		kept := rows[:0]
 		for _, row := range rows {
@@ -433,7 +438,7 @@ func (p *P) cmdLs(args []string) {
 	}
 	for _, r := range listed {
 		where := p.tilde(r.Cwd)
-		if b := p.branch(r.Cwd); b != "" {
+		if b := p.rowBranch(r); b != "" {
 			where = fmt.Sprintf("%s [%s]", p.tilde(r.Cwd), b)
 		}
 		attached := ""
@@ -444,7 +449,7 @@ func (p *P) cmdLs(args []string) {
 		}
 		inbox := ""
 		if r.Agent != "" {
-			if on, summary := p.inboxStatus(r); on {
+			if on, summary := p.inboxStatus(r); on && summary != nil {
 				inbox = fmt.Sprintf("inbox: %s unread, %s awaiting ACK", pyStr(summary.Get("unread")), pyStr(summary.Get("unacknowledged")))
 			}
 		}

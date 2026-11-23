@@ -89,7 +89,7 @@ func serveConn(ctx context.Context, s *Service, c net.Conn) {
 		r.Status = &st
 	case "ls":
 		r.Members = s.Members()
-	case "cron-members":
+	case "cron-members", "service-members":
 		r.Members = s.CronMembers()
 	case "reserve-cron-cooldown":
 		if q.CronUntil == nil {

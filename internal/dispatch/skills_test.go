@@ -14,11 +14,11 @@ import (
 func TestOrderSkillsFrontmatter(t *testing.T) {
 	base := "---\nname: s1\nrepo: kit\n%s---\n\n## Acceptance\n- ok\n"
 	for in, want := range map[string]string{
-		"skills: [pstack/poteto-mode, hunk/hunk-review]\n": "pstack/poteto-mode,hunk/hunk-review",
-		"skills: [\"pstack/poteto-mode\"] # one mode\n":    "pstack/poteto-mode",
-		"skills: hunk/hunk-review\n":                       "hunk/hunk-review",
-		"skills: []\n":                                     "",
-		"":                                                 "",
+		"skills: [pstack/poteto-mode, reviewer/reviewer-review]\n": "pstack/poteto-mode,reviewer/reviewer-review",
+		"skills: [\"pstack/poteto-mode\"] # one mode\n":            "pstack/poteto-mode",
+		"skills: reviewer/reviewer-review\n":                       "reviewer/reviewer-review",
+		"skills: []\n":                                             "",
+		"":                                                         "",
 	} {
 		o, err := Parse(strings.Replace(base, "%s", in, 1))
 		if err != nil {

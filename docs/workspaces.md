@@ -1,54 +1,36 @@
-# Workspaces
+# Workspace capture
 
-Use a workspace to associate harness subscriptions and authentication, a
-home directory, and a private network with a cluster.
+See the [workspace guide](https://hevkit.com/docs/workspaces) for workspace
+setup, host restrictions, and command selection. To capture a workspace's
+transcripts into a separate Layer archive, put its trace settings in
+`~/.hev/config.toml`.
 
 ```toml
-active_workspace = "hev"
-
-[workspaces.hev]
-dir = "~/workspace"
-hosts = ["tower", "oven", "mini"]
-
 [workspaces.bcc]
-dir = "~/workspace/clients/bristlecone"
-hosts = ["win-oven"]
-login = "own"
-
-[workspaces.bcc.subscriptions.env_refs]
-GEMINI_API_KEY = "secret://bcc-gemini"
-
-[workspaces.bcc.cluster]
-network = "bcc"
+dir = "~/workspace/clients/bcc"
+endpoint = "https://your-layer-gateway.example"
+traces_namespace = "bcc-traces"
+api_key_ref = "op://your-vault/your-item/credential"
+mode = "workspace"
 ```
 
-Put the configuration in `~/.hev/config.toml` or the file named by
-`HEV_CONFIG`. Without configuration, `hev` uses `~/workspace`. The global
-`-w` flag takes precedence over `HEV_WORKSPACE`, the longest canonical home
-directory matching the current directory, the saved `active_workspace`, and
-the default `hev`. Invalid explicit selections fail. Archived workspaces are
-excluded from selection.
+For a local workspace archive, set `archive_dir` in place of the Layer
+endpoint and key reference. A workspace capture target with neither a Layer
+endpoint nor a key reference defaults to the workspace's own local archive
+directory if no `archive_dir` is set. The default namespace is
+`<workspace>-traces`.
 
-`hev workspace ls`, `current`, and `show NAME` support JSON output.
-`use NAME` saves the fallback selection. Use `add NAME --dir PATH` to create
-a workspace, `archive NAME` to retire it, and `import --themes FILE --lists FILE`
-to import shell themes and client lists.
+Existing nested `[workspaces.<name>.layer]` endpoint, namespace and
+`api_key_op_ref` settings are also supported. Flat fields take precedence
+over their nested equivalents. `api_key_op_ref` is an alias for
+`api_key_ref`. Archived workspaces and workspaces restricted to other hosts
+are skipped.
 
-Provision the same workspace name on the dispatch target. With `login = "own"`,
-harness profiles live under `~/.hev/workspaces/NAME/harnesses/`. Use
-`claude_config_dir`, `codex_home`, or `agy_data_dir` under `subscriptions`
-to override a profile. Antigravity uses its profile as its home directory,
-including for OAuth and transcripts. The target resolves subscription
-`env_refs` at launch.
+Workspace targets default to `mode = "workspace"`, which selects sessions
+by their workdirs, using the most specific configured workspace. Set
+`mode = "mirror"` to opt in to capturing sessions across all workspaces
+into that archive. Check the destination's access policy before enabling a
+mirror.
 
-Set `layer.endpoint`, `traces_namespace`, `board_namespace`, `board_url`, and
-`api_key_op_ref` under the workspace to select hosted targets. Client
-workspaces without a Layer reference use `~/.hev/workspaces/NAME/archive`
-and `~/.hev/workspaces/NAME/board`. To migrate from `hev bucket`, copy the
-client archive endpoint, namespace and key reference into the named workspace
-and configure its board separately. Existing bucket workflows remain available
-in the default workspace.
-
-An empty host list preserves the configured host inventory. A populated list
-limits dispatch routing and cluster, orchestrator and peer inventory. Configure
-the workspace's private network and SWIM daemon on its member hosts.
+See [Capture to multiple trace archives](trace-archive.md) for named targets,
+key reference formats, independent state, and status.

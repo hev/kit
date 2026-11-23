@@ -37,9 +37,11 @@ func newSkillsPreviewCmd() *cobra.Command {
 				WouldGain  int `json:"would_gain"`
 			}
 			counts := make(map[string]coverage)
-			for _, d := range harness.All() {
-				if d.Trace != nil {
-					counts[d.TraceName] = coverage{}
+			// Count the harnesses that have a native trace source; a registered
+			// trace root without an adapter (hev foh, Phase 1) has nothing to preview.
+			for _, src := range sources {
+				if _, name := trace.SourceInfo(src); name != "" {
+					counts[name] = coverage{}
 				}
 			}
 			var turns []trace.Turn

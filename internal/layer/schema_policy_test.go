@@ -32,7 +32,7 @@ func assertIndexPolicy(t *testing.T, schema map[string]any, kind string) {
 
 func TestDeclaredIndexPolicy(t *testing.T) {
 	var policy map[string][]string
-	raw, err := os.ReadFile("../../docs/schema-cut/policy.json")
+	raw, err := os.ReadFile("../../schemas/layer/policy.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestDeclaredIndexPolicy(t *testing.T) {
 		if kind == "chunks" {
 			ns = "hev-traces"
 		}
-		raw, err := os.ReadFile("../../docs/schema-cut/" + ns + ".schema.json")
+		raw, err := os.ReadFile("../../schemas/layer/" + ns + ".schema.json")
 		if err != nil {
 			t.Fatal(err)
 		}

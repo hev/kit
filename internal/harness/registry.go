@@ -17,6 +17,9 @@ const (
 	OpenCode = "opencode"
 	Agy      = "agy"
 	Dot      = "dot"
+	Grok     = "grok"
+	// FOH is hev foh, kit's optional native front-of-house harness (RFC 0029).
+	FOH = "hev"
 )
 
 type Descriptor struct {
@@ -66,7 +69,8 @@ type Hooks struct {
 func (h Hooks) SettingsPath(home string) string {
 	if h.HomeEnv != "" {
 		if dir := os.Getenv(h.HomeEnv); dir != "" {
-			return filepath.Join(dir, filepath.Base(h.Config))
+			_, relative, _ := strings.Cut(h.Config, "/")
+			return filepath.Join(dir, filepath.FromSlash(relative))
 		}
 	}
 	return filepath.Join(home, filepath.FromSlash(h.Config))
@@ -94,14 +98,17 @@ type Peers struct {
 
 type Trace struct {
 	// PreviewTail preserves the ordering of exported skill preview blocks.
-	PreviewTail               bool
-	Path, Override, XDGSubdir string
-	RequireHome               bool
+	PreviewTail                               bool
+	Path, Override, OverrideSubdir, XDGSubdir string
+	RequireHome                               bool
 }
 
 func (t Trace) Root() string {
 	if t.Override != "" {
 		if dir := os.Getenv(t.Override); dir != "" {
+			if t.OverrideSubdir != "" {
+				return filepath.Join(dir, t.OverrideSubdir)
+			}
 			return dir
 		}
 	}
@@ -150,6 +157,11 @@ var registry = []Descriptor{
 			UserInstructions: ".codex/AGENTS.md", ProjectInstructions: []string{"AGENTS.md"},
 			InstallTarget: ".codex", InstallMarker: ".codex", CoveredBy: "agents"}},
 	{Name: Dot, Binary: Dot, TraceName: Dot, Trace: &Trace{Path: ".dot/traces", RequireHome: true, PreviewTail: true}},
+	// hev kit (alias: hev foh) writes its own JSONL sessions and is matched as a
+	// peer only when invoked as `hev kit` or `hev foh` (never for ordinary hev subcommands).
+	{Name: FOH, Binary: FOH, TraceName: "hev_foh", Aliases: []string{"hev_foh", "foh", "kit"},
+		Peers: &Peers{Paste: true, MatchProcess: matchHevKit, Headless: hevKitHeadless},
+		Trace: &Trace{Path: ".hev/foh/sessions", Override: "HEV_FOH_SESSIONS_DIR", RequireHome: true}},
 	{Name: Pi, Binary: Pi, TraceName: Pi,
 		Peers: &Peers{InboxOnly: true, MatchProcess: matchPi},
 		Trace: &Trace{Path: ".pi/agent/sessions", Override: "HEV_PI_SESSIONS_DIR"},
@@ -184,6 +196,18 @@ var registry = []Descriptor{
 		}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
+	{Name: Grok, Binary: Grok, TraceName: Grok,
+		Dispatch: &Dispatch{ModelFlag: "--model", PromptPrefix: "--single=",
+			Args:          []string{"--output-format", "streaming-json", "--no-auto-update"},
+			EffortArgs:    func(effort string) []string { return []string{"--reasoning-effort", effort} },
+			ProjectSkills: ".grok/skills", SessionEnv: []string{"GROK_SESSION_ID"}},
+		Hooks: &Hooks{Events: hookEvents, Config: ".grok/hooks/hev-kit.json", HomeEnv: "GROK_HOME"},
+		Peers: &Peers{MatchProcess: matchGrok, Headless: grokHeadless},
+		Trace: &Trace{Path: ".grok/sessions", Override: "GROK_HOME", OverrideSubdir: "sessions", RequireHome: true},
+		Skills: &Skills{User: []string{".grok/skills", ".agents/skills", ".claude/skills"},
+			Project:          []string{".grok/skills", ".claude/skills"},
+			UserInstructions: ".claude/CLAUDE.md", ProjectInstructions: []string{"AGENTS.md", "Agents.md", "AGENT.md", "CLAUDE.md", "Claude.md", "CLAUDE.local.md", ".claude/CLAUDE.md", ".claude/CLAUDE.local.md"},
+			InstallTarget: ".grok", InstallMarker: ".grok"}},
 }
 
 // All returns descriptors in trace discovery order. Treat capabilities as read-only.
@@ -221,7 +245,7 @@ func HooksFor(name string) *Hooks {
 
 // PeerDetectionOrder preserves the engine's matching precedence. Gemini is
 // observation-only legacy support, with no registered kit capabilities.
-func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi} }
+func PeerDetectionOrder() []string { return []string{Claude, Codex, "gemini", OpenCode, Pi, Grok} }
 
 func CanPaste(name string) bool {
 	d, _ := Lookup(name)
@@ -276,7 +300,24 @@ func SkillTargets() []SkillTarget {
 	return targets
 }
 
-func CompatDetectionOrder() []string { return []string{Agy, Pi, Claude, Codex} }
+func CompatDetectionOrder() []string { return []string{FOH, Agy, Pi, Claude, Codex, Grok} }
+
+func matchHevKit(words []string, exe, _, _ string) bool {
+	return exe == FOH && len(words) >= 2 && (words[1] == "kit" || words[1] == "foh")
+}
+
+func hevKitHeadless(words []string) bool {
+	for i := 2; i < len(words); i++ {
+		if words[i] == "--" {
+			break
+		}
+		flag, _, _ := strings.Cut(words[i], "=")
+		if flag == "--once" || flag == "--show-mascot" {
+			return true
+		}
+	}
+	return false
+}
 
 func matchClaude(_ []string, exe, entry, base string) bool {
 	return exe == Claude || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base == Claude
@@ -290,4 +331,31 @@ var piCLI = regexp.MustCompile(`(?:^|/)@earendil-works/pi-coding-agent/dist/(?:b
 
 func matchPi(words []string, exe, entry, _ string) bool {
 	return (len(words) == 1 && words[0] == Pi) || (exe == "node" && piCLI.MatchString(entry))
+}
+
+var grokPackage = regexp.MustCompile(`(?:^|/)@xai-official/grok(?:-(?:linux|darwin|win32)-(?:x64|arm64))?/bin/grok(?:\.exe)?$`)
+
+func matchGrok(words []string, exe, entry, _ string) bool {
+	if grokPackage.MatchString(filepath.ToSlash(words[0])) || (exe == "node" && grokPackage.MatchString(filepath.ToSlash(entry))) {
+		return true
+	}
+	if exe != Grok && exe != "grok.exe" {
+		return false
+	}
+	for i, word := range words[1:] {
+		if word == "--output-format=streaming-json" || (word == "--output-format" && i+2 < len(words) && words[i+2] == "streaming-json") {
+			return grokHeadless(words)
+		}
+	}
+	return false
+}
+
+func grokHeadless(words []string) bool {
+	for _, word := range words[1:] {
+		switch strings.SplitN(word, "=", 2)[0] {
+		case "-p", "--single", "--prompt-file", "--prompt-json":
+			return true
+		}
+	}
+	return false
 }

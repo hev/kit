@@ -121,8 +121,7 @@ class ReleaseDraftTest(unittest.TestCase):
         self.assertIn("Bump github.com/spf13/pflag", b[deps:])
         self.assertIn("- Direct commit without a PR ([", b)
         self.assertNotIn("Tidy a test", b)
-        self.assertIn("No preview yet", b)
-        self.assertNotIn("http://", b.split("## Docs preview")[1])
+        self.assertIn("## Documentation\n\n<https://hevkit.com/docs>", b)
         self.assertEqual(rd.parse_marker(b), {"version": "0.7.0", "base": "v0.6.2", "source": d.source})
         self.assertTrue(b.endswith(f"source={d.source} -->\n"))
 
@@ -130,7 +129,7 @@ class ReleaseDraftTest(unittest.TestCase):
         self.assertEqual(rd.render(self.git).body, rd.render(self.git).body)
 
     def test_notes_file_leads_and_declares_version(self):
-        self.repo.commit("Notes for 0.7.0 (#190)", {"docs/releases/v0.7.0.md": "## Highlights\n\n- Contexts.\n"})
+        self.repo.commit("Notes for 0.7.0 (#190)", {"releases/v0.7.0.md": "## Highlights\n\n- Contexts.\n"})
         d = rd.render(self.git)
         self.assertTrue(d.body.startswith("## Highlights\n\n- Contexts.\n"))
         self.assertNotIn("not written yet", d.body)
@@ -138,7 +137,7 @@ class ReleaseDraftTest(unittest.TestCase):
 
         # A notes file for a later minor does not jump the train ahead of 0.7.0
         # unless 0.7.0 is tagged.
-        self.repo.commit("Notes for 0.8.0", {"docs/releases/v0.8.0.md": "## Next\n"})
+        self.repo.commit("Notes for 0.8.0", {"releases/v0.8.0.md": "## Next\n"})
         self.assertEqual(rd.render(self.git).version, "0.7.0")
         self.repo.git("tag", "v0.7.0")
         d = rd.render(self.git)
@@ -177,7 +176,7 @@ class ReleaseDraftTest(unittest.TestCase):
         d = rd.render(self.git, branch="v0.7")
         self.assertEqual((d.version, d.base, d.entries), ("0.7.1", "v0.7.0", 1))
         # A notes file in another line does not pull the patch line onto it.
-        r.commit("0.8 notes", {"docs/releases/v0.8.0.md": "## Next\n"})
+        r.commit("0.8 notes", {"releases/v0.8.0.md": "## Next\n"})
         self.assertEqual(rd.render(self.git, branch="v0.7").version, "0.7.1")
         # The next train opens from the 0.7.0 tag.
         r.git("checkout", "-q", "-b", "v0.8", "v0.7.0")
@@ -205,91 +204,15 @@ class ReleaseDraftTest(unittest.TestCase):
         self.assertEqual([x["tag_name"] for x in gh.releases], ["v0.7.1"])
         self.assertEqual(gh.releases[0]["target_commitish"], r.git("rev-parse", "v0.7"))
 
-    def test_docs_preview_links_pages_changed_since_base(self):
-        self.repo.commit("Site onto main (#210)", {
-            "site/package.json": "{}\n",
-            "site/src/content/docs/index.mdx": "---\n---\n",
-            "site/src/content/docs/context.mdx": "---\n---\n",
-        })
-        self.repo.commit("Retire a page (#211)", {"site/src/content/docs/old.mdx": "x\n"})
-        self.repo.git("rm", "-q", "site/src/content/docs/old.mdx")
-        self.repo.git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "Remove old page (#212)")
-        d = rd.render(self.git)
-        self.assertIn("docs preview on the mini", d.body)
-        self.assertIn("- `/docs/context`", d.body)
-        self.assertIn("- `/docs`", d.body)
-        self.assertNotIn("http", d.body.split("## Docs preview")[1])
-        self.assertNotIn("old", d.body.split("## Docs preview")[1])
-        self.assertIn("### Docs", d.body)
-        d = rd.render(self.git, preview="http://preview.example:4342/")
-        self.assertIn("<http://preview.example:4342/docs>", d.body)
-        self.assertIn("- [context](http://preview.example:4342/docs/context)", d.body)
-        self.assertIn("- [index](http://preview.example:4342/docs)", d.body)
-
-    def test_train_docs_branch_lists_planned_pages(self):
-        r = self.repo
-        r.commit("Site onto main (#210)", {
-            "site/package.json": "{}\n",
-            "site/src/content/docs/index.mdx": "---\n---\n",
-        })
-        main = r.git("rev-parse", "HEAD")
-        # No train docs branch: the preview follows main.
-        d = rd.render(self.git)
-        self.assertIn("which follows the train branch.", d.body)
-        self.assertNotIn("planned features", d.body)
-        # The conventional branch, train/v0.7-docs, carries docs for an unbuilt feature.
-        r.git("checkout", "-q", "-b", "train/v0.7-docs")
-        r.commit("docs: 0.7 train docs", {"site/src/content/docs/context.mdx": "Context.\n",
-                                          "site/src/content/docs/index.mdx": "---\nx\n---\n"})
-        r.git("checkout", "-q", "main")
-        d = rd.render(self.git, preview="http://mini:4371")
-        self.assertEqual(d.source, main)
-        self.assertIn("follows the train docs branch `train/v0.7-docs`", d.body)
-        self.assertIn("plus the docs for features not merged yet)", d.body)
-        self.assertNotIn("Coming in", d.body)
-        planned = d.body.split("not on the train branch yet:")[1]
-        self.assertIn("- [context](http://mini:4371/docs/context)", planned)
-        self.assertIn("- [index](http://mini:4371/docs)", planned)
-        self.assertEqual(d.body, rd.render(self.git, preview="http://mini:4371").body)
-        # Main moves on; pages already merged from the branch's base are not planned.
-        r.commit("Context lands with its docs (#220)", {"site/src/content/docs/context.mdx": "Context.\n"})
-        r.git("checkout", "-q", "train/v0.7-docs")
-        r.git("-c", "commit.gpgsign=false", "rebase", "-q", "main")
-        r.git("checkout", "-q", "main")
-        d = rd.render(self.git)
-        planned = d.body.split("not on the train branch yet:")[1]
-        self.assertNotIn("context", planned)
-        self.assertIn("- `/docs`", planned)
-        # A notes file can name a different branch (0.7's is a dispatch branch).
-        r.git("branch", "-q", "-m", "train/v0.7-docs", "d/kit-docs-07")
-        self.assertNotIn("planned features", rd.render(self.git).body)
-        r.commit("0.7 notes", {"docs/releases/v0.7.0.md": "# kit 0.7.0\n\n<!-- train-docs: d/kit-docs-07 -->\n"})
-        self.assertIn("follows the train docs branch `d/kit-docs-07`", rd.render(self.git).body)
-        r.git("branch", "-q", "other", "d/kit-docs-07")
-        self.assertIn("train docs branch `other`", rd.render(self.git, docs_branch="other").body)
-        r.git("branch", "-q", "-D", "other")
-        # At the cut the branch is closed: the preview follows main again.
-        r.git("branch", "-q", "-D", "d/kit-docs-07")
-        d = rd.render(self.git)
-        self.assertIn("which follows the train branch.", d.body)
-        self.assertNotIn("not on the train branch yet", d.body)
-        # The published body never names the train docs branch.
-        r.git("tag", "v0.7.0")
-        self.assertNotIn("train docs", rd.render(self.git, version="0.7.0", published=True).body)
-
     def test_published_body_at_the_tag(self):
-        self.repo.commit("Site onto main (#210)", {"site/package.json": "{}\n",
-                                                   "site/src/content/docs/context.mdx": "---\n---\n"})
-        self.repo.commit("Notes (#211)", {"docs/releases/v0.7.0.md": "## Highlights\n"})
-        draft = rd.render(self.git, preview="http://preview.example:4342")
+        self.repo.commit("Notes (#211)", {"releases/v0.7.0.md": "## Highlights\n"})
+        draft = rd.render(self.git)
         self.repo.git("tag", "v0.7.0")
-        pub = rd.render(self.git, ref="v0.7.0", version="0.7.0", published=True)
+        pub = rd.render(self.git, ref="v0.7.0", version="0.7.0")
         self.assertEqual((pub.base, pub.source), ("v0.6.2", draft.source))
         self.assertNotIn("preview", pub.body.lower())
-        self.assertIn("## Docs\n\n<https://hevkit.com/docs>", pub.body)
-        self.assertIn("- [context](https://hevkit.com/docs/context)", pub.body)
-        # Everything above the docs section is the draft Adam read.
-        self.assertEqual(pub.body.split("## Docs")[0], draft.body.split("## Docs")[0])
+        self.assertIn("## Documentation\n\n<https://hevkit.com/docs>", pub.body)
+        self.assertEqual(pub.body, draft.body)
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             self.assertEqual(rd.main(["--repo-dir", str(self.repo.root), "--published", "--apply",
                                       "--version", "0.7.0", "--ref", "v0.7.0"], gh=no_gh), 1)

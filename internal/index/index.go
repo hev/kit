@@ -27,8 +27,10 @@ import (
 // chunk ids are content-addressed that is a no-op upsert rather than a
 // duplicate archive. That property is why this file can stay this simple.
 type State struct {
-	path  string
-	Units map[string]string `json:"units"` // unit key -> signature
+	path string
+	// CaptureScope remembers the configured filter of a named daemon target.
+	CaptureScope string            `json:"capture_scope,omitempty"`
+	Units        map[string]string `json:"units"` // unit key -> signature
 }
 
 func statePath() string {
@@ -120,6 +122,11 @@ type Options struct {
 	// RepoURL resolves the origin for a working directory. Tests can replace
 	// the git lookup; nil uses `git remote get-url origin`.
 	RepoURL func(workdir string) string
+	// Context stops between units. Clients with remote stores should also
+	// bind their requests to this context.
+	Context context.Context
+	// FilterTurns selects sessions before any image, chunk or read-side write.
+	FilterTurns func([]trace.Turn) []trace.Turn
 	// Select, when set, keeps only the units it accepts: a bounded backfill
 	// names the transcripts it covers.
 	Select func(trace.Unit) bool
@@ -272,6 +279,9 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 	}
 	rep := &Report{UnitsSeen: len(units), Redactions: redact.Counts{}}
 	for i, u := range units {
+		if opt.Context != nil && opt.Context.Err() != nil {
+			return rep, opt.Context.Err()
+		}
 		if opt.Progress != nil {
 			opt.Progress(i+1, len(units), u.Key)
 		}
@@ -285,6 +295,16 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 			// One unreadable transcript must not sink a run over thousands.
 			rep.Errors = append(rep.Errors, fmt.Sprintf("%s: %v", u.Key, err))
 			continue
+		}
+
+		if opt.FilterTurns != nil {
+			turns = opt.FilterTurns(turns)
+			if len(turns) == 0 {
+				if !opt.DryRun && u.Signature != "" {
+					st.Units[u.Key] = u.Signature
+				}
+				continue
+			}
 		}
 
 		// Images first: bytes go to this host's blob store (never to the

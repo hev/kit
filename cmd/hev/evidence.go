@@ -41,7 +41,7 @@ optional claims. On this machine they are folders under ~/.hev/evidence
 manifest.json and the item files beside it. Text and every manifest string
 are scrubbed of secrets before they are written.
 
-See docs/evidence.md.`,
+See https://hevkit.com/docs/evidence.`,
 		SilenceUsage: true,
 	}
 	root.AddCommand(evidencePutCmd(), evidenceCreateCmd(), evidenceAddCmd(), evidenceClaimCmd(), evidenceSealCmd(),

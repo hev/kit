@@ -118,7 +118,7 @@ type Row struct {
 	// Steer counts the run's steering receipts by state.
 	Steer *steer.Counts `json:"steer,omitempty"`
 	// Attention reports a Slack notice still retrying or failed here
-	// (docs/notify.md); empty when every post went through.
+	// (https://hevkit.com/docs/notify); empty when every post went through.
 	Attention string `json:"attention,omitempty"`
 }
 type Response struct {

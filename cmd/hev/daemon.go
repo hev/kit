@@ -191,6 +191,7 @@ var daemonStatusCmd = &cobra.Command{
 				fmt.Printf("Notice: %s\n", status.Notice)
 			}
 		}
+		writeCaptureTargets(cmd.OutOrStdout(), status.Targets)
 		writeUpdateStatus(cmd.OutOrStdout())
 		if status, configured := license.Inspect(time.Now()); configured {
 			fmt.Fprintf(cmd.OutOrStdout(), "license     %s\n", licenseLine(status))
@@ -240,6 +241,32 @@ var daemonStatusCmd = &cobra.Command{
 // printStorage says where traces go, without reading a secret: what the
 // running capture daemon reports for itself, and separately what this
 // shell would resolve, flagging the two when they differ.
+func writeCaptureTargets(out io.Writer, targets []daemon.TargetStatus) {
+	for _, target := range targets {
+		fmt.Fprintf(out, "Capture target %s (%s, %s)", target.Name, target.Mode, target.Storage)
+		if target.Namespace != "" {
+			fmt.Fprintf(out, " namespace %s", target.Namespace)
+		}
+		if target.Endpoint != "" {
+			fmt.Fprintf(out, " at %s", target.Endpoint)
+		}
+		if target.KeySource != "" {
+			fmt.Fprintf(out, " (key from %s)", target.KeySource)
+		}
+		fmt.Fprintln(out)
+		if target.LastRun.IsZero() {
+			fmt.Fprintln(out, "  Last run: pending")
+			continue
+		}
+		fmt.Fprintf(out, "  Last run: %s\n  Units indexed: %d\n", target.LastRun.Format(time.RFC3339), target.UnitsIndexed)
+		lastError := target.LastError
+		if lastError == "" {
+			lastError = "none"
+		}
+		fmt.Fprintf(out, "  Last error: %s\n", lastError)
+	}
+}
+
 func printStorage() {
 	cfg, err := daemon.LoadConfig()
 	if err != nil {
@@ -260,14 +287,15 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 	var dv *storageView
 	switch {
 	case stErr != nil:
-		fmt.Fprintf(out, "Storage (daemon): unknown: %v\n", stErr)
+		fmt.Fprintln(out, "Storage (daemon): could not read daemon storage status")
 	case !st.Running:
 		fmt.Fprintln(out, "Storage (daemon): no capture daemon is running")
 	case st.Record == nil:
 		fmt.Fprintln(out, "Storage (daemon): not reported (the running daemon predates this build; restart it to see its mode)")
 	case st.Record.Mode == storagemode.Layer:
-		dv = &storageView{storagemode.Layer, st.Record.Namespace, st.Record.Endpoint}
-		fmt.Fprintf(out, "Storage (daemon): hev layer namespace %s at %s (pid %d, key from %s)\n", st.Record.Namespace, st.Record.Endpoint, st.Record.PID, st.Record.KeySource)
+		endpoint := daemon.CaptureEndpoint(st.Record.Endpoint)
+		dv = &storageView{storagemode.Layer, st.Record.Namespace, endpoint}
+		fmt.Fprintf(out, "Storage (daemon): hev layer namespace %s at %s (pid %d, key from %s)\n", st.Record.Namespace, endpoint, st.Record.PID, st.Record.KeySource)
 	default:
 		dv = &storageView{storagemode.Filesystem, st.Record.Namespace, st.Record.Archive}
 		fmt.Fprintf(out, "Storage (daemon): files at %s (pid %d)\n", st.Record.Archive, st.Record.PID)
@@ -280,8 +308,13 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 	var sv *storageView
 	res, err := daemon.ResolveMode(cfg)
 	switch {
+	case storagemode.IsNoKey(err):
+		fmt.Fprintln(out, "Storage (this shell): error: this machine is set up for hev layer and this shell has no usable Layer API key")
+		if dv != nil && dv.mode == storagemode.Layer {
+			fmt.Fprintf(out, "  The capture daemon on this machine (pid %d) uses Layer.\n", st.Record.PID)
+		}
 	case err != nil:
-		fmt.Fprintf(out, "Storage (this shell): error: %s\n", strings.ReplaceAll(err.Error(), "\n", "\n  "))
+		fmt.Fprintln(out, "Storage (this shell): could not determine storage mode")
 	case res.Mode == storagemode.Filesystem:
 		dir := filepath.Join(filearchive.Root(cfg.ArchiveDir), ns)
 		sv = &storageView{storagemode.Filesystem, ns, dir}
@@ -291,6 +324,7 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 		if endpoint == "" {
 			endpoint = layer.DefaultEndpoint
 		}
+		endpoint = daemon.CaptureEndpoint(endpoint)
 		sv = &storageView{storagemode.Layer, ns, endpoint}
 		fmt.Fprintf(out, "Storage (this shell): hev layer namespace %s at %s (key from %s)\n", ns, endpoint, res.Source)
 	}

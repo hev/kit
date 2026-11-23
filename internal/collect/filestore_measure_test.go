@@ -17,7 +17,7 @@ import (
 )
 
 // TestFileTurnsMeasure prints rough size and speed of the no-key turn store
-// for docs/app-traces.md. It only runs with HEV_COLLECT_MEASURE set (to the
+// for https://hevkit.com/docs/app-traces. It only runs with HEV_COLLECT_MEASURE set (to the
 // owners and turns per owner as "100x200"; "1" means 100x200).
 func TestFileTurnsMeasure(t *testing.T) {
 	v := os.Getenv("HEV_COLLECT_MEASURE")

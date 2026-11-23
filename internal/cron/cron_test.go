@@ -3,6 +3,7 @@ package cron
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -285,12 +286,25 @@ func TestCronSWIMFailover(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	key := make([]byte, 32)
 	node := func(name string) *cluster.Node {
-		n, err := cluster.Start(cluster.Config{Bind: "127.0.0.1:0", Name: name, KeyRef: "secret://fixture/key"}, key, cluster.LocalFacts(name, false, 0), logger)
-		if err != nil {
-			t.Fatal(err)
+		cfg := cluster.Config{Bind: "127.0.0.1:0", Name: name, KeyRef: "secret://fixture/key"}
+		facts := cluster.LocalFacts(name, false, 0)
+		var err error
+		// Memberlist selects the port with TCP before binding UDP to it.
+		// Its built-in collision retry does not recognize Windows bind errors.
+		// Bound retries to fixture startup, before any join or job assertions.
+		for range 10 {
+			var n *cluster.Node
+			n, err = cluster.Start(cfg, key, facts, logger)
+			if err == nil {
+				t.Cleanup(func() { _ = n.Close(false) })
+				return n
+			}
+			if !errors.Is(err, cluster.ErrTransportStart) {
+				break
+			}
 		}
-		t.Cleanup(func() { _ = n.Close(false) })
-		return n
+		t.Fatalf("start SWIM fixture %s: %v", name, err)
+		return nil
 	}
 	a, b := node("node-a"), node("node-b")
 	if err := b.Join(a.Address()); err != nil {

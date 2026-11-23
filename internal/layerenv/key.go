@@ -106,7 +106,7 @@ func ReadKey() (string, error) {
 		return key, nil
 	}
 	if _, err := exec.LookPath("op"); err != nil {
-		return "", fmt.Errorf("no HEVLAYER_API_KEY in the environment and no `op` to read %s", ref)
+		return "", fmt.Errorf("no HEVLAYER_API_KEY in the environment and no `op` to read %s", refVar)
 	}
 	// A rate limit any kit process on this host was answered with holds until
 	// its reset: no request, the same answer.
@@ -118,7 +118,9 @@ func ReadKey() (string, error) {
 	if err := secrets.ReserveDirect(time.Now(), secrets.DefaultCaller("kit layer-key direct")); err != nil {
 		return "", err
 	}
-	cmd := exec.Command("op", "read", ref)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "op", "read", ref)
 	// The service-account token is what authorizes 1Password, so it cannot come
 	// from 1Password. A non-login shell has no profile to export it.
 	if os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") == "" {
@@ -147,7 +149,7 @@ func ReadKey() (string, error) {
 		return "", fmt.Errorf("read %s: %w", refVar, limitErr)
 	}
 	if err != nil {
-		return "", fmt.Errorf("op read %s: %w", ref, err)
+		return "", fmt.Errorf("op read failed for %s", refVar)
 	}
 	key := strings.TrimSpace(string(out))
 	if key == "" {

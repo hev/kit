@@ -8,8 +8,13 @@ import (
 	"strings"
 )
 
-// Usage is the reference's module docstring, plus the two helpers this
-// implementation folds in as subcommands.
+const nativeUsage = `
+
+Interactive hev kit sessions appear in ls as kit-PID. Send to that address
+without tmux. Messages are background by default. Add --interrupt to start
+or steer a turn. Shell sends without a session are attributed to local.`
+
+// Usage retains the reference help alongside native commands and helpers.
 const Usage = `peers: see and talk to the other coding agents running in tmux.
 
   peers [ls] [-a] [--everywhere] [--json]
@@ -67,7 +72,7 @@ not the human.
 A session with inbox on (tmux option @peers-inbox, set by ` + "`peers inbox on`" + `)
 never has messages pasted into it: send, chat and relayed messages are held in
 ~/.local/state/peers-v2/inbox/SESSION.jsonl, whatever its state, and it reads them
-with ` + "`peers inbox`" + ` on its own time.`
+with ` + "`peers inbox`" + ` on its own time.` + nativeUsage
 
 // Main runs one peers invocation and returns its exit status.
 // Message is the sender-side observation of a successful send or chat post.

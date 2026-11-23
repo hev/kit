@@ -76,25 +76,24 @@ type OrchestratorEvidence struct {
 // used by the follow-through orchestrator: select inventory, then inspect run and PR/CI state.
 func GatherOrchestratorEvidence(ctx context.Context, s OrchestratorSpec) ([]OrchestratorEvidence, error) {
 	cfg, e := Load(ConfigPath(""))
-	if e == nil && s.WorkspaceName != "" {
-		w, err := workspace.Named(s.WorkspaceName)
-		if err != nil {
-			return nil, err
-		}
-		cfg.ScopeWorkspace(w)
-	}
 	if e != nil {
 		return nil, e
 	}
-	inv := Inventory(cfg, "")
+	cfg, required, e := orchestratorSnapshotHosts(s, cfg)
+	if e != nil {
+		return nil, e
+	}
+	ctx = WorkspaceContext(ctx, cfg.SelectedWorkspace)
 	out := []OrchestratorEvidence{}
-	rows, e := SelectInventoryEvidence(inv, func(row Row) bool { return row.Kind != "orch" && s.Includes(row.Order) })
+	rows, e := orchestratorSnapshotRows(s, Inventory(cfg, ""), required)
 	if e != nil {
 		return nil, e
 	}
 	for _, r := range rows {
 		host, row := r.Host, r.Row
-		detail, e := RPC(ctx, cfg.Hosts[host], Request{Action: "show", Name: row.Name})
+		detailCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		detail, e := RPC(detailCtx, cfg.Hosts[host], Request{Action: "show", Name: row.Name})
+		cancel()
 		if e != nil {
 			return nil, e
 		}

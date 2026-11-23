@@ -133,6 +133,78 @@ func workspaceHead(wt string, m Meta) (string, error) {
 	return head, nil
 }
 
+// checkCompactWorkspace validates every safety guard required before removing
+// a dispatch run's worktree. When dryRun is true it avoids mutating remote-tracking
+// refs (skipping git fetch) so dry-run mutates zero files.
+func checkCompactWorkspace(dir string, m Meta, dryRun bool) (string, string, error) {
+	wt := filepath.Join(dir, "wt")
+	if m.Forward != nil {
+		return "", "", errors.New("run moved to another host")
+	}
+	if processRecordLive(filepath.Join(dir, "harness.json")) {
+		return "", "", errors.New("run still has an active harness")
+	}
+	var result Result
+	if readJSON(filepath.Join(dir, "result.json"), &result) == nil {
+		reconcileLaunch(dir, &result)
+		if result.LaunchUnconfirmed {
+			return "", "", errors.New("run launch is unconfirmed")
+		}
+	}
+	if c := steerCounts(dir); c != nil && c.Halting {
+		return "", "", errors.New("run is halting")
+	}
+	common, err := linkedWorkspace(wt)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := workspaceRestoreRepo(m, common); err != nil {
+		return "", "", err
+	}
+	head, err := workspaceHead(wt, m)
+	if err != nil {
+		return "", "", err
+	}
+
+	if head != m.WorkspaceBase {
+		if !dryRun {
+			if _, err = command(wt, "git", "fetch", "--no-tags", "--prune", "--refmap=", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
+				return "", "", errors.New("cannot verify workspace HEAD on origin")
+			}
+		}
+		refs, err := command(wt, "git", "for-each-ref", "--contains="+head, "--count=1", "refs/remotes/origin/")
+		if err != nil || refs == "" {
+			return "", "", errors.New("workspace HEAD is unpushed")
+		}
+	}
+	status, err := command(wt, "git", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "--untracked-files=no", "--ignore-submodules=none")
+	if err != nil {
+		return "", "", errors.New("cannot inspect tracked workspace changes")
+	}
+	if status != "" {
+		return "", "", errors.New("workspace has uncommitted source changes")
+	}
+	flags, err := command(wt, "git", "ls-files", "-v", "-z")
+	if err != nil {
+		return "", "", errors.New("cannot inspect workspace index")
+	}
+	for _, entry := range strings.Split(flags, "\x00") {
+		if entry != "" && (entry[0] == 'S' || (entry[0] >= 'a' && entry[0] <= 'z')) {
+			return "", "", errors.New("workspace index hides tracked files from status")
+		}
+	}
+	untracked, err := command(wt, "git", "ls-files", "--others", "--directory", "--no-empty-directory", "-z")
+	if err != nil {
+		return "", "", errors.New("cannot inspect untracked workspace files")
+	}
+	for _, path := range strings.Split(untracked, "\x00") {
+		if path != "" && !strings.HasPrefix(path, "target/") && !strings.HasPrefix(path, "node_modules/") {
+			return "", "", errors.New("workspace has untracked source files")
+		}
+	}
+	return common, head, nil
+}
+
 // Callers hold the dispatch root lock and have fenced run launches.
 func compactWorkspace(dir string, m Meta) error {
 	wt := filepath.Join(dir, "wt")
@@ -141,67 +213,9 @@ func compactWorkspace(dir string, m Meta) error {
 			return nil
 		}
 	}
-	if m.Forward != nil {
-		return errors.New("run moved to another host")
-	}
-	if processRecordLive(filepath.Join(dir, "harness.json")) {
-		return errors.New("run still has an active harness")
-	}
-	var result Result
-	if readJSON(filepath.Join(dir, "result.json"), &result) == nil {
-		reconcileLaunch(dir, &result)
-		if result.LaunchUnconfirmed {
-			return errors.New("run launch is unconfirmed")
-		}
-	}
-	if c := steerCounts(dir); c != nil && c.Halting {
-		return errors.New("run is halting")
-	}
-	common, err := linkedWorkspace(wt)
+	common, head, err := checkCompactWorkspace(dir, m, false)
 	if err != nil {
 		return err
-	}
-	if _, err := workspaceRestoreRepo(m, common); err != nil {
-		return err
-	}
-	head, err := workspaceHead(wt, m)
-	if err != nil {
-		return err
-	}
-
-	if head != m.WorkspaceBase {
-		if _, err = command(wt, "git", "fetch", "--no-tags", "--prune", "--refmap=", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
-			return errors.New("cannot verify workspace HEAD on origin")
-		}
-		refs, err := command(wt, "git", "for-each-ref", "--contains="+head, "--count=1", "refs/remotes/origin/")
-		if err != nil || refs == "" {
-			return errors.New("workspace HEAD is unpushed")
-		}
-	}
-	status, err := command(wt, "git", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "--untracked-files=no", "--ignore-submodules=none")
-	if err != nil {
-		return errors.New("cannot inspect tracked workspace changes")
-	}
-	if status != "" {
-		return errors.New("workspace has uncommitted source changes")
-	}
-	flags, err := command(wt, "git", "ls-files", "-v", "-z")
-	if err != nil {
-		return errors.New("cannot inspect workspace index")
-	}
-	for _, entry := range strings.Split(flags, "\x00") {
-		if entry != "" && (entry[0] == 'S' || (entry[0] >= 'a' && entry[0] <= 'z')) {
-			return errors.New("workspace index hides tracked files from status")
-		}
-	}
-	untracked, err := command(wt, "git", "ls-files", "--others", "--directory", "--no-empty-directory", "-z")
-	if err != nil {
-		return errors.New("cannot inspect untracked workspace files")
-	}
-	for _, path := range strings.Split(untracked, "\x00") {
-		if path != "" && !strings.HasPrefix(path, "target/") && !strings.HasPrefix(path, "node_modules/") {
-			return errors.New("workspace has untracked source files")
-		}
 	}
 
 	ignore, err := os.CreateTemp(dir, "workspace-excludes-")
@@ -401,4 +415,205 @@ func autoCompactDone(dir string) {
 			}
 		}
 	}
+}
+
+// CompactOptions controls age-bounded compaction of ended dispatch runs.
+type CompactOptions struct {
+	OlderThan time.Duration
+	Now       time.Time
+	DryRun    bool
+}
+
+// CompactAction describes the outcome for one inspected dispatch run.
+type CompactAction struct {
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Action     string `json:"action"` // "compacted", "would_compact", "kept"
+	Reason     string `json:"reason,omitempty"`
+	BytesFreed int64  `json:"bytes_freed,omitempty"`
+}
+
+// CompactReport summarizes a CompactEndedRuns pass.
+type CompactReport struct {
+	Compacted  []string        `json:"compacted"`
+	Kept       []CompactAction `json:"kept,omitempty"`
+	Actions    []CompactAction `json:"actions,omitempty"`
+	BytesFreed int64           `json:"bytes_freed"`
+}
+
+// CompactEndedRuns compacts ended dispatch runs (done, failed, closed) older
+// than opts.OlderThan while strictly reusing compactWorkspace's safety guards.
+// Active/running, queued, recent, dirty, unpushed, and out-of-home worktrees
+// are always kept. In DryRun mode, zero files are created or modified.
+func CompactEndedRuns(opts CompactOptions) (CompactReport, error) {
+	rep := CompactReport{Compacted: []string{}}
+	root := Root()
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return rep, nil
+	} else if err != nil {
+		return rep, errors.New("cannot inspect dispatch root")
+	}
+
+	if !opts.DryRun {
+		unlock, err := lockRoot()
+		if err != nil {
+			return rep, err
+		}
+		defer unlock()
+	}
+
+	live, err := liveNames()
+	if err == nil {
+		err = addReservations(live)
+	}
+	if err != nil {
+		return rep, err
+	}
+
+	queued := map[string]bool{}
+	if qEntries, qErr := queueEntries(); qErr == nil {
+		for _, qe := range qEntries {
+			if qe.Request.Name != "" {
+				queued[qe.Request.Name] = true
+			}
+		}
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return rep, errors.New("cannot list runs for compaction")
+	}
+
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	recordKept := func(name, state, reason string) {
+		act := CompactAction{Name: name, State: state, Action: "kept", Reason: reason}
+		rep.Kept = append(rep.Kept, act)
+		rep.Actions = append(rep.Actions, act)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || !ValidName(name) {
+			continue
+		}
+		dir := filepath.Join(root, name)
+		if !exists(filepath.Join(dir, "meta.json")) {
+			continue
+		}
+		var m Meta
+		if err := readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
+			recordKept(name, "unknown", "unreadable metadata")
+			continue
+		}
+		wt := filepath.Join(dir, "wt")
+		if m.Compacted {
+			if _, statErr := os.Lstat(wt); os.IsNotExist(statErr) {
+				continue
+			}
+		}
+		if live[name] {
+			recordKept(name, "running", "run is active")
+			continue
+		}
+		if queued[name] {
+			recordKept(name, "queued", "run is queued")
+			continue
+		}
+
+		var result Result
+		if err := readJSON(filepath.Join(dir, "result.json"), &result); err != nil && !os.IsNotExist(err) {
+			recordKept(name, "unknown", "unreadable result")
+			continue
+		}
+		reconcileLaunch(dir, &result)
+		st := State(&result, false)
+		switch st {
+		case "done", "failed", StateClosed:
+		default:
+			recordKept(name, st, "state is "+st)
+			continue
+		}
+
+		endedAt := result.End
+		if st == StateClosed && !result.ClosedAt.IsZero() && result.ClosedAt.After(endedAt) {
+			endedAt = result.ClosedAt
+		}
+		if endedAt.IsZero() {
+			recordKept(name, st, "missing end timestamp")
+			continue
+		}
+		if now.Sub(endedAt) < opts.OlderThan {
+			recordKept(name, st, "newer than compact_after")
+			continue
+		}
+		if _, statErr := os.Lstat(wt); os.IsNotExist(statErr) {
+			continue
+		}
+
+		wtBytes := dirSizeBounded(wt, 200000)
+
+		if opts.DryRun {
+			if _, _, err := checkCompactWorkspace(dir, m, true); err != nil {
+				recordKept(name, st, err.Error())
+				continue
+			}
+			act := CompactAction{Name: name, State: st, Action: "would_compact", BytesFreed: wtBytes}
+			rep.Compacted = append(rep.Compacted, name)
+			rep.Actions = append(rep.Actions, act)
+			rep.BytesFreed += wtBytes
+			continue
+		}
+
+		if err := compactWorkspace(dir, m); err != nil {
+			recordKept(name, st, err.Error())
+			continue
+		}
+		act := CompactAction{Name: name, State: st, Action: "compacted", BytesFreed: wtBytes}
+		rep.Compacted = append(rep.Compacted, name)
+		rep.Actions = append(rep.Actions, act)
+		rep.BytesFreed += wtBytes
+	}
+
+	return rep, nil
+}
+
+// dirSizeBounded sums regular file sizes under root without following symlinks.
+func dirSizeBounded(root string, maxEntries int) int64 {
+	var total int64
+	visited := 0
+	var walk func(string)
+	walk = func(dir string) {
+		if visited >= maxEntries {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if visited >= maxEntries {
+				return
+			}
+			visited++
+			p := filepath.Join(dir, e.Name())
+			info, err := os.Lstat(p)
+			if err != nil {
+				continue
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
+			if info.IsDir() {
+				walk(p)
+			} else if info.Mode().IsRegular() {
+				total += info.Size()
+			}
+		}
+	}
+	walk(root)
+	return total
 }

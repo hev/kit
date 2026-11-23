@@ -14,20 +14,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() { rootCmd.AddCommand(newSwarmCommand()) }
+func init() {
+	cmd := newSwarmCommand()
+	cmd.Hidden = true
+	rootCmd.AddCommand(cmd)
+}
 
 func newSwarmCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:    "swarm",
-		Hidden: true,
-		Short:  "Put an orchestrator and its workers on a problem from one file",
+		Use:   "swarm",
+		Short: "Put an orchestrator and its workers on a problem from one file",
 		Long: `A swarm is one Markdown file that declares a problem, an orchestrator and
 worker roles with concurrency limits (RFC 0013). up compiles it into an
 orchestrator and ordinary dispatch runs on this host; a code-only reconcile
 tick in the orchestrator's supervisor launches units, repairs failed ones in
 place and starts integration when the pieces are done. A person merges.
 
-Phase 1: every unit runs on this host. See docs/swarms.md.`,
+Phase 1: every unit runs on this host. See https://hevkit.com/docs/swarms.`,
 	}
 	var file string
 	var dry bool

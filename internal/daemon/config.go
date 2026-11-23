@@ -3,8 +3,6 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"github.com/hev/kit/internal/layerenv"
-	"github.com/hev/kit/internal/update"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,13 +11,18 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
+	"github.com/hev/kit/internal/workspace"
 )
 
 type Config struct {
+	captureTargets []captureTarget
+
 	ConfigPath string
 
 	// Layer archive target.
@@ -151,23 +154,26 @@ type localFileConfig struct {
 }
 
 type fileConfig struct {
-	Kit          *KitConfig           `toml:"kit,omitempty"`
-	KitPrior     *layerConfig         `toml:"kit_prior,omitempty"`
-	Skills       *skillsources.Config `toml:"skills,omitempty"`
-	Invite       *InviteConfig        `toml:"invite,omitempty"`
-	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
-	Layer        layerConfig          `toml:"layer"`
-	Archive      *archiveConfig       `toml:"archive,omitempty"`
-	Local        *localFileConfig     `toml:"local,omitempty"`
-	ActiveBucket string               `toml:"active_bucket"`
-	Capture      captureConfig        `toml:"capture"`
-	Buckets      []BucketConfig       `toml:"buckets"`
+	Kit          *KitConfig                     `toml:"kit,omitempty"`
+	KitPrior     *layerConfig                   `toml:"kit_prior,omitempty"`
+	Workspaces   map[string]workspace.Workspace `toml:"workspaces,omitempty"`
+	Skills       *skillsources.Config           `toml:"skills,omitempty"`
+	Invite       *InviteConfig                  `toml:"invite,omitempty"`
+	InviteLocal  *layerConfig                   `toml:"invite_local,omitempty"`
+	Layer        layerConfig                    `toml:"layer"`
+	Archive      *archiveConfig                 `toml:"archive,omitempty"`
+	Local        *localFileConfig               `toml:"local,omitempty"`
+	ActiveBucket string                         `toml:"active_bucket"`
+	Capture      captureConfig                  `toml:"capture"`
+	Buckets      []BucketConfig                 `toml:"buckets"`
 	// Update is read by internal/update; kept here so a rewrite of the file
 	// (hev bucket use) carries it over.
 	Update *update.Config `toml:"update,omitempty"`
 	// Preserve license settings on config rewrites. License decoding and
 	// entitlement are independent of daemon capture configuration.
 	License any `toml:"license,omitempty"`
+	// Preserve [hygiene] settings on config rewrites.
+	Hygiene any `toml:"hygiene,omitempty"`
 }
 
 type archiveConfig struct {
@@ -186,20 +192,21 @@ type layerConfig struct {
 }
 
 type captureConfig struct {
-	Instructions       *bool    `toml:"instructions,omitempty"`
-	Redact             *bool    `toml:"redact,omitempty"`
-	RedactSalt         string   `toml:"redact_salt,omitempty"`
-	ScanInterval       string   `toml:"scan_interval"`
-	ScanRoots          []string `toml:"scan_roots"`
-	RawAPIBodies       *bool    `toml:"raw_api_bodies"`
-	ToolContent        *bool    `toml:"tool_content"`
-	Images             *bool    `toml:"images,omitempty"`
-	UnknownProject     string   `toml:"unknown_project"`
-	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
-	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
-	PiSessionsDir      string   `toml:"pi_sessions_dir"`
-	OpenCodeDataDir    string   `toml:"opencode_data_dir"`
-	AgyDataDir         string   `toml:"agy_data_dir"`
+	Targets            []targetConfig `toml:"targets,omitempty"`
+	Instructions       *bool          `toml:"instructions,omitempty"`
+	Redact             *bool          `toml:"redact,omitempty"`
+	RedactSalt         string         `toml:"redact_salt,omitempty"`
+	ScanInterval       string         `toml:"scan_interval"`
+	ScanRoots          []string       `toml:"scan_roots"`
+	RawAPIBodies       *bool          `toml:"raw_api_bodies"`
+	ToolContent        *bool          `toml:"tool_content"`
+	Images             *bool          `toml:"images,omitempty"`
+	UnknownProject     string         `toml:"unknown_project"`
+	ClaudeRawBodiesDir string         `toml:"claude_raw_bodies_dir"`
+	CodexSessionsDir   string         `toml:"codex_sessions_dir"`
+	PiSessionsDir      string         `toml:"pi_sessions_dir"`
+	OpenCodeDataDir    string         `toml:"opencode_data_dir"`
+	AgyDataDir         string         `toml:"agy_data_dir"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -407,6 +414,7 @@ func applyConfigFile(c *Config) error {
 	}
 	c.Kit = fc.Kit
 	c.Invite = fc.Invite
+	c.captureTargets = captureTargets(fc.Capture.Targets, fc.Workspaces, c.Host)
 	if fc.Archive != nil && fc.Archive.Namespace != "" && fc.Layer.Namespace == "" {
 		c.LayerNamespace = fc.Archive.Namespace
 	}
@@ -674,7 +682,11 @@ func valueOrEnv(value, envName, fallback string) string {
 func resolveGHUser() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gh", "config", "get", "-h", "github.com", "user").Output()
+	cmd := exec.CommandContext(ctx, "gh", "config", "get", "-h", "github.com", "user")
+	// Keep this background lookup read-only. gh telemetry can spawn a
+	// detached child that inherits HOME and writes after gh has exited.
+	cmd.Env = append(cmd.Environ(), "GH_TELEMETRY=disabled", "GH_NO_UPDATE_NOTIFIER=1")
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

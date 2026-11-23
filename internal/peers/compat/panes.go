@@ -1,6 +1,8 @@
 package compat
 
 import (
+	"github.com/hev/kit/internal/peers/nativeinbox"
+
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,6 +21,7 @@ import (
 
 // Row is one pane, managed runner or headless run (the reference's row dict).
 type Row struct {
+	Native                    *nativeinbox.Presence
 	ID, Session, Window, Pane string
 	PID                       int
 	Cwd, Title                string
@@ -369,6 +372,9 @@ func pyStrip(s string) string { return strings.TrimFunc(s, pyIsSpace) }
 func pyIsSpace(r rune) bool { return unicode.IsSpace(r) || r >= 0x1c && r <= 0x1f }
 
 func (p *P) state(r *Row) string {
+	if r.Native != nil {
+		return r.Native.State
+	}
 	if r.Managed != nil {
 		if Equal(r.Managed.Obj("checkpoint").Get("phase"), "running") {
 			return "working"
@@ -465,6 +471,13 @@ func screenState(agent string, raw, plain []string) string {
 	for i := len(plain) - 1; !agy && i >= 0; i-- {
 		s := strings.TrimLeftFunc(plain[i], unicode.IsSpace)
 		if strings.HasPrefix(s, "❯") || strings.HasPrefix(s, "›") {
+			if agent == harness.FOH {
+				rest := pyStrip(strings.TrimPrefix(s, "›"))
+				if rest == "" || strings.HasPrefix(rest, "Ask hev kit") {
+					break
+				}
+				return "draft"
+			}
 			typed := strings.TrimLeftFunc(strings.ReplaceAll(undimmed(raw[i]), " ", " "), unicode.IsSpace)
 			if typed != "" {
 				typed = string([]rune(typed)[1:])
@@ -482,8 +495,11 @@ func screenState(agent string, raw, plain []string) string {
 		if agyRunning && (i < inputStart || i >= inputEnd) && agyCancelRE.MatchString(plain[i]) {
 			return "working"
 		}
+		if agent == harness.FOH && (strings.Contains(plain[i], "Enter steers") || strings.Contains(plain[i], "working…") || strings.Contains(plain[i], "thinking…")) {
+			return "working"
+		}
 	}
-	if agy && agySpinning(plain) {
+	if (agy || agent == harness.FOH) && agySpinning(plain) {
 		return "working"
 	}
 	if agy && inputStart < 0 {
@@ -826,6 +842,9 @@ type who struct {
 
 // whoami refuses rather than send a message nobody can answer or attribute.
 func (p *P) whoami(rows []*Row) (who, error) {
+	if native, ok := p.nativeSender(); ok {
+		return native, nil
+	}
 	mine := p.me(rows)
 	if mine == nil {
 		return who{}, refuse(noSender)
