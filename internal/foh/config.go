@@ -20,12 +20,17 @@ const DefaultBaseURL = "https://openrouter.ai/api/v1"
 // DefaultModel is used when no flag, environment, config or favorite names one.
 const DefaultModel = "anthropic/claude-sonnet-5.5"
 
+// DefaultDocsURL is where the harness fetches its own documentation.
+// Overridable at build time via -ldflags or at runtime via HEV_DOCS_URL / [foh].docs_url.
+var DefaultDocsURL = "https://hevkit.com/docs"
+
 // Config is the optional [foh] table in ~/.hev/config.toml.
 type Config struct {
 	Model        string `toml:"model"`
 	BaseURL      string `toml:"base_url"`
 	APIKeyRef    string `toml:"api_key_ref"`
 	SystemPrompt string `toml:"system_prompt"`
+	DocsURL      string `toml:"docs_url"`
 	// Codex is the optional [foh.codex] table for the codex-sub provider.
 	Codex CodexConfig `toml:"codex"`
 }
@@ -138,16 +143,16 @@ var ResolveSecretRef = func(ctx context.Context, ref string) (string, error) {
 }
 
 // ErrNoAPIKey is returned when no OpenRouter key is configured.
-var ErrNoAPIKey = errors.New("no OpenRouter API key: set OPENROUTER_API_KEY, HEV_FOH_API_KEY or [foh].api_key_ref")
+var ErrNoAPIKey = errors.New("no OpenRouter API key: set OPENROUTER_API_KEY, HEV_API_KEY or [foh].api_key_ref")
 
 // ErrNoProviders is returned when neither OpenRouter nor a Codex ChatGPT
 // subscription login is available.
-var ErrNoProviders = errors.New("no model provider: set OPENROUTER_API_KEY (or HEV_FOH_API_KEY, [foh].api_key_ref), or sign in to Codex with a ChatGPT plan (`codex login`)")
+var ErrNoProviders = errors.New("no model provider: set OPENROUTER_API_KEY (or HEV_API_KEY, [foh].api_key_ref), or sign in to Codex with a ChatGPT plan (`codex login`)")
 
-// ResolveAPIKey reads OPENROUTER_API_KEY, HEV_FOH_API_KEY, then
+// ResolveAPIKey reads OPENROUTER_API_KEY, HEV_API_KEY, then
 // [foh].api_key_ref. The returned error never includes the key.
 func (c Config) ResolveAPIKey(ctx context.Context) (string, error) {
-	for _, name := range []string{"OPENROUTER_API_KEY", "HEV_FOH_API_KEY"} {
+	for _, name := range []string{"OPENROUTER_API_KEY", "HEV_API_KEY"} {
 		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 			return v, nil
 		}
@@ -167,5 +172,26 @@ func (c Config) ResolveAPIKey(ctx context.Context) (string, error) {
 	return "", ErrNoAPIKey
 }
 
+// ResolvedDocsURL returns the documentation base URL from HEV_DOCS_URL,
+// [foh].docs_url, or DefaultDocsURL.
+func (c Config) ResolvedDocsURL() string {
+	if v := strings.TrimSpace(os.Getenv("HEV_DOCS_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	if v := strings.TrimSpace(c.DocsURL); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return strings.TrimRight(DefaultDocsURL, "/")
+}
+
+// DocsLLMsURL derives the /llms.txt index URL for the configured docs URL.
+func (c Config) DocsLLMsURL() string {
+	u := c.ResolvedDocsURL()
+	if strings.HasSuffix(u, "/docs") {
+		return strings.TrimSuffix(u, "/docs") + "/llms.txt"
+	}
+	return u + "/llms.txt"
+}
+
 // secretEnv lists variables kept out of tool subprocesses.
-var secretEnv = []string{"OPENROUTER_API_KEY", "HEV_FOH_API_KEY"}
+var secretEnv = []string{"OPENROUTER_API_KEY", "HEV_API_KEY"}

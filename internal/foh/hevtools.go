@@ -62,6 +62,8 @@ type hevArgs struct {
 	Body    string `json:"body"`
 	Lines   int    `json:"lines"`
 	Limit   int    `json:"limit"`
+	// steer
+	Level string `json:"level"`
 	// dispatch send
 	Order   string `json:"order"`
 	Repo    string `json:"repo"`
@@ -120,14 +122,25 @@ var hevToolDefs = []struct {
 			"ls":    {func(hevArgs) ([]string, string, error) { return []string{"dispatch", "ls", "--json"}, "", nil }},
 			"hosts": {func(hevArgs) ([]string, string, error) { return []string{"dispatch", "hosts", "--json"}, "", nil }},
 			"show": {func(a hevArgs) ([]string, string, error) {
-				return []string{"dispatch", "show", a.Name, "--json"}, "", need("name", a.Name)
+				if err := need("name", a.Name); err != nil {
+					return nil, "", err
+				}
+				argv := []string{"dispatch", "show", a.Name, "--json"}
+				if h := strings.TrimSpace(a.Host); h != "" {
+					argv = append(argv, "--host", h)
+				}
+				return argv, "", nil
 			}},
 			"send": {func(a hevArgs) ([]string, string, error) {
 				order, err := composeOrder(a)
-				return []string{"dispatch", "-", "--json"}, order, err
+				argv := []string{"dispatch", "-", "--json"}
+				if h := strings.TrimSpace(a.Host); h != "" {
+					argv = append(argv, "--host", h)
+				}
+				return argv, order, err
 			}},
 		}},
-	{"hev_peers", "See and message live agent sessions: ls, read TARGET (last lines of its pane), send TARGET MESSAGE.",
+	{"hev_peers", "See and message live agent sessions: ls, read TARGET (last lines of its pane), send TARGET MESSAGE. Use the short session name (e.g. foh-kit-7) for local peers on this machine, and HOST/SESSION only for remote hosts.",
 		`{"type":"object","properties":{"action":{"type":"string","enum":["ls","read","send"]},"target":{"type":"string"},"message":{"type":"string"},"lines":{"type":"integer"}},"required":["action"]}`,
 		map[string]hevAction{
 			"ls": {func(hevArgs) ([]string, string, error) { return []string{"peers", "ls", "--json"}, "", nil }},
@@ -143,6 +156,29 @@ var hevToolDefs = []struct {
 					return nil, "", err
 				}
 				return []string{"peers", "send", a.Target, "-"}, a.Message, need("message", a.Message)
+			}},
+		}},
+	{"hev_steer", "Steer a BOH dispatch run or orchestrator (o-NAME): send TARGET MESSAGE with optional level (note, urgent, halt, redirect), or ls TARGET for receipts.",
+		`{"type":"object","properties":{"action":{"type":"string","enum":["send","ls"]},"target":{"type":"string"},"message":{"type":"string"},"level":{"type":"string","enum":["note","urgent","halt","redirect"]}},"required":["action"]}`,
+		map[string]hevAction{
+			"send": {func(a hevArgs) ([]string, string, error) {
+				if err := need("target", a.Target); err != nil {
+					return nil, "", err
+				}
+				if err := need("message", a.Message); err != nil {
+					return nil, "", err
+				}
+				argv := []string{"steer", a.Target, a.Message}
+				if lvl := strings.TrimSpace(a.Level); lvl != "" {
+					argv = append(argv, "--level", lvl)
+				}
+				return argv, "", nil
+			}},
+			"ls": {func(a hevArgs) ([]string, string, error) {
+				if strings.TrimSpace(a.Target) != "" {
+					return []string{"steer", "ls", a.Target}, "", nil
+				}
+				return []string{"steer", "ls"}, "", nil
 			}},
 		}},
 	{"hev_board", "Shared findings board: search QUERY, read ID, post a finding (board, title, body).",
@@ -221,7 +257,7 @@ func (t *Toolset) hevTools() []Tool {
 				}
 				out, err := t.Hev(ctx, argv, stdin)
 				body := strings.TrimSpace(string(out))
-				card.Body = prettyBody(body)
+				card.Body = formatCardBody(def.name, a.Action, body)
 				if err != nil {
 					card.Summary = "failed: " + err.Error()
 					content := err.Error()
@@ -232,6 +268,18 @@ func (t *Toolset) hevTools() []Tool {
 				}
 				card.OK = true
 				card.Summary = summarize(def.name, a.Action, body)
+				if def.name == "hev_dispatch" && a.Action == "send" {
+					if run, ok := extractDispatchedRun(string(raw), body); ok {
+						card.Summary = "dispatched → " + run.Label()
+					}
+				} else if def.name == "hev_dispatch" && a.Action == "show" && a.Name != "" {
+					run := watchedRun{Name: a.Name, Host: strings.TrimSpace(a.Host)}
+					if wr, ok := parseShowResponse(run, []byte(body)); ok {
+						card.Summary = run.Label() + " · " + wr.State
+					} else {
+						card.Summary = "show " + run.Label()
+					}
+				}
 				if body == "" {
 					body = "[no output]"
 				}

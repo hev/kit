@@ -28,13 +28,13 @@ prompts. Every tool call is still bounded:
 - A tool result sent back to the model is capped at 32 KiB.
 - `glob` and `grep` stop at fixed limits on results and files walked.
 
-Tool subprocesses don't receive `OPENROUTER_API_KEY` or `HEV_FOH_API_KEY`.
+Tool subprocesses don't receive `OPENROUTER_API_KEY` or `HEV_API_KEY`.
 
 ## Providers
 
 | Provider | Badge | Model IDs | Sign-in |
 |----------|-------|-----------|---------|
-| `openrouter` | `[OR] $3.00/$15.00` | vendor slugs, such as `google/gemini-4-neon` | `OPENROUTER_API_KEY`, `HEV_FOH_API_KEY` or `[foh].api_key_ref` |
+| `openrouter` | `[OR] $3.00/$15.00` | vendor slugs, such as `google/gemini-4-neon` | `OPENROUTER_API_KEY`, `HEV_API_KEY` or `[foh].api_key_ref` |
 | `codex-sub` | `[codex-sub] sub` | `codex/NAME`, such as `codex/gpt-6-astra` | your Codex ChatGPT login (`codex login`) |
 
 You need at least one. With both, every model from both shows in the same
