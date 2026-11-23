@@ -727,8 +727,13 @@ func TestInteropWaitPasteAndErrors(t *testing.T) {
 	}
 	// Without a pane the sender comes from process ancestry (or is refused), identically.
 	h.same("", norm, "send", "bravo", "who am I")
-	// Help is the reference text plus the two folded-in helpers.
+	// Help retains the reference text alongside the Go-specific additions.
 	py, goHelp := h.ok(pyImpl, "", "", "--help"), h.ok(goImpl, "", "", "--help")
+	goHelp, hasNative := strings.CutSuffix(goHelp, nativeUsage+"\n")
+	if !hasNative {
+		t.Fatal("native peer help is missing")
+	}
+	goHelp += "\n"
 	goHelp = strings.Replace(goHelp, "  peers role [SESSION] [foh|local|boh|offline]  inspect/set participation\n", "  peers role [SESSION] [foh|boh|offline]  inspect/set local participation\n", 1)
 	if strings.Replace(goHelp, "  peers inbox-hook                 UserPromptSubmit hook: inject the bound inbox (peers-inbox-hook)\n  peers runtime codex|claude|pi [ARGS...]\n                                   launch a harness owning a receipt capability (peers-runtime)\n", "", 1) != py {
 		t.Fatalf("help drifted\npython: %s\ngo: %s", py, goHelp)
