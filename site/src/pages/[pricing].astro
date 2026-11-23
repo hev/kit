@@ -31,6 +31,7 @@ const pricing = {
 		baseMonthly: 25, // $ / month
 		includedGB: 5, // GB stored, measured monthly
 		includedSearches: 1_000_000, // searches / month
+		includedInference: 10, // $ / month of included frontier inference credit for hev foh
 		perGBMonth: 5, // $ per GB-month stored beyond the included amount
 		perExtraSearchBlock: 10, // $ per block of searches beyond the included amount
 		searchBlock: 1_000_000, // searches in one block
@@ -90,8 +91,10 @@ const tiers = [
 		price: "Free",
 		unit: "Apache-2.0",
 		included: [
-			"Everything, on local disk",
-			"Traces and trace search, the board, peers and the dashboard",
+			"Full hev kit binary on local disk (macOS, Linux, Windows)",
+			"Dispatch, validation, orchestrators, traces, board, peers and dashboard",
+			"Works with Claude Code, Codex, Antigravity, Pi and OpenCode",
+			"Native hev foh harness with free OpenRouter inference (daily limit, no key needed)",
 		],
 		nodes: nodesLabel(nodes.starter),
 		people: "Unlimited agents on those nodes",
@@ -104,13 +107,15 @@ const tiers = [
 		price: usd(cloud.baseMonthly),
 		unit: "base / month",
 		included: [
-			`${gb(cloud.includedGB)} stored`,
-			`${count(cloud.includedSearches)} searches / month`,
+			`Everything in ${STARTER}, shared across your team`,
+			`${gb(cloud.includedGB)} stored and ${count(cloud.includedSearches)} searches / month`,
+			`${usd(cloud.includedInference)} / month of frontier inference credit for hev foh (zero API keys)`,
 			"Your own mobile app, voice-first",
 		],
 		beyond: [
 			`${usd(cloud.perGBMonth)} per GB-month stored`,
 			`${usd(cloud.perExtraSearchBlock)} per additional ${count(cloud.searchBlock)} searches`,
+			"Additional hev foh inference billed in dollars (or fall back to free routes)",
 			"No ceiling",
 		],
 		nodes: nodesLabel(nodes.advanced),
@@ -134,7 +139,13 @@ const tiers = [
 					note: "Launch partners keep this price for as long as their license continues.",
 				}
 			: null,
-		included: [`${gb(enterprise.includedGB)} of index`, "Your store, your data", "kit included", "Your own mobile app, voice-first", "SLA and migration help"],
+		included: [
+			"Everything in hev kit, backed by your own hev layer",
+			`${gb(enterprise.includedGB)} of index — your store, your data`,
+			"BYOKey for hev foh (OpenRouter, Bedrock, Azure OpenAI, Vertex)",
+			"Your own mobile app, voice-first",
+			"SLA and migration help",
+		],
 		whereLink: pricing.names.pro.link,
 		beyond: [`${usd(enterprise.perTBBlock)} / month per additional TB`],
 		nodes: nodesLabel(nodes.pro),
@@ -144,7 +155,48 @@ const tiers = [
 	},
 ];
 
+const kitPillars = [
+	{
+		label: "meta-harness",
+		title: "One binary, every harness",
+		body: "Wraps Claude Code, Codex, Antigravity, Pi and OpenCode on macOS, Linux and Windows. Bring your existing subscriptions and machines; kit ties them together.",
+	},
+	{
+		label: "hev foh",
+		title: "Built-in front-of-house harness",
+		body: "A lean terminal agent for coordinating dispatches, peers, traces and the board. Free OpenRouter routes on Starter, included frontier credits on Club, and BYOKey on Pro.",
+	},
+	{
+		label: "dispatch & validate",
+		title: "Orders as plain Markdown",
+		body: "Send work to any host with acceptance criteria, an isolated Git worktree, status and logs. A second host and model can validate the diff before you review.",
+	},
+	{
+		label: "traces & board",
+		title: "Memory that outlives a session",
+		body: "Every run is captured and searchable. Local files and grep on Starter; one shared semantic archive across every machine and teammate on Club and Pro.",
+	},
+	{
+		label: "peers & hooks",
+		title: "Agent-to-agent coordination",
+		body: "Agents across machines read what peers are doing, message before colliding on a branch, and emit hooks for Slack or custom notifications.",
+	},
+	{
+		label: "orchestrators",
+		title: "Keep long goals moving",
+		body: "Declarative loop agents that watch runs in fresh checkpointed rounds, request rework, and escalate only when a person is needed.",
+	},
+];
+
 const faq = [
+	{
+		q: "What is included in hev kit?",
+		a: "One Apache-2.0 Go binary for macOS, Linux and Windows. It gives Claude Code, Codex, Antigravity, Pi and OpenCode shared tools for dispatch, validation, orchestrators, traces, the board, peers, hooks, skills and secrets—plus hev foh, a built-in front-of-house harness for steering work from the terminal.",
+	},
+	{
+		q: "How does hev foh inference work across plans?",
+		a: `${STARTER} runs hev foh on free OpenRouter routes with zero API key setup (rate-limited daily; public free routes, so keep secrets out of it). ${ADVANCED} includes ${usd(cloud.includedInference)} a month of managed frontier inference credit—shown in dollars rather than raw token math—with top-ups or fallback to free routes. ${PRO} unlocks bring-your-own-key (BYOK) for hev foh so requests go straight to your own OpenRouter, AWS Bedrock, Azure OpenAI or Vertex endpoints.`,
+	},
 	{
 		q: "Do people or agents cost anything?",
 		a: `No. Agents are unlimited on every plan, and ${ADVANCED} and ${PRO} have unlimited people. Invite everyone and run every agent the work needs; the bill follows what you store and search, not who or what is doing it.`,
@@ -314,6 +366,30 @@ const faq = [
 				bill reaches {PRO}'s {usd(enterprise.listMonthly)} list price. When your
 				{ADVANCED} bill gets near that, owning it with {PRO} is the better deal.
 			</p>
+		</section>
+
+		<section id="whats-in-kit" class="note-section">
+			<div class="section-heading">
+				<p class="section-label"># what's in hev kit</p>
+				<h2>One meta-harness across every plan.</h2>
+				<p>
+					Every tier runs the same Apache-2.0 <code>hev</code> binary on your machines.
+					You don't pay per seat or per coding agent—you upgrade when you want hosted
+					frontier inference for <code>hev foh</code>, shared team memory across machines,
+					or your own cloud deployment with <code>hev layer</code>.
+				</p>
+			</div>
+			<div class="kit-grid">
+				{
+					kitPillars.map((item) => (
+						<article class="kit-card">
+							<p class="kit-card-label">// {item.label}</p>
+							<h3>{item.title}</h3>
+							<p>{item.body}</p>
+						</article>
+					))
+				}
+			</div>
 		</section>
 
 		<section id="start" class="note-section with-art">
@@ -764,8 +840,46 @@ const faq = [
 		margin-top: 1.5rem;
 	}
 
+	.kit-grid {
+		margin-top: 2rem;
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	.kit-card {
+		border: 1px solid var(--rule);
+		background: var(--paper-warm);
+		padding: 1.25rem 1.35rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.kit-card-label {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		font-size: 0.72rem;
+		letter-spacing: 0.11em;
+		text-transform: uppercase;
+		color: var(--signal);
+	}
+
+	.kit-card h3 {
+		font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+		font-size: 1rem;
+		line-height: 1.3;
+		color: var(--ink);
+	}
+
+	.kit-card p {
+		color: var(--ink-soft);
+		font-size: 0.92rem;
+		line-height: 1.55;
+	}
+
 	@media (max-width: 900px) {
-		.tiers {
+		.tiers,
+		.kit-grid {
 			grid-template-columns: 1fr;
 		}
 	}
