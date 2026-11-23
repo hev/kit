@@ -77,11 +77,12 @@ func makeCluster(t *testing.T, withReference bool) *cluster {
 	if os.Getenv("PEERS_INTEROP_REQUIRED") == "1" {
 		skip = t.Fatal
 	}
-	reference := os.Getenv("PEERS_PYTHON_REFERENCE")
-	if withReference && reference == "" {
-		skip("set PEERS_PYTHON_REFERENCE to the reference bin/peers")
-	}
+	var reference string
 	if withReference {
+		reference = os.Getenv("PEERS_PYTHON_REFERENCE")
+		if reference == "" {
+			skip("set PEERS_PYTHON_REFERENCE to the reference bin/peers")
+		}
 		if _, err := os.Stat(reference); err != nil {
 			t.Fatal(err)
 		}
