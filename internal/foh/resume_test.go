@@ -16,8 +16,8 @@ type fakeTraceSource struct {
 	turns map[string][]trace.Turn
 }
 
-func (f fakeTraceSource) Describe() string              { return "fake" }
-func (f fakeTraceSource) Units() ([]trace.Unit, error)  { return f.units, nil }
+func (f fakeTraceSource) Describe() string             { return "fake" }
+func (f fakeTraceSource) Units() ([]trace.Unit, error) { return f.units, nil }
 func (f fakeTraceSource) Read(u trace.Unit) ([]trace.Turn, error) {
 	return f.turns[u.Key], nil
 }
