@@ -3,6 +3,7 @@ package preval
 import (
 	"context"
 	"fmt"
+	"net/url"
 )
 
 type Excerpt struct {
@@ -38,7 +39,15 @@ func (p Provider) ReviewMaterial(ctx context.Context, pr PullRequest) ([]Excerpt
 
 	path := fmt.Sprintf("/%s/%s/_apis/git/repositories/%s/pullRequests/%d", p.Organization, p.Project, p.Repository.Repository, pr.ID)
 	var iterations struct {
-		Value []struct{ ID int }
+		Value []struct {
+			ID              int
+			CommonRefCommit struct {
+				ID string `json:"commitId"`
+			}
+			SourceRefCommit struct {
+				ID string `json:"commitId"`
+			}
+		}
 	}
 	var threads struct {
 		Value []struct{ Comments []struct{ Content string } }
@@ -49,24 +58,36 @@ func (p Provider) ReviewMaterial(ctx context.Context, pr PullRequest) ([]Excerpt
 	if err := p.fetch(ctx, path+"/threads?api-version=7.1", &threads); err != nil {
 		return nil, err
 	}
-	last := 0
-	for _, iteration := range iterations.Value {
-		last = max(last, iteration.ID)
+	last := -1
+	for i, iteration := range iterations.Value {
+		if last == -1 || iteration.ID > iterations.Value[last].ID {
+			last = i
+		}
 	}
 	var excerpts []Excerpt
-	if last > 0 {
-		// ADO's PR iteration endpoint supplies changed paths and change types.
+	if last >= 0 {
+		iteration := iterations.Value[last]
 		var changes struct {
 			ChangeEntries []struct {
 				ChangeType string
 				Item       struct{ Path string }
 			}
 		}
-		if err := p.fetch(ctx, fmt.Sprintf("%s/iterations/%d/changes?api-version=7.1&$top=10", path, last), &changes); err != nil {
+		if err := p.fetch(ctx, fmt.Sprintf("%s/iterations/%d/changes?api-version=7.1&$top=10", path, iteration.ID), &changes); err != nil {
 			return nil, err
 		}
 		for i, change := range changes.ChangeEntries[:min(10, len(changes.ChangeEntries))] {
-			excerpts = append(excerpts, Excerpt{fmt.Sprintf("diff:%d", i+1), change.ChangeType + " " + change.Item.Path})
+			summary := change.ChangeType + " " + change.Item.Path
+			if i < 2 {
+				repositoryPath := fmt.Sprintf("/%s/%s/_apis/git/repositories/%s", p.Organization, p.Project, p.Repository.Repository)
+				if before := p.azureContent(ctx, repositoryPath, change.Item.Path, iteration.CommonRefCommit.ID); before != "" {
+					summary += "\nBefore:\n" + before
+				}
+				if after := p.azureContent(ctx, repositoryPath, change.Item.Path, iteration.SourceRefCommit.ID); after != "" {
+					summary += "\nAfter:\n" + after
+				}
+			}
+			excerpts = append(excerpts, Excerpt{fmt.Sprintf("diff:%d", i+1), summary})
 		}
 	}
 	for i, thread := range threads.Value[:min(10, len(threads.Value))] {
@@ -75,4 +96,19 @@ func (p Provider) ReviewMaterial(ctx context.Context, pr PullRequest) ([]Excerpt
 		}
 	}
 	return excerpts, nil
+}
+
+func (p Provider) azureContent(ctx context.Context, repositoryPath, path, revision string) string {
+	if len(path) == 0 || len(path) > 500 || !identifier.MatchString(revision) {
+		return ""
+	}
+	query := url.Values{
+		"api-version": {"7.1"}, "path": {path}, "includeContent": {"true"},
+		"versionDescriptor.versionType": {"commit"}, "versionDescriptor.version": {revision},
+	}
+	var item struct{ Content string }
+	if p.fetch(ctx, repositoryPath+"/items?"+query.Encode(), &item) != nil {
+		return "" // a file can legitimately exist on only one side
+	}
+	return item.Content[:min(len(item.Content), 800)]
 }

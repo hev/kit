@@ -97,10 +97,10 @@ type Evaluation struct {
 }
 
 type Observation struct {
-	Source       Source
-	ObservedAt   time.Time
-	LastActivity time.Time
-	Outcome      string
+	Source       Source    `json:"source"`
+	ObservedAt   time.Time `json:"observed_at"`
+	LastActivity time.Time `json:"last_activity,omitempty"`
+	Outcome      string    `json:"outcome"`
 }
 
 // Attribution is a workspace-owned registration. Corrections must come from
@@ -160,7 +160,16 @@ func Project(link Attribution, observation Observation, previous *Evaluation, st
 		result.Score, result.Reason = score(-1), "An explicit provenance link marked the attributed attempt as "+result.Outcome+"."
 	case Active:
 		result.Reason = "The pull request is active."
-		if staleAfter > 0 && !observation.LastActivity.IsZero() && observation.ObservedAt.Sub(observation.LastActivity) >= staleAfter {
+		activity := observation.LastActivity
+		if previous != nil && previous.Outcome == Closed {
+			// Reactivation is itself activity, even when a provider does not
+			// report it in the history used to assess inactivity.
+			activity = observation.ObservedAt
+		}
+		if previous != nil && previous.Outcome == Active && !activity.IsZero() && previous.ObservedAt.After(activity) {
+			activity = previous.ObservedAt
+		}
+		if staleAfter > 0 && !activity.IsZero() && observation.ObservedAt.Sub(activity) >= staleAfter {
 			result.Outcome, result.Score, result.Reason = Stale, score(-0.25), "The active pull request exceeded the configured inactivity threshold."
 		}
 	}
@@ -182,4 +191,58 @@ func Project(link Attribution, observation Observation, previous *Evaluation, st
 		result.ObservedAt, result.Source.EventID, result.Learning = previous.ObservedAt, previous.Source.EventID, previous.Learning
 	}
 	return result, nil
+}
+
+// UnmarshalJSON accepts the compact string used by Layer and the native object
+// used by local source documents and the API.
+func (e *Evaluation) UnmarshalJSON(raw []byte) error {
+	if len(raw) > 0 && raw[0] == '"' {
+		var wire string
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return errInvalid
+		}
+		raw = []byte(wire)
+	}
+	type projection Evaluation
+	return json.Unmarshal(raw, (*projection)(e))
+}
+
+func (e Evaluation) Valid() bool {
+	p := e.Provenance
+	if e.Schema != Schema || e.PolicyVersion != PolicyVersion || e.ObservedAt.IsZero() ||
+		e.Source.ID <= 0 || !e.Source.Repository.valid() || !identifier.MatchString(e.Source.Revision) || !identifier.MatchString(e.Source.EventID) ||
+		!identifier.MatchString(e.ID) || !identifier.MatchString(p.OrderID) || !identifier.MatchString(p.AttemptID) ||
+		p.TraceSessionIDs == nil || p.EvidenceIDs == nil || !validIDs(p.TraceSessionIDs, 32) || !validIDs(p.EvidenceIDs, 32) ||
+		!validIDs(e.Learning.Refs, 16) || !slices.Contains([]string{"pending", "disabled", "failed", "none", "recorded"}, e.Learning.Status) ||
+		(e.Learning.Status == "recorded") != (len(e.Learning.Refs) > 0) {
+		return false
+	}
+	var expected float64
+	switch e.Outcome {
+	case Active:
+		return e.Score == nil && e.Reason == "The pull request is active."
+	case Merged:
+		expected = 1
+		if e.Reason != "Provider confirmed the pull request was merged." {
+			return false
+		}
+	case Closed:
+		expected = -1
+		if e.Reason != "Provider confirmed the pull request was closed without merging." {
+			return false
+		}
+	case Stale:
+		expected = -0.25
+		if e.Reason != "The active pull request exceeded the configured inactivity threshold." {
+			return false
+		}
+	case Superseded, Corrected, Reverted:
+		expected = -1
+		if e.Reason != "An explicit provenance link marked the attributed attempt as "+e.Outcome+"." {
+			return false
+		}
+	default:
+		return false
+	}
+	return e.Score != nil && *e.Score == expected
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/internal/preval"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/steer"
 )
@@ -44,7 +45,7 @@ type RPCReply struct {
 	Code  int   `json:"code,omitempty"`
 }
 
-var rpcErrors = [...]error{nil, ErrInvalid, ErrForbidden, ErrNotFound, ErrConflict, ErrRejected, ErrUnavailable}
+var rpcErrors = [...]error{nil, ErrInvalid, ErrForbidden, ErrNotFound, ErrConflict, ErrRejected, ErrUnavailable, ErrPrecondition}
 
 func (r RPCReply) Err() error {
 	if r.Code < 0 || r.Code >= len(rpcErrors) {
@@ -91,6 +92,25 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 		rows, err := list(q.WorkspaceName)
 		return Reply{Rows: rows}, err
 	case "show":
+		return get(q.Name, q.WorkspaceName)
+	case "set-evaluation":
+		current, err := get(q.Name, q.WorkspaceName)
+		if err != nil {
+			return Reply{}, err
+		}
+		if current.Active || req.IfMatch == "" || len(req.Evaluation) > 32<<10 {
+			return Reply{}, ErrConflict
+		}
+		var evaluation preval.Evaluation
+		if json.Unmarshal(req.Evaluation, &evaluation) != nil || !evaluation.Valid() || evaluation.Provenance.OrderID != q.Name {
+			return Reply{}, ErrRejected
+		}
+		if err := dispatch.SetEvaluationConditional(evaluation, req.IfMatch); err != nil {
+			if errors.Is(err, preval.ErrConflict) {
+				return Reply{}, ErrPrecondition
+			}
+			return Reply{}, ErrUnavailable
+		}
 		return get(q.Name, q.WorkspaceName)
 	case "logs":
 		return logs(q, req)
@@ -219,7 +239,19 @@ func get(id, workspaceName string) (Reply, error) {
 				}
 			}
 		}
-		return Reply{Order: row, Active: out.Active}, nil
+		reply := Reply{Order: row, Active: out.Active}
+		if result, ok := row["result"].(map[string]any); ok {
+			if attempt, ok := result["span_id"].(string); ok && attempt != "" {
+				var evaluation *preval.Evaluation
+				if raw, err := json.Marshal(result["evaluation"]); err == nil && json.Unmarshal(raw, &evaluation) == nil {
+					reply.EvaluationETag = dispatch.OrderEvaluationRevision(id, attempt, evaluation)
+					if evaluation != nil {
+						row["evaluation"] = evaluation
+					}
+				}
+			}
+		}
+		return reply, nil
 	}
 	return Reply{}, ErrNotFound
 }

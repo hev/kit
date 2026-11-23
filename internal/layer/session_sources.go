@@ -67,6 +67,7 @@ func (c *Client) writeSessionSources(rows []trace.SessionRow) (WriteResult, erro
 				return result, err
 			}
 			row := input
+			row.Evaluation = nil // Evaluation belongs to the conditional enrichment writer.
 			row.Commits = append(trace.StringList(nil), input.Commits...)
 			existing := current != nil
 			var old trace.SessionRow

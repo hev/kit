@@ -35,6 +35,8 @@ func (h HostedDocuments) request(ctx context.Context, method, prefix, id, revisi
 	path := strings.TrimRight(h.BaseURL, "/") + strings.TrimRight(prefix, "/") + "/" + url.PathEscape(id)
 	if method == http.MethodPut {
 		path += "/evaluation"
+	} else if prefix == h.TracePath || prefix == h.OrderPath {
+		path += "?view=evaluation"
 	}
 	request, err := http.NewRequestWithContext(ctx, method, path, bytes.NewReader(body))
 	if err != nil {

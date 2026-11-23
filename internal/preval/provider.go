@@ -92,7 +92,15 @@ func (p Provider) hookAuthorized(r *http.Request, body []byte) bool {
 // Hook accepts only configured repository identities. The callback reconciles
 // an existing attribution and never treats the payload itself as an outcome.
 func (p Provider) Hook(reconcile func(context.Context, PullRequest) error) http.Handler {
+	slots := make(chan struct{}, 8)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -104,6 +112,17 @@ func (p Provider) Hook(reconcile func(context.Context, PullRequest) error) http.
 		}
 		if !p.Repository.valid() || !p.hookAuthorized(r, body) {
 			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if p.Repository.Provider == GitHub && r.Header.Get("X-GitHub-Event") == "ping" {
+			var ping struct{ Repository githubRepo }
+			if json.Unmarshal(body, &ping) != nil {
+				w.WriteHeader(http.StatusBadRequest)
+			} else if !p.githubRepoMatches(ping.Repository) {
+				w.WriteHeader(http.StatusForbidden)
+			} else {
+				w.WriteHeader(http.StatusNoContent)
+			}
 			return
 		}
 		id, status := p.hookIdentity(r, body)

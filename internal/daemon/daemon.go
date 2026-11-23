@@ -21,6 +21,7 @@ import (
 	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hygiene"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/license"
 	"github.com/hev/kit/internal/metrics"
 	"github.com/hev/kit/internal/peers"

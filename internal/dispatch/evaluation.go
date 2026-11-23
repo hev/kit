@@ -42,7 +42,13 @@ func ReadEvaluation(order, attempt string) (*preval.Evaluation, error) {
 
 // SetEvaluation patches the existing result without reserializing other fields
 // through the current Result type.
-func SetEvaluation(eval preval.Evaluation) error {
+func SetEvaluation(eval preval.Evaluation) error { return SetEvaluationConditional(eval, "") }
+
+func OrderEvaluationRevision(order, attempt string, evaluation *preval.Evaluation) string {
+	return preval.Revision([]string{order, attempt}, evaluation)
+}
+
+func SetEvaluationConditional(eval preval.Evaluation, expected string) error {
 	release, err := lockRoot()
 	if err != nil {
 		return err
@@ -51,6 +57,15 @@ func SetEvaluation(eval preval.Evaluation) error {
 	doc, path, err := orderEvaluationDocument(eval.Provenance.OrderID, eval.Provenance.AttemptID)
 	if err != nil {
 		return err
+	}
+	if expected != "" {
+		var previous *preval.Evaluation
+		if raw := doc["evaluation"]; len(raw) > 0 && json.Unmarshal(raw, &previous) != nil {
+			return preval.ErrConflict
+		}
+		if OrderEvaluationRevision(eval.Provenance.OrderID, eval.Provenance.AttemptID, previous) != expected {
+			return preval.ErrConflict
+		}
 	}
 	changed, err := preval.Patch(doc, eval)
 	if err != nil || !changed {

@@ -97,6 +97,15 @@ func loadPREvaluation(path string) (*preval.Reconciler, error) {
 	var documents preval.Documents
 	var local localEvaluationDocuments
 	if hosted := config.Hosted; hosted != nil {
+		if hosted.OrderPath == "" {
+			hosted.OrderPath = "/v1/orders"
+		}
+		if hosted.TracePath == "" {
+			hosted.TracePath = "/v1/traces/sessions"
+		}
+		if hosted.EvidencePath == "" {
+			hosted.EvidencePath = "/v1/evidence"
+		}
 		documents = preval.HostedDocuments{BaseURL: hosted.BaseURL, OrderPath: hosted.OrderPath, TracePath: hosted.TracePath,
 			EvidencePath: hosted.EvidencePath, Token: os.Getenv(hosted.TokenEnv)}
 	} else {

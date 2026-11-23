@@ -141,8 +141,24 @@ func (r *Reconciler) repair(ctx context.Context, link Attribution, observation O
 	for _, id := range link.Provenance.EvidenceIDs {
 		err = errors.Join(err, r.documents.WriteEvidence(ctx, id, evaluation))
 	}
-	if err != nil || evaluation.Learning.Status != "pending" || !learn || r.learner == nil {
+	if err != nil || !learn || r.learner == nil {
 		return err
+	}
+	if evaluation.Learning.Status == "failed" {
+		if recovery, ok := r.learner.(learningRecovery); ok {
+			learning, err := recovery.Recover(ctx, evaluation)
+			if err != nil {
+				return err
+			}
+			if learning.Status == "recorded" {
+				evaluation.Learning = learning
+				return r.documents.WriteOrder(ctx, evaluation)
+			}
+		}
+		return nil
+	}
+	if evaluation.Learning.Status != "pending" {
+		return nil
 	}
 	// Persist the attempt before invoking the harness. An interruption leaves
 	// a failed marker and never repeatedly spends model time on this transition.
@@ -156,6 +172,10 @@ func (r *Reconciler) repair(ctx context.Context, link Attribution, observation O
 	}
 	evaluation.Learning = out
 	return r.documents.WriteOrder(ctx, evaluation)
+}
+
+type learningRecovery interface {
+	Recover(context.Context, Evaluation) (Learning, error)
 }
 
 type Learner interface {

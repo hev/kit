@@ -28,8 +28,6 @@
 package filearchive
 
 import (
-	"slices"
-
 	"bufio"
 	"bytes"
 	"context"
@@ -1075,32 +1073,63 @@ func (s *Store) WriteInstructionVersions(rows []layer.InstructionVersion) error 
 	})
 }
 
+func (s *Store) ReadEvaluation(id string) (eval *preval.Evaluation, etag string, err error) {
+	err = s.lockedRead(func() error {
+		stored, err := s.readSession(keyOf(id))
+		if err != nil {
+			return err
+		}
+		if stored.obj == nil {
+			return os.ErrNotExist
+		}
+		eval, etag, err = preval.TraceRevision(stored.obj)
+		return err
+	})
+	if etag == "" && err == nil {
+		err = os.ErrNotExist
+	}
+	return
+}
+
 // SetEvaluation preserves session contents and verifies the recorded attempt.
 func (s *Store) SetEvaluation(id string, eval preval.Evaluation) error {
-	return s.locked(func() error {
+	_, err := s.SetEvaluationConditional(context.Background(), id, "", eval)
+	return err
+}
+
+func (s *Store) SetEvaluationConditional(ctx context.Context, id, expected string, eval preval.Evaluation) (etag string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	err = s.locked(func() error {
 		key := keyOf(id)
 		stored, err := s.readSession(key)
 		if err != nil {
 			return err
 		}
-		var row struct {
-			ID      string `json:"id"`
-			Session string `json:"session_id"`
-			Order   string `json:"order"`
-			Attempt string `json:"parent_span_id"`
+		if stored.obj == nil {
+			return os.ErrNotExist
 		}
-		data, _ := json.Marshal(stored.obj)
-		if json.Unmarshal(data, &row) != nil || row.ID != id ||
-			!slices.Contains(eval.Provenance.TraceSessionIDs, row.Session) ||
-			row.Order != eval.Provenance.OrderID || row.Attempt != eval.Provenance.AttemptID {
+		_, prior, err := preval.TraceRevision(stored.obj)
+		if err != nil {
+			return err
+		}
+		if expected != "" && expected != prior || !preval.TraceMatches(stored.obj, id, eval.Provenance) {
 			return preval.ErrConflict
 		}
 		changed, err := preval.Patch(stored.obj, eval)
-		if err != nil || !changed {
+		if err != nil {
 			return err
 		}
-		return s.writeSession(key, stored, stored.obj)
+		if changed {
+			if err := s.writeSession(key, stored, stored.obj); err != nil {
+				return err
+			}
+		}
+		_, etag, err = preval.TraceRevision(stored.obj)
+		return err
 	})
+	return
 }
 
 // EvaluationSample returns a bounded set of text blocks from one session.

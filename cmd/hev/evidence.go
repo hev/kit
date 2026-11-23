@@ -566,6 +566,9 @@ func evidenceShowCmd() *cobra.Command {
 }
 
 func printEvidence(w io.Writer, p *evidence.Package, dir string) {
+	if p.Evaluation != nil {
+		fmt.Fprintf(w, "PR outcome: %s. %s\n", p.Evaluation.Outcome, p.Evaluation.Reason)
+	}
 	fmt.Fprintf(w, "%s  %s\n", p.ID, p.Title)
 	fmt.Fprintf(w, "state    %s", p.State)
 	if p.SealedAt != nil {
