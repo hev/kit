@@ -9,6 +9,7 @@ import (
 	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/preval"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/workspace"
 	"io"
@@ -137,6 +138,8 @@ type Result struct {
 	ClosedBy     string    `json:"closed_by,omitempty"`
 	ClosedReason string    `json:"closed_reason,omitempty"`
 	SupersededBy string    `json:"superseded_by,omitempty"`
+
+	Evaluation *preval.Evaluation `json:"evaluation,omitempty"`
 }
 
 // Closed reports whether a person closed the run (see hev dispatch close).

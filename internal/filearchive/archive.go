@@ -28,6 +28,8 @@
 package filearchive
 
 import (
+	"slices"
+
 	"bufio"
 	"bytes"
 	"context"
@@ -37,6 +39,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/hevpaths"
+	"github.com/hev/kit/internal/preval"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -584,6 +588,7 @@ func (s *Store) writeSessions(rows []trace.SessionRow, written *int, listed map[
 				row.Commits = append(row.Commits, old.Commits...)
 			}
 			row.Commits = uniqueSorted(row.Commits)
+			row.Evaluation = nil // Evaluation belongs to the conditional enrichment writer.
 			obj, err := objectOf(row)
 			if err != nil {
 				return err
@@ -1068,4 +1073,56 @@ func (s *Store) WriteInstructionVersions(rows []layer.InstructionVersion) error 
 		_, err := s.upsertLines(s.instructionsPath(), group)
 		return err
 	})
+}
+
+// SetEvaluation preserves session contents and verifies the recorded attempt.
+func (s *Store) SetEvaluation(id string, eval preval.Evaluation) error {
+	return s.locked(func() error {
+		key := keyOf(id)
+		stored, err := s.readSession(key)
+		if err != nil {
+			return err
+		}
+		var row struct {
+			ID      string `json:"id"`
+			Session string `json:"session_id"`
+			Order   string `json:"order"`
+			Attempt string `json:"parent_span_id"`
+		}
+		data, _ := json.Marshal(stored.obj)
+		if json.Unmarshal(data, &row) != nil || row.ID != id ||
+			!slices.Contains(eval.Provenance.TraceSessionIDs, row.Session) ||
+			row.Order != eval.Provenance.OrderID || row.Attempt != eval.Provenance.AttemptID {
+			return preval.ErrConflict
+		}
+		changed, err := preval.Patch(stored.obj, eval)
+		if err != nil || !changed {
+			return err
+		}
+		return s.writeSession(key, stored, stored.obj)
+	})
+}
+
+// EvaluationSample returns a bounded set of text blocks from one session.
+func (s *Store) EvaluationSample(id string) (sample string, err error) {
+	err = s.lockedRead(func() error {
+		file, err := os.Open(s.path("blocks", keyOf(id)))
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(io.LimitReader(file, 192<<10))
+		scanner.Buffer(make([]byte, 4096), 64<<10)
+		var text strings.Builder
+		for scanner.Scan() && text.Len() < 4800 {
+			var row trace.BlockRow
+			if json.Unmarshal(scanner.Bytes(), &row) == nil && row.SessionID == id {
+				text.WriteString(row.Text[:min(len(row.Text), 4800-text.Len())])
+				text.WriteByte('\n')
+			}
+		}
+		sample = text.String()
+		return nil
+	})
+	return sample, err
 }
