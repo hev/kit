@@ -107,21 +107,40 @@ type native struct {
 // Normalize turns a harness's hook JSON into an Event. The event argument is
 // authoritative: a harness that names it differently is still answered in
 // the shape the installed hook asked for.
-func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) {
-	if !ValidHarness(harness) {
-		return Event{}, fmt.Errorf("unknown harness %q", harness)
+func Normalize(name, event string, raw []byte, now time.Time) (Event, error) {
+	if !ValidHarness(name) {
+		return Event{}, fmt.Errorf("unknown harness %q", name)
 	}
-	if nativeName(harness, event) == "" {
+	if nativeName(name, event) == "" {
 		return Event{}, fmt.Errorf("unknown event %q", event)
 	}
-	ev := Event{Schema: Schema, ID: strings.ToLower(ulid.Make().String()), Time: now.UTC(), Event: event, Harness: harness}
+	ev := Event{Schema: Schema, ID: strings.ToLower(ulid.Make().String()), Time: now.UTC(), Event: event, Harness: name}
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return ev, fmt.Errorf("empty hook input")
 	}
 	var n native
 	if err := json.Unmarshal(raw, &n); err != nil {
-		return ev, fmt.Errorf("parse %s hook input: %w", harness, err)
+		return ev, fmt.Errorf("parse %s hook input: %w", name, err)
+	}
+	if name == harness.Grok {
+		var grok struct {
+			Event      string          `json:"hookEventName"`
+			SessionID  string          `json:"sessionId"`
+			PromptID   string          `json:"promptId"`
+			ToolName   string          `json:"toolName"`
+			ToolInput  json.RawMessage `json:"toolInput"`
+			ToolResult json.RawMessage `json:"toolResult"`
+			ToolUseID  string          `json:"toolUseId"`
+		}
+		if err := json.Unmarshal(raw, &grok); err != nil {
+			return ev, fmt.Errorf("invalid Grok hook payload")
+		}
+		if grok.Event != "" {
+			n.HookEventName = grok.Event
+		}
+		n.SessionID, n.TurnID = grok.SessionID, grok.PromptID
+		n.ToolName, n.ToolInput, n.ToolResponse, n.ToolUseID = grok.ToolName, grok.ToolInput, grok.ToolResult, grok.ToolUseID
 	}
 	ev.NativeEvent = n.HookEventName
 	ev.SessionID, ev.TurnID, ev.TranscriptPath, ev.Cwd, ev.Model = n.SessionID, n.TurnID, n.TranscriptPath, n.Cwd, n.Model
@@ -144,6 +163,14 @@ func Normalize(harness, event string, raw []byte, now time.Time) (Event, error) 
 		}
 		t.Command = toolCommand(t.Input)
 		t.Kind = Classify(t.Name, t.Command)
+		if name == harness.Grok {
+			switch t.Name {
+			case "run_terminal_command", "run_terminal_cmd", "Shell":
+				t.Kind = ClassifyShell(t.Command)
+			case "StrReplace", "EditNotebook", "Delete":
+				t.Kind = KindMutate
+			}
+		}
 		ev.Tool = t
 	}
 	return ev, nil

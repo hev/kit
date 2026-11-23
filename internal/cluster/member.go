@@ -130,6 +130,9 @@ func (n *Node) broadcastState(b []byte) {
 	}
 }
 
+// ErrTransportStart indicates that memberlist could not create its transport.
+var ErrTransportStart = errors.New("cluster transport could not start")
+
 // Start requires a raw 32-byte key. It never permits memberlist's plaintext mode.
 func Start(cfg Config, key []byte, facts Facts, logger *slog.Logger) (*Node, error) {
 	return start(cfg, key, facts, logger, nil)
@@ -190,7 +193,7 @@ func start(cfg Config, key []byte, facts Facts, logger *slog.Logger, tune func(*
 	c.LogOutput = io.Discard
 	ml, e := memberlist.Create(c)
 	if e != nil {
-		return nil, errors.New("cluster transport could not start")
+		return nil, ErrTransportStart
 	}
 	n.ml = ml
 	n.bound = ml.LocalNode().Address()

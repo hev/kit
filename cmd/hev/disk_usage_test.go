@@ -33,6 +33,7 @@ func TestDiskUsagePerSurface(t *testing.T) {
 	fill(t, filepath.Join(h, "peers", "p"), 60)
 	fill(t, filepath.Join(h, "hooks", "events.jsonl"), 70)
 	fill(t, filepath.Join(h, "evidence", "ev_x", "001-a.png"), 4096)
+	fill(t, filepath.Join(h, "reviews", "rev_x", "review.json"), 21)
 	fill(t, filepath.Join(h, "config.toml"), 11)
 	fill(t, filepath.Join(h, "secrets", "cache"), 9)
 	// A file named like a surface at the top level is not that surface.
@@ -42,19 +43,19 @@ func TestDiskUsagePerSurface(t *testing.T) {
 	fill(t, outside, 1<<20)
 	os.Symlink(outside, filepath.Join(h, "board", "link"))
 
-	u := measureDiskUsage(home, filepath.Join(h, "evidence"))
-	want := map[string]int64{"traces": 1024, "board": 307, "orders": 50, "peers": 60, "hooks": 70, "evidence": 4096}
+	u := measureDiskUsage(home, filepath.Join(h, "evidence"), filepath.Join(h, "reviews"))
+	want := map[string]int64{"traces": 1024, "board": 307, "orders": 50, "peers": 60, "hooks": 70, "evidence": 4096, "reviews": 21}
 	for k, v := range want {
 		if u.Surfaces[k] != v {
 			t.Errorf("%s = %d, want %d", k, u.Surfaces[k], v)
 		}
 	}
-	if u.Other != 25 || u.Total != 1024+307+50+60+70+4096+25 || u.Partial {
+	if u.Other != 25 || u.Total != 1024+307+50+60+70+4096+21+25 || u.Partial {
 		t.Fatalf("other %d total %d partial %v", u.Other, u.Total, u.Partial)
 	}
 	var out bytes.Buffer
 	writeDiskUsage(&out, u)
-	for _, line := range []string{"Disk usage (" + filepath.Join("~", ".hev") + "): 5.5 KiB", "  traces    1.0 KiB", "  evidence  4.0 KiB", "  hooks     70 B", "  other     25 B"} {
+	for _, line := range []string{"Disk usage (" + filepath.Join("~", ".hev") + "): 5.5 KiB", "  traces    1.0 KiB", "  evidence  4.0 KiB", "  reviews   21 B", "  hooks     70 B", "  other     25 B"} {
 		if !strings.Contains(out.String(), line) {
 			t.Errorf("missing %q in\n%s", line, out.String())
 		}
@@ -64,13 +65,21 @@ func TestDiskUsagePerSurface(t *testing.T) {
 	// the total; ~/.hev/evidence then is just other.
 	ext := filepath.Join(t.TempDir(), "proof")
 	fill(t, filepath.Join(ext, "ev_y", "manifest.json"), 500)
-	u = measureDiskUsage(home, ext)
-	if u.Surfaces["evidence"] != 500 || u.Other != 25+4096 || u.Total != 1024+307+50+60+70+4096+25+500 {
+	u = measureDiskUsage(home, ext, "")
+	if u.Surfaces["evidence"] != 500 || u.Other != 25+4096 || u.Total != 1024+307+50+60+70+4096+21+25+500 {
 		t.Fatalf("external evidence %+v", u)
 	}
+	// A configured review folder is attributed to reviews even when nested
+	// under another surface. The default review directory becomes other.
+	override := filepath.Join(h, "orders", "code-reviews")
+	fill(t, filepath.Join(override, "rev_y", "review.json"), 42)
+	u = measureDiskUsage(home, "", override)
+	if u.Surfaces["reviews"] != 42 || u.Surfaces["orders"] != 50 || u.Other != 25+21 {
+		t.Fatalf("configured reviews %+v", u)
+	}
 	// An empty ~/.hev reports zeros, not an error.
-	u = measureDiskUsage(t.TempDir(), "")
-	if u.Total != 0 || len(u.Surfaces) != 6 {
+	u = measureDiskUsage(t.TempDir(), "", "")
+	if u.Total != 0 || len(u.Surfaces) != 7 {
 		t.Fatalf("empty %+v", u)
 	}
 }
@@ -83,7 +92,7 @@ func TestDiskUsageBounded(t *testing.T) {
 	}
 	defer func(n int, d time.Duration) { diskUsageMaxEntries, diskUsageBudget = n, d }(diskUsageMaxEntries, diskUsageBudget)
 	diskUsageMaxEntries = 10
-	u := measureDiskUsage(home, "")
+	u := measureDiskUsage(home, "", "")
 	if !u.Partial || u.Total >= 500 {
 		t.Fatalf("bounded walk %+v", u)
 	}
@@ -93,7 +102,7 @@ func TestDiskUsageBounded(t *testing.T) {
 		t.Fatalf("partial output %s", out.String())
 	}
 	diskUsageMaxEntries = 1_000_000
-	if u := measureDiskUsage(home, ""); u.Partial || u.Surfaces["traces"] != 500 {
+	if u := measureDiskUsage(home, "", ""); u.Partial || u.Surfaces["traces"] != 500 {
 		t.Fatalf("full walk %+v", u)
 	}
 }

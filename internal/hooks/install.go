@@ -34,6 +34,9 @@ func HarnessHome(home, harness string) string {
 	if path == "" {
 		return ""
 	}
+	if harness == "grok" {
+		return filepath.Dir(filepath.Dir(path))
+	}
 	return filepath.Dir(path)
 }
 

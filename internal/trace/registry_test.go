@@ -15,14 +15,15 @@ func TestRegisteredSourceOrder(t *testing.T) {
 		harness.OpenCode: "opencode root",
 		harness.Dot:      "dot root",
 		harness.Agy:      "agy root",
+		harness.Grok:     "grok root",
 	}
 	for _, tc := range []struct {
 		name    string
 		sources []Source
 		want    []string
 	}{
-		{"discovery", Sources(roots), []string{"claude_code", "codex", "dot", "pi", "opencode", "agy"}},
-		{"preview", PreviewSources(roots), []string{"claude_code", "codex", "pi", "opencode", "dot", "agy"}},
+		{"discovery", Sources(roots), []string{"claude_code", "codex", "dot", "pi", "opencode", "agy", "grok"}},
+		{"preview", PreviewSources(roots), []string{"claude_code", "codex", "pi", "opencode", "grok", "dot", "agy"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var names []string
