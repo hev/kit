@@ -1,12 +1,10 @@
 ---
-import DeepToggle from "./deep/DeepToggle.astro";
 import { APP_LIVE, PRICING_SIGNIN, SIGNIN_HREF } from "../lib/site";
 
 interface Props {
 	current?: "product" | "docs" | "pricing";
-	deep?: boolean;
 }
-const { current = "product", deep = false } = Astro.props;
+const { current = "product" } = Astro.props;
 const REPO = "hev/kit";
 ---
 
@@ -17,7 +15,6 @@ const REPO = "hev/kit";
 				hev<span class="cursor" aria-hidden="true"></span>
 				<span class="suffix">kit</span>
 			</a>
-			{deep && <DeepToggle />}
 		</div>
 		{
 			PRICING_SIGNIN && (

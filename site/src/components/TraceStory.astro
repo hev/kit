@@ -148,16 +148,13 @@ const dark = (s: string) => `/shots/${s}-dark.webp`;
 	const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 	const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
-	// The shots follow the site's theme, not the OS: the light <source> holds
-	// only while the page is light. Underwater they are always the dark ones.
+	// Always show light screenshots (light-only site).
 	function pickShots() {
-		const lightShots = root.dataset.theme === "light" && !root.classList.contains("deep");
 		document.querySelectorAll<HTMLSourceElement>(".story-grid source[data-light]").forEach((s) => {
-			s.media = lightShots ? "all" : "not all";
+			s.media = "all";
 		});
 	}
 	pickShots();
-	new MutationObserver(pickShots).observe(root, { attributes: true, attributeFilter: ["data-theme", "class"] });
 
 	function frame() {
 		queued = false;

@@ -1,12 +1,13 @@
+<p align="center">
+  <img src="site/public/img/hev-head.png" alt="hev kit" width="120" height="120" />
+</p>
+
 # hev kit
 
-hev kit is what you need to make your machine part of a software factory.
-It's one binary with the tools a factory needs: a daemon that collects
-traces, dispatch that sends work to your hosts, and an admission controller
-that decides which repos a host accepts (and probably tools and skills over
-time). `brew install hev` gets you everything you need to run a factory. To
-get the most out of the factory you'll want headless machines locally or in
-the cloud.
+hev kit is a **meta-harness** for Claude Code, Codex, Antigravity (agy), Pi,
+and OpenCode. One binary on macOS, Linux, and Windows gives those harnesses
+shared tools for dispatch, validation, orchestrators, traces, the board, peers,
+hooks, skills, and secrets—plus the built-in `hev kit` terminal harness.
 
 ## Install
 
@@ -34,63 +35,52 @@ key, `hev up` keeps traces in files on this machine and needs no Docker.
 
 ## Five-minute quickstart
 
-Start the local archive and capture daemon, then check it:
+Install with Homebrew and start kit:
 
 ```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
 hev up
-hev s
 ```
 
-Register a host in `~/.config/hev/dispatch.toml`. This example uses your own
-machine; it needs Git, tmux, the Codex CLI, and an existing clone at
-`~/workspace/sample` with an `origin` remote. Use a repository you want an agent
-to work on, and replace `sample` below with its directory name.
+On a new machine, `hev up` runs `hev onboard`: confirm your detected harnesses
+and workspace (default `~/workspace`), and it creates `~/.hev/`, writes a local
+`~/.config/hev/dispatch.toml`, installs bundled agent skills, and starts `hevd`
+and the local dashboard (`http://127.0.0.1:8099`). Check status with `hev s`.
 
-```toml
-cap = 2
-workspace = "~/workspace"
+Open your harness:
 
-[hosts.here]
-local = true
+```sh
+hev kit                # built-in harness (free routes on Starter Kit, no key required)
 ```
 
-Save an order as `order.md`:
+Or use your existing harness—`hev up` already installed kit's bundled skills
+(re-run `hev skills setup` any time):
 
-```markdown
----
-name: explain-project
-host: here
-repo: sample
-base: main
-harness: codex
-validation: none
----
-Read the project and write a short architecture guide in ARCHITECTURE.md.
-Do not push or open a PR.
-
-## Acceptance
-- The guide explains the entry points and how to run the project.
+```sh
+hev skills setup
+claude                 # or codex, agy, pi, opencode
 ```
 
-Dispatch it, follow its log, and inspect the result:
+Then ask your harness to dispatch your first item (for example: *"Dispatch an
+order to add a short Development section to README.md in `sample`, commit on a
+branch, and don't push"*). On the first run, the agent will walk you through
+repository admission, create an isolated Git worktree, follow the run, and show
+you the receipt.
+
+You can also drive dispatch and trace search directly from the shell:
 
 ```sh
 hev dispatch order.md
 hev dispatch logs explain-project -f
 hev dispatch show explain-project
-```
-
-Dispatch creates an isolated Git worktree and keeps the order, status, report,
-and logs under `~/dispatch/explain-project/`. Once capture has indexed the
-session, search its trace:
-
-```sh
 hev traces search 'architecture' --order explain-project
 ```
 
-The [dispatch guide](docs/dispatch.md) covers remote hosts, inline tasks,
-notifications, validation, and rework. The [online docs](https://hevkit.com/docs)
-walk through the factory setup.
+The [quickstart](https://hevkit.com/docs/quickstart) and
+[online docs](https://hevkit.com/docs) cover admission, orders, validation,
+rework, and clusters.
 
 ## Dispatch
 

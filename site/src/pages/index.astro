@@ -3,8 +3,6 @@ import Base from "../layouts/Base.astro";
 import { INVITE_HREF, PRICING_SIGNIN, SIGNUP_HREF } from "../lib/site";
 import HevdBanner from "../components/HevdBanner.astro";
 import TraceStory from "../components/TraceStory.astro";
-import Dive from "../components/deep/Dive.astro";
-import Seafloor from "../components/deep/Seafloor.astro";
 
 // The first dispatch, split where `hev up` prints hevd.
 const order = `---
@@ -75,23 +73,8 @@ budget: {concurrent_runs: 3, runs_per_day: 20}
 Rework anything red once. Ask me before touching the API repo.`;
 ---
 
-<Base title="hev kit: build your own software factory" current="product" deep>
-	<Dive />
-	{/* Underwater the hero is the plunge: full bleed, at the surface, the art
-	    leaving its left side to open water for the copy. The art is lazy, so
-	    the plain page never fetches it. */}
-	<div class="plunge">
-		<picture class="plunge-art">
-			<source srcset="/deep/hero-sm.webp" media="(max-width: 920px)" />
-			<img
-				src="/deep/hero.webp"
-				width="2200"
-				height="1228"
-				loading="lazy"
-				alt="The pixel-art mascot in a brass diving helmet swimming down through drifting transcript pages, holding a lantern."
-			/>
-		</picture>
-		<section class="hero">
+<Base title="hev kit: build your own software factory" current="product">
+	<section class="hero">
 			<div class="hero-copy">
 				<p class="kicker">// hev kit</p>
 				<h1>Everything you need to build your own software factory.</h1>
@@ -147,7 +130,6 @@ Rework anything red once. Ask me before touching the API repo.`;
 				}
 			</div>
 		</section>
-	</div>
 
 	<main>
 		{
@@ -214,9 +196,8 @@ Rework anything red once. Ask me before touching the API repo.`;
             </div>
         </section>
 
-		<section id="order" class="run-section" data-depth="200">
+		<section id="order" class="run-section">
 			<div class="section-heading">
-				<p class="zone">twilight zone &middot; 200 m</p>
 				<p class="section-label"># an order</p>
 				<h2>Work goes out as a file.</h2>
 				<p>
@@ -253,10 +234,9 @@ Rework anything red once. Ask me before touching the API repo.`;
 			</div>
 		</section>
 
-		<section id="traces" class="run-section" data-depth="1000">
+		<section id="traces" class="run-section">
 			<TraceStory>
 				<div class="section-heading">
-					<p class="zone">midnight zone &middot; 1,000 m</p>
 					<p class="section-label"># traces</p>
 					<h2>Every run is a trace.</h2>
 					<p>
@@ -269,9 +249,8 @@ Rework anything red once. Ask me before touching the API repo.`;
 			</TraceStory>
 		</section>
 
-		<section id="orchestrators" class="run-section" data-depth="4000">
+		<section id="orchestrators" class="run-section">
 			<div class="section-heading">
-				<p class="zone">abyss &middot; 4,000 m</p>
 				<p class="section-label"># orchestrators <span class="status-tag">new in 0.6</span></p>
 				<h2>Leave someone down there.</h2>
 				<p>
@@ -306,7 +285,6 @@ Rework anything red once. Ask me before touching the API repo.`;
 			)
 		}
 	</main>
-	<Seafloor />
 </Base>
 
 <script is:inline>
