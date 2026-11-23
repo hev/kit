@@ -4,12 +4,14 @@ package compat
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -1135,9 +1137,24 @@ while True:
     message = input()
     print("received: " + message + " " + header, flush=True)
 `
+	python := c.python
+	if runtime.GOOS == "darwin" {
+		// The framework launcher re-execs Python with its own argv[0].
+		// Use the interpreter directly so this fixture can impersonate agy.
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		prefix, err := exec.CommandContext(ctx, c.python, "-c", "import sys; print(sys.base_exec_prefix)").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		framework := filepath.Join(strings.TrimSpace(string(prefix)), "Resources", "Python.app", "Contents", "MacOS", "Python")
+		if info, err := os.Stat(framework); err == nil && info.Mode().IsRegular() {
+			python = framework
+		}
+	}
 	start := func(name, prompt string) {
 		screen := "> transcript quote\n" + rule + "\n" + prompt + "\n" + rule + "\n? for shortcuts"
-		command := "exec -a agy " + shlexQuote(c.python) + " -c " + shlexQuote(fixture) + " " + shlexQuote(screen)
+		command := "exec -a agy " + shlexQuote(python) + " -c " + shlexQuote(fixture) + " " + shlexQuote(screen)
 		h.tmux("new-session", "-d", "-s", name, "-c", h.home, "bash -c "+shlexQuote(command))
 		h.panes[name] = h.tmux("display-message", "-p", "-t", "="+name+":", "#{pane_id}")
 	}

@@ -16,7 +16,7 @@ type Scope struct {
 	Enabled    bool
 }
 
-func (s Scope) allowsLocal(row *Row) bool {
+func (s Scope) AllowsLocal(row *Row) bool {
 	if name := row.Dispatch; name != "" {
 		var meta struct {
 			Workspace string `json:"workspace"`

@@ -400,7 +400,7 @@ func (p *P) cmdLs(args []string) {
 	if p.scope.Enabled {
 		kept := rows[:0]
 		for _, row := range rows {
-			if p.scope.Workspace.AllowsHost(p.selfLabel()) && p.scope.allowsLocal(row) {
+			if p.scope.Workspace.AllowsHost(p.selfLabel()) && p.scope.AllowsLocal(row) {
 				kept = append(kept, row)
 			}
 		}
