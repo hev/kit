@@ -3,501 +3,258 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
-	"io"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/dispatch"
-	"github.com/hev/kit/internal/reviewnotes"
+	"github.com/hev/kit/internal/reviews"
 )
 
-const (
-	testHead = "1111111111111111111111111111111111111111"
-	testBase = "2222222222222222222222222222222222222222"
-)
+const reviewTestToken = "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
 
-type fakeReview struct {
-	files    map[string]map[string]string // run -> files
-	state    map[string]string
-	hunk     bool
-	steer    bool
-	ran      [][]string
-	stdin    []string
-	requests []dispatch.Request
-	session  string
-	comments string
-	// webHelp makes hunk diff --help list --web.
-	webHelp bool
-	runErr  error
-	cache   string
-	// sent holds every message hev review send delivered (stdin of hev).
-	sent []string
+func reviewHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HEV_CONFIG", "")
+	t.Setenv(reviews.DirEnv, "")
+	return home
 }
 
-func (f *fakeReview) deps(t *testing.T) reviewDeps {
-	if f.cache == "" {
-		f.cache = t.TempDir()
-	}
-	cache := f.cache
-	row := func(name, base, branch string) dispatch.Row {
-		r := dispatch.Row{Kind: "run", State: f.state[name]}
-		r.Name, r.Base, r.Branch, r.Repo = name, base, branch, "kit"
-		return r
-	}
-	return reviewDeps{
-		load: func() (dispatch.Config, error) {
-			return dispatch.Config{Hosts: map[string]dispatch.Host{"oven": {SSH: "oven"}, "mini": {SSH: "mini"}}}, nil
-		},
-		inventory: func(dispatch.Config, string) map[string]dispatch.Response {
-			return map[string]dispatch.Response{
-				"oven": {Rows: []dispatch.Row{
-					row("feat", "v0.7", "d/feat"),
-					row("feat-review", "d/feat", "d/feat-review"),
-					row("other", "v0.7", "d/other"),
-				}},
-				"mini": {Rows: []dispatch.Row{
-					row("kit-review-feat", "d/feat", "d/kit-review-feat"),
-					row("followup-feat", "d/feat", "d/followup-feat"),
-				}},
-			}
-		},
-		rpc: func(_ context.Context, h dispatch.Host, q dispatch.Request) (dispatch.Response, error) {
-			f.requests = append(f.requests, q)
-			switch q.Action {
-			case "review-fetch":
-				return dispatch.Response{Review: &dispatch.ReviewFetch{Branch: "d/" + q.Name, Base: "v0.7", Head: testHead, MergeBase: testBase}}, nil
-			case "show":
-				return dispatch.Response{Files: f.files[q.Name]}, nil
-			}
-			return dispatch.Response{}, errors.New("unexpected " + q.Action)
-		},
-		lookPath: func(string) (string, error) {
-			if f.hunk {
-				return "/x/hunk", nil
-			}
-			return "", errors.New("not found")
-		},
-		run: func(dir string, stdin io.Reader, _, _ io.Writer, name string, args ...string) error {
-			f.ran = append(f.ran, append([]string{dir, name}, args...))
-			b, _ := io.ReadAll(stdin)
-			f.stdin = append(f.stdin, string(b))
-			if name != "hunk" {
-				if f.runErr != nil {
-					return f.runErr
-				}
-				f.sent = append(f.sent, string(b))
-			}
-			return nil
-		},
-		output: func(dir, name string, args ...string) ([]byte, error) {
-			cmd := strings.Join(append([]string{name}, args...), " ")
-			switch {
-			case strings.HasPrefix(cmd, "git rev-parse --show-toplevel"):
-				return []byte(dir + "\n"), nil
-			case strings.HasPrefix(cmd, "git cat-file"), strings.HasPrefix(cmd, "git update-ref"):
-				return nil, nil
-			case strings.HasPrefix(cmd, "git diff --stat"):
-				return []byte(" a.go | 2 +-\n"), nil
-			case cmd == "hunk diff --help":
-				if f.webHelp {
-					return []byte("Options:\n  --web   open in the browser\n  --agent-notes  show notes\n"), nil
-				}
-				return []byte("Options:\n  --agent-context <path>  JSON sidecar\n  --agent-notes  show notes\n"), nil
-			case cmd == "hunk --version":
-				return []byte("0.25.0\n"), nil
-			case cmd == "hunk session list --json":
-				return []byte(f.session), nil
-			case strings.HasPrefix(cmd, "hunk session comment list"):
-				f.ran = append(f.ran, append([]string{dir, name}, args...))
-				return []byte(f.comments), nil
-			}
-			return nil, errors.New("unexpected command " + cmd)
-		},
-		cacheDir: func() (string, error) { return cache, nil },
-		getwd:    func() (string, error) { return "/work/kit", nil },
-		hasSteer: func() bool { return f.steer },
-		self:     func() (string, error) { return "/bin/hev", nil },
-	}
-}
-
-func notesJSON(t *testing.T, n reviewnotes.Notes) string {
-	b, err := reviewnotes.Marshal(n)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
-
-func newFakeReview(t *testing.T) *fakeReview {
-	build := reviewnotes.Notes{Summary: "Adds feat.", Head: testHead, Files: []reviewnotes.File{{Path: "a.go", Summary: "feat", Annotations: []reviewnotes.Annotation{{Summary: "why", NewRange: reviewnotes.Range{1, 2}, Author: "feat opus", Source: "feat"}}}}}
-	review := reviewnotes.Notes{Files: []reviewnotes.File{{Path: "a.go", Annotations: []reviewnotes.Annotation{{Summary: "bug", NewRange: reviewnotes.Range{2, 2}, Tags: []string{"finding", "fail"}, Confidence: "high", Author: "feat-review sonnet", Source: "feat-review"}}}}}
-	stale := reviewnotes.Notes{Head: "3333333", Files: []reviewnotes.File{{Path: "a.go", Annotations: []reviewnotes.Annotation{{Summary: "stale finding"}}}}}
-	return &fakeReview{
-		state: map[string]string{"feat": "running"},
-		files: map[string]map[string]string{
-			"feat":            {"report.md": "PR #1 done", reviewnotes.FileName: notesJSON(t, build)},
-			"feat-review":     {"report.md": "VERDICT: FAIL head=" + testHead[:12] + "\nfindings", reviewnotes.FileName: notesJSON(t, review)},
-			"kit-review-feat": {"report.md": "VERDICT: PASS head=3333333", reviewnotes.FileName: notesJSON(t, stale)},
-		},
-	}
-}
-
-func execReview(t *testing.T, f *fakeReview, args ...string) (string, string, error) {
-	d := f.deps(t)
-	c := newReviewCommand(&d)
-	var out, errout bytes.Buffer
+func reviewCLI(stdin string, args ...string) (string, error) {
+	c := newReviewCommand()
+	c.SilenceUsage = true
+	var out bytes.Buffer
 	c.SetOut(&out)
-	c.SetErr(&errout)
-	c.SetIn(strings.NewReader(""))
+	c.SetErr(&out)
+	c.SetIn(strings.NewReader(stdin))
 	c.SetArgs(args)
 	err := c.Execute()
-	return out.String(), errout.String(), err
+	return strings.TrimSpace(out.String()), err
 }
 
-func TestReviewOpensHunkWithMergedNotes(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk, f.webHelp = true, true
-	_, errout, err := execReview(t, f, "feat", "--web")
+func mustReviewCLI(t *testing.T, stdin string, args ...string) string {
+	t.Helper()
+	out, err := reviewCLI(stdin, args...)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("review %s: %v", args[0], err)
 	}
-	if len(f.ran) != 1 {
-		t.Fatalf("ran %v", f.ran)
-	}
-	run := f.ran[0]
-	notesPath := run[5]
-	want := []string{"/work/kit", "hunk", "diff", testBase + "..." + testHead, "--agent-context", notesPath, "--agent-notes", "--web"}
-	if !reflect.DeepEqual(run, want) || filepath.Base(notesPath) != "merged.json" {
-		t.Fatalf("hunk run %v, want %v", run, want)
-	}
-	merged, err := reviewnotes.Load(notesPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a := merged.Files[0].Annotations
-	if merged.Head != testHead || len(a) != 2 || a[0].Summary != "why" || a[1].Summary != "bug" || a[1].Author != "feat-review sonnet" {
-		t.Fatalf("merged: %+v", merged)
-	}
-	for _, want := range []string{"dropped review notes from kit-review-feat", "reviews: feat-review, kit-review-feat", "feat-review: VERDICT: FAIL"} {
-		if !strings.Contains(errout, want) {
-			t.Errorf("stderr lacks %q:\n%s", want, errout)
-		}
-	}
-	if strings.Contains(errout, "followup-feat") {
-		t.Error("a non-review run on the branch was treated as a review")
-	}
-	// The local checkout already had both commits: no bundle was requested.
-	for _, q := range f.requests {
-		if q.Bundle {
-			t.Fatalf("unneeded bundle request: %+v", q)
-		}
-	}
+	return out
 }
 
-func TestReviewWithoutHunkPrintsVerdictStatAndHint(t *testing.T) {
-	f := newFakeReview(t)
-	out, _, err := execReview(t, f, "feat", "--with", "feat-review")
-	if err != nil {
+func TestReviewCLIValidationAndSearch(t *testing.T) {
+	home := reviewHome(t)
+	head := strings.Repeat("b", 40)
+	out := mustReviewCLI(t, `[{"file":"pkg/parser.go","severity":"major","body":"retry deadlock `+reviewTestToken+`"}]`,
+		"create", "--repo", "kit", "--head", head, "--order", "example", "--verdict", "rework", "-m", "Migration "+reviewTestToken)
+	id, verdict, ok := strings.Cut(out, " ")
+	if !ok || !strings.HasPrefix(id, "rev_") || verdict != "rework" {
+		t.Fatalf("unexpected review output %q", out)
+	}
+	minor := mustReviewCLI(t, "", "add", id, "--file", "pkg/other.go", "--lines", "2-4", "--severity", "minor", "-m", "retry cleanup")
+	mustReviewCLI(t, "", "resolve", id, minor, "--status", "waived", "-m", "confirmed "+reviewTestToken)
+	file := filepath.Join(home, "findings.json")
+	if err := os.WriteFile(file, []byte(`[{"file":"pkg/parser.go","severity":"major","body":"retry deadlock"}]`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.ran) != 0 {
-		t.Fatalf("ran %v without hunk", f.ran)
-	}
-	for _, want := range []string{"feat-review: VERDICT: FAIL head=" + testHead[:12], "a.go | 2 +-", "curl -fsSL https://hunk.dev/install.sh | sh"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "kit-review-feat") {
-		t.Error("--with did not replace discovery")
-	}
-}
-
-func TestReviewPrintNotes(t *testing.T) {
-	f := newFakeReview(t)
-	out, _, err := execReview(t, f, "feat", "--print-notes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	n, err := reviewnotes.Parse([]byte(out))
-	if err != nil || n.Summary != "Adds feat." || len(n.Files[0].Annotations) != 2 {
-		t.Fatalf("printed notes %v:\n%s", err, out)
-	}
-	if len(f.ran) != 0 {
-		t.Fatal("print-notes launched hunk")
-	}
-}
-
-func TestReviewUnknownRun(t *testing.T) {
-	f := newFakeReview(t)
-	if _, _, err := execReview(t, f, "nope"); err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Fatal(err)
-	}
-	if _, _, err := execReview(t, f, "feat", "--host", "nowhere"); err == nil || !strings.Contains(err.Error(), "unknown host") {
-		t.Fatal(err)
-	}
-}
-
-const testSessions = `{"sessions":[{"sessionId":"s-other","repoRoot":"/x","title":"x","review":{"head":"9999999999"}},{"sessionId":"s-feat","repoRoot":"/work/kit","title":"kit 2222...1111","review":{"head":"` + testHead + `"}}]}`
-
-const testComments = `{"comments":[
- {"noteId":"b1","source":"ai","filePath":"a.go","newRange":[2,2],"body":"bug","author":"feat-review sonnet"},
- {"noteId":"mcp:1","source":"agent","filePath":"a.go","newRange":[5,5],"body":"from a shell"},
- {"noteId":"user:2","parentId":"b1","source":"user","filePath":"a.go","newRange":[2,2],"body":"agree, fix it","author":"user"},
- {"noteId":"user:1","source":"user","filePath":"a.go","newRange":[1,1],"body":"rename this","author":"user"}
-]}`
-
-func TestReviewSendDryRun(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk, f.session, f.comments = true, testSessions, testComments
-	out, _, err := execReview(t, f, "send", "feat", "--dry-run")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"Review notes for feat at 111111111111 from hunk (2):",
-		"1. a.go:1: rename this",
-		`2. a.go:2 (reply to feat-review sonnet note "bug"): agree, fix it`,
-		"dry run: would send with hev dispatch say",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "from a shell") {
-		t.Error("live agent comment sent without --include-live")
-	}
-	if len(f.ran) != 1 || f.ran[0][5] != "s-feat" {
-		t.Fatalf("comment list did not target the run's session: %v", f.ran)
-	}
-}
-
-func TestReviewSendDelivers(t *testing.T) {
-	for _, c := range []struct {
-		steer bool
-		state string
-		want  []string
+	mustReviewCLI(t, "", "put", "--repo", "other", "--head", head, "--verdict", "pass", "-m", "migration", "--findings-file", file)
+	for _, tc := range []struct {
+		query string
+		flags []string
+		count int
 	}{
-		{false, "running", []string{"", "/bin/hev", "dispatch", "say", "feat", "-", "--host", "oven"}},
-		{true, "running", []string{"", "/bin/hev", "steer", "feat", "-", "--level", "urgent", "--host", "oven"}},
-		{true, "done", []string{"", "/bin/hev", "dispatch", "say", "feat", "-", "--host", "oven"}},
+		{"migration retry parser.go", nil, 2},
+		{"migration deadlock", []string{"--repo", "kit", "--path", "parser", "--severity", "major", "--open"}, 1},
+		{"migration", []string{"--repo", "missing"}, 0},
+		{"deadlock", []string{"--path", "other"}, 0},
+		{"deadlock", []string{"--severity", "minor"}, 0},
+		{"cleanup", []string{"--repo", "kit", "--severity", "minor"}, 1},
+		{"cleanup", []string{"--open"}, 0},
+		{reviewTestToken, nil, 0},
 	} {
-		f := newFakeReview(t)
-		f.hunk, f.session, f.comments, f.steer = true, testSessions, testComments, c.steer
-		f.state["feat"] = c.state
-		out, _, err := execReview(t, f, "send", "feat", "--include-live")
-		if err != nil {
-			t.Fatal(err)
+		var result []reviews.Review
+		args := append([]string{"search", tc.query, "--json"}, tc.flags...)
+		out := mustReviewCLI(t, "", args...)
+		if err := json.Unmarshal([]byte(out), &result); err != nil || len(result) != tc.count || strings.Contains(out, reviewTestToken) {
+			t.Fatalf("search result count %d, want %d, decode error %v, query flags %v", len(result), tc.count, err, tc.flags)
 		}
-		last := f.ran[len(f.ran)-1]
-		if !reflect.DeepEqual(last, c.want) {
-			t.Fatalf("steer=%v state=%s: ran %v, want %v", c.steer, c.state, last, c.want)
-		}
-		msg := f.stdin[len(f.stdin)-1]
-		if !strings.Contains(msg, "a.go:5: from a shell") || !strings.Contains(msg, "a.go:1: rename this") || !strings.Contains(out, "Sending with") {
-			t.Fatalf("message:\n%s", msg)
+		if len(result) == 2 && result[0].Repo != "other" {
+			t.Fatal("results must be newest first")
 		}
 	}
-}
+	out = mustReviewCLI(t, "", "ls", "--order", "example", "--head", head, "--verdict", "rework", "--open", "--json")
+	if !strings.Contains(out, id) || strings.Contains(out, reviewTestToken) {
+		t.Fatal("list missing the selected review or leaked its raw text")
+	}
+	out = mustReviewCLI(t, "", "show", id, "--json")
+	var r reviews.Review
+	if err := json.Unmarshal([]byte(out), &r); err != nil || r.ID != id || len(r.Findings) != 2 || strings.Contains(out, reviewTestToken) {
+		t.Fatal("show did not return the scrubbed review")
+	}
+	if f := r.Findings[1]; f.StartLine != 2 || f.EndLine != 4 || f.Status != "waived" || f.ResolvedAt == nil {
+		t.Fatal("show lost line range or resolution")
+	}
+	mustReviewCLI(t, "", "resolve", id, r.Findings[0].ID, "--status", "fixed")
 
-func TestReviewSendNothingToSend(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk, f.session, f.comments = true, testSessions, `{"comments":[]}`
-	out, _, err := execReview(t, f, "send", "feat")
-	if err != nil || !strings.Contains(out, "nothing to send") || len(f.ran) != 1 {
-		t.Fatalf("%v %q %v", err, out, f.ran)
-	}
-}
-
-func TestPickHunkSession(t *testing.T) {
-	if sel, err := pickHunkSession([]byte(testSessions), testHead[:9], "", "/work/kit", false); err != nil || sel != "s-feat" {
-		t.Fatal(sel, err)
-	}
-	if sel, err := pickHunkSession([]byte(testSessions), testHead, "s-feat", "/elsewhere", false); err != nil || sel != "s-feat" {
-		t.Fatal(sel, err)
-	}
-	if _, err := pickHunkSession([]byte(testSessions), testHead, "s-feat", "/elsewhere", true); err == nil || !strings.Contains(err.Error(), "not --repo /elsewhere") {
-		t.Fatal(err)
-	}
-	if _, err := pickHunkSession([]byte(testSessions), testHead, "s-other", "/x", true); err == nil || !strings.Contains(err.Error(), "not the run's head") {
-		t.Fatal(err)
-	}
-	if _, err := pickHunkSession([]byte(testSessions), testHead, "s-gone", "/work/kit", false); err == nil || !strings.Contains(err.Error(), "no live hunk session s-gone") {
-		t.Fatal(err)
-	}
-	if _, err := pickHunkSession([]byte(`{"sessions":[]}`), testHead, "", "/work/kit", false); err == nil || !strings.Contains(err.Error(), "no live hunk session") {
-		t.Fatal(err)
-	}
-	dup := `{"sessions":[{"sessionId":"a","repoRoot":"/r","review":{"head":"` + testHead + `"}},{"sessionId":"b","repoRoot":"/r/","review":{"head":"` + testHead + `"}}]}`
-	if _, err := pickHunkSession([]byte(dup), testHead, "", "/r", false); err == nil || !strings.Contains(err.Error(), "--session") {
-		t.Fatal(err)
-	}
-}
-
-// A window in another clone that shows the same commit must never be read
-// for this run, even when it is the only window with that head.
-func TestReviewSendRejectsOtherRepository(t *testing.T) {
-	onlyA := `{"sessions":[{"sessionId":"s-a","repoRoot":"/clones/a","title":"a","review":{"head":"` + testHead + `"}}]}`
-	for _, args := range [][]string{
-		{"send", "feat", "--repo", "/clones/b"},
-		{"send", "feat", "--repo", "/clones/b", "--dry-run"},
-		{"send", "feat"}, // the current checkout, /work/kit
-		{"send", "feat", "--repo", "/clones/b", "--session", "s-a"},
+	for _, tc := range []struct {
+		stdin string
+		args  []string
+	}{
+		{"", []string{"put", "--repo", "kit", "--head", head, "--verdict", reviewTestToken}},
+		{`[{"file":"p.go","severity":"major","status":"closed","body":"issue"}]`, []string{"put", "--repo", "kit", "--head", head}},
+		{"", []string{"add", id, "--file", "pkg/file.go", "--severity", reviewTestToken, "-m", "finding"}},
+		{"", []string{"add", id, "--file", "../" + reviewTestToken, "--severity", "major", "-m", "finding"}},
+		{"", []string{"add", id, "--file", "/tmp/file.go", "--severity", "major", "-m", "finding"}},
+		{"", []string{"add", id, "--file", "pkg/file.go", "--lines", "5-2", "--severity", "major", "-m", "finding"}},
+		{"", []string{"resolve", id, minor, "--status", "open"}},
+		{"", []string{"resolve", id, reviewTestToken, "--status", "fixed"}},
+		{"", []string{"show", "../" + reviewTestToken}},
+		{"", []string{"ls", "--verdict", "accepted"}},
+		{"", []string{"search", "retry", "--severity", "medium"}},
 	} {
-		f := newFakeReview(t)
-		f.hunk, f.session, f.comments = true, onlyA, testComments
-		out, _, err := execReview(t, f, args...)
-		if err == nil {
-			t.Fatalf("%v: no error; output:\n%s", args, out)
+		out, err := reviewCLI(tc.stdin, tc.args...)
+		if err == nil || strings.Contains(err.Error(), reviewTestToken) || strings.Contains(out, reviewTestToken) {
+			t.Fatalf("review %s should reject input without echoing secrets", tc.args[0])
 		}
-		if !strings.Contains(err.Error(), "/clones/a") {
-			t.Errorf("%v: error does not name the other window: %v", args, err)
-		}
-		if len(f.ran) != 0 || len(f.stdin) != 0 {
-			t.Fatalf("%v: read comments or sent: %v", args, f.ran)
-		}
-	}
-	// The same window is used when --repo names its repository.
-	f := newFakeReview(t)
-	f.hunk, f.session, f.comments = true, onlyA, testComments
-	if _, _, err := execReview(t, f, "send", "feat", "--repo", "/clones/a"); err != nil {
-		t.Fatal(err)
-	}
-	if len(f.ran) != 2 || f.ran[0][5] != "s-a" {
-		t.Fatalf("ran %v", f.ran)
 	}
 }
 
-// hev review records the repository it opened; send reads that window even
-// from another working directory.
-func TestReviewSendUsesRepositoryReviewOpened(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk = true
-	if _, _, err := execReview(t, f, "feat"); err != nil {
+func TestReviewCLIStoreLocation(t *testing.T) {
+	home := reviewHome(t)
+	config := filepath.Join(home, ".hev", "config.toml")
+	fill(t, config, 0)
+	if err := os.WriteFile(config, []byte("[reviews]\ndir = \"~/custom-reviews\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(f.cache, "hev", "review", "feat", reviewRepoFile))
-	if err != nil || strings.TrimSpace(string(b)) != "/work/kit" {
-		t.Fatalf("recorded repo %q %v", b, err)
+	head := strings.Repeat("c", 40)
+	out := mustReviewCLI(t, "", "put", "--repo", "kit", "--head", head)
+	id, _, _ := strings.Cut(out, " ")
+	if _, err := os.Stat(filepath.Join(home, "custom-reviews", id, "review.json")); err != nil {
+		t.Fatal(err)
 	}
-	if repo, strict, err := sendRepo(f.deps(t), "", "feat", "kit", testBase); err != nil || repo != "/work/kit" || strict {
-		t.Fatal(repo, strict, err)
+	override := t.TempDir()
+	t.Setenv(reviews.DirEnv, override)
+	out = mustReviewCLI(t, "", "put", "--repo", "kit", "--head", head)
+	id, _, _ = strings.Cut(out, " ")
+	if _, err := os.Stat(filepath.Join(override, id, "review.json")); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestReviewSendDeliversEachNoteOnce(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk, f.session, f.comments = true, testSessions, testComments
-	if _, _, err := execReview(t, f, "send", "feat"); err != nil {
-		t.Fatal(err)
-	}
-	// Unchanged session: nothing is sent again.
-	out, _, err := execReview(t, f, "send", "feat")
-	if err != nil || !strings.Contains(out, "already sent") {
-		t.Fatalf("%v\n%s", err, out)
-	}
-	if got := f.sent; len(got) != 1 {
-		t.Fatalf("delivered %d times: %q", len(got), got)
-	}
-	// A dry run shows nothing new either, and records nothing.
-	out, _, _ = execReview(t, f, "send", "feat", "--dry-run")
-	if !strings.Contains(out, "already sent") {
-		t.Fatal(out)
-	}
-	// A new note and an edited note are sent; the unchanged reply is not.
-	f.comments = strings.Replace(testComments, `"body":"rename this"`, `"body":"rename this to feat2"`, 1)
-	f.comments = strings.Replace(f.comments, "]}", `,{"noteId":"user:3","source":"user","filePath":"b.go","newRange":[7,7],"body":"new note"}]}`, 1)
-	out, _, err = execReview(t, f, "send", "feat")
+func reviewGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, "git", args...)
+	c.Dir = dir
+	out, err := c.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("git %s: %v: %s", args[0], err, out)
 	}
-	got := f.sent
-	if len(got) != 2 {
-		t.Fatalf("sends %q", got)
-	}
-	last := got[1]
-	if !strings.Contains(last, "(2):") || !strings.Contains(last, "a.go:1: rename this to feat2") || !strings.Contains(last, "b.go:7: new note") || strings.Contains(last, "agree, fix it") {
-		t.Fatalf("second delivery:\n%s", last)
-	}
-	if !strings.Contains(out, "1 already sent to feat, skipped") {
-		t.Fatal(out)
-	}
-	// --resend sends everything again.
-	if _, _, err := execReview(t, f, "send", "feat", "--resend"); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.sent; len(got) != 3 || !strings.Contains(got[2], "(3):") {
-		t.Fatalf("resend %q", got)
-	}
-	// The same note IDs in a different target are a separate delivery.
-	l, err := loadLedger(filepath.Join(f.cache, "hev", "review", "sent.json"))
-	if err != nil || len(l.Deliveries["oven/feat"]["s-feat"]) != 3 || l.Deliveries["oven/other"] != nil {
-		t.Fatalf("ledger %+v %v", l, err)
-	}
+	return strings.TrimSpace(string(out))
 }
 
-func TestReviewSendDryRunRecordsNothing(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk, f.session, f.comments = true, testSessions, testComments
-	for i := 0; i < 2; i++ {
-		out, _, err := execReview(t, f, "send", "feat", "--dry-run")
-		if err != nil || !strings.Contains(out, "from hunk (2):") {
-			t.Fatalf("dry run %d: %v\n%s", i, err, out)
+func TestReviewCLIRunPinsDiffAndVerdict(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell fixture for the reviewer")
+	}
+	reviewHome(t)
+	t.Setenv("HEV_ORDERS_DIR", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	for _, role := range []string{"AUTHOR", "COMMITTER"} {
+		t.Setenv("GIT_"+role+"_NAME", "Test")
+		t.Setenv("GIT_"+role+"_EMAIL", "review@example.test")
+	}
+	dir, bin := t.TempDir(), t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	reviewGit(t, dir, "init", "-qb", "main")
+	reviewGit(t, dir, "remote", "add", "origin", "https://github.com/hev/kit.git")
+	file := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(file, []byte("base\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reviewGit(t, dir, "add", "a.txt")
+	reviewGit(t, dir, "commit", "-qm", "base")
+	base := reviewGit(t, dir, "rev-parse", "HEAD")
+	reviewGit(t, dir, "checkout", "-qb", "feature")
+	if err := os.WriteFile(file, []byte("base\nfeature change\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reviewGit(t, dir, "commit", "-qam", "head")
+	head := reviewGit(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(file, []byte("uncommitted work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	codex := filepath.Join(bin, "codex")
+	fake := `#!/bin/sh
+set -eu
+[ -f schema.json ]
+[ ! -e a.txt ]
+case " $* " in *" --sandbox read-only "*" --output-schema schema.json "*) ;; *) exit 3 ;; esac
+input=$(cat)
+case "$input" in *"untrusted data"*"+feature change"*) ;; *) exit 4 ;; esac
+case "$input" in *"uncommitted work"*) exit 5 ;; esac
+printf '%s\n' '{"verdict":"rework","summary":"Needs a fix","findings":[{"file":"a.txt","start_line":2,"end_line":2,"severity":"major","body":"Fix this issue"}]}'
+`
+	if err := os.WriteFile(codex, []byte(fake), 0700); err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(dispatch.Root(), "example")
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	meta := dispatch.Meta{Order: dispatch.Order{Name: "example", Repo: "kit", Base: "main"},
+		Branch: "feature", ResolvedRepo: dir}
+	if err := dispatch.WriteJSON(filepath.Join(runDir, "meta.json"), meta); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(t.TempDir(), "dispatch.toml")
+	if err := os.WriteFile(config, []byte("[hosts.local]\nlocal = true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	empty := t.TempDir()
+	reviewGit(t, empty, "init", "-q")
+	for _, tc := range []struct {
+		args        []string
+		repo, order string
+	}{
+		{[]string{"run", "main..feature", "--checkout", dir}, "github.com/hev/kit", ""},
+		{[]string{"run", "feature", "--checkout", dir}, "github.com/hev/kit", ""},
+		{[]string{"run", "example", "--checkout", empty, "--host", "local", "--config", config}, "kit", "example"},
+	} {
+		out := mustReviewCLI(t, "", tc.args...)
+		id, verdict, _ := strings.Cut(out, " ")
+		if verdict != "rework" {
+			t.Fatalf("unexpected review verdict %q", verdict)
+		}
+		out = mustReviewCLI(t, "", "show", id, "--json")
+		var r reviews.Review
+		if err := json.Unmarshal([]byte(out), &r); err != nil || r.BaseSHA != base || r.HeadSHA != head ||
+			r.Repo != tc.repo || r.Order != tc.order || r.Harness != "codex" || len(r.Findings) != 1 {
+			t.Fatalf("review was not bound to the selected commits: %v %s", err, out)
+		}
+		if f := r.Findings[0]; f.File != "a.txt" || f.StartLine != 2 || f.EndLine != 2 || f.Status != "open" {
+			t.Fatal("review lost its anchored finding")
 		}
 	}
-	if _, err := os.Stat(filepath.Join(f.cache, "hev", "review", "sent.json")); !os.IsNotExist(err) {
-		t.Fatalf("dry run wrote the ledger: %v", err)
-	}
-}
-
-func TestReviewSendFailureIsRetried(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk, f.session, f.comments = true, testSessions, testComments
-	f.runErr = errors.New("exit status 1")
-	if _, _, err := execReview(t, f, "send", "feat"); err == nil || !strings.Contains(err.Error(), "nothing recorded") {
+	if err := os.WriteFile(codex, []byte("#!/bin/sh\nprintf '%s\\n' '"+reviewTestToken+"'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	f.runErr = nil
-	if _, _, err := execReview(t, f, "send", "feat"); err != nil {
-		t.Fatal(err)
+	out, err := reviewCLI("", "run", "main..feature", "--checkout", dir)
+	if err == nil || strings.Contains(err.Error(), reviewTestToken) || strings.Contains(out, reviewTestToken) {
+		t.Fatal("malformed harness output should fail without revealing its contents")
 	}
-	got := append([]string{f.stdin[0]}, f.sent...)
-	if len(got) != 2 || got[0] != got[1] || !strings.Contains(got[1], "(2):") {
-		t.Fatalf("the failed send's notes were not sent again: %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(f.cache, "hev", "review", "sent.json.lock")); !os.IsNotExist(err) {
-		t.Fatal("lock left behind")
-	}
-}
-
-func TestReviewWebNeedsHunkBrowserMode(t *testing.T) {
-	f := newFakeReview(t)
-	f.hunk = true
-	_, _, err := execReview(t, f, "feat", "--web")
-	if err == nil || !strings.Contains(err.Error(), "hunk 0.25.0 has no browser mode") {
-		t.Fatal(err)
-	}
-	if len(f.ran) != 0 || len(f.requests) != 0 {
-		t.Fatalf("launched or fetched: %v %v", f.ran, f.requests)
-	}
-	// Without hunk, --web falls back to the terminal summary like any review.
-	f = newFakeReview(t)
-	out, _, err := execReview(t, f, "feat", "--web")
-	if err != nil || !strings.Contains(out, "hunk.dev/install.sh") {
-		t.Fatal(err, out)
-	}
-	if hunkHasFlag("  --web-ish  x\n  --webs", "--web") || !hunkHasFlag("  -w, --web  open", "--web") {
-		t.Fatal("hunkHasFlag")
-	}
-}
-
-func TestReviewCommandRegistered(t *testing.T) {
-	c, _, err := rootCmd.Find([]string{"review", "send"})
-	if err != nil || c.Name() != "send" {
-		t.Fatal(c, err)
+	out = mustReviewCLI(t, "", "ls", "--json")
+	var all []reviews.Review
+	if err := json.Unmarshal([]byte(out), &all); err != nil || len(all) != 3 {
+		t.Fatal("malformed harness output must not persist a review")
 	}
 }
