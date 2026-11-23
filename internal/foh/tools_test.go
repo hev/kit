@@ -57,7 +57,9 @@ func TestHevToolArgvAndCards(t *testing.T) {
 		if got := strings.Join(calls[0].args, " "); got != tt.want || calls[0].stdin != tt.stdin {
 			t.Errorf("%s %s: argv %q stdin %q", tt.tool, tt.args, got, calls[0].stdin)
 		}
-		if res.Card == nil || res.Card.Tool != tt.tool || !res.Card.OK || res.Card.Body == "" || strings.Contains(res.Card.Body, `"runs"`) {
+		if res.Card == nil || res.Card.Tool != tt.tool || !res.Card.OK ||
+			strings.TrimSpace(res.Card.Body) == "" || strings.TrimSpace(res.Card.Summary) == "" ||
+			strings.Contains(res.Card.Body, `"runs"`) {
 			t.Errorf("%s card = %+v", tt.tool, res.Card)
 		}
 		if !strings.Contains(res.Content, `"runs"`) {

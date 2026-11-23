@@ -33,7 +33,7 @@ func TestParseShorthand(t *testing.T) {
 		{"mattpocock/skills", "mattpocock", "skills", "", ""},
 		{"cursor/plugins//pstack", "cursor", "plugins", "pstack", ""},
 		{"cursor/plugins//pstack@main", "cursor", "plugins", "pstack", "main"},
-		{"modem-dev/hunk//packages/hunk/skills@v1.2.0", "modem-dev", "hunk", "packages/hunk/skills", "v1.2.0"},
+		{"acme/reviewer//packages/reviewer/skills@v1.2.0", "acme", "reviewer", "packages/reviewer/skills", "v1.2.0"},
 		{"anthropics/skills/skills", "anthropics", "skills", "skills", ""},
 		{"obra/superpowers@refs/heads/main", "obra", "superpowers", "", "refs/heads/main"},
 		{"github:badlogic/pi-skills", "badlogic", "pi-skills", "", ""},
@@ -60,7 +60,7 @@ func TestParseShorthand(t *testing.T) {
 		}
 	}
 	names := map[string]string{"mattpocock/skills//skills": "mattpocock", "cursor/plugins//pstack": "pstack", "anthropics/skills//skills": "anthropics",
-		"badlogic/pi-skills": "pi-skills", "modem-dev/hunk//packages/hunk/skills": "hunk", "vercel-labs/agent-browser//skills": "agent-browser", "obra/superpowers//skills": "superpowers"}
+		"badlogic/pi-skills": "pi-skills", "acme/reviewer//packages/reviewer/skills": "reviewer", "vercel-labs/agent-browser//skills": "agent-browser", "obra/superpowers//skills": "superpowers"}
 	for in, want := range names {
 		s, _ := ParseShorthand(in)
 		if got := s.DefaultName(); got != want {
@@ -243,7 +243,7 @@ func TestConfigTextEditsAndBump(t *testing.T) {
 	if _, err := AddSourceText(next, Source{Name: "pstack", Kind: KindTool, URL: "https://github.com/x/y.git", Commit: sha}); err == nil {
 		t.Fatal("duplicate name accepted")
 	}
-	next2, err := AddSourceText(next, Source{Name: "hunk", Kind: KindTool, URL: "https://github.com/modem-dev/hunk.git", Ref: "refs/heads/main", Commit: sha})
+	next2, err := AddSourceText(next, Source{Name: "reviewer", Kind: KindTool, URL: "https://github.com/acme/reviewer.git", Ref: "refs/heads/main", Commit: sha})
 	if err != nil {
 		t.Fatal(err)
 	}

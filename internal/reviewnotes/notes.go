@@ -1,11 +1,6 @@
-// Package reviewnotes owns review-notes.json, the anchored review notes a
-// dispatched run writes beside report.md. The format is hunk's agent-context
-// sidecar, version 1 (https://hunk.dev/docs/agents/agent-context-and-stml/),
-// so the file loads into `hunk diff --agent-context` unchanged. Kit owns and
-// validates the file whether or not hunk is installed.
-//
-// Kit adds one optional top-level field, head: the commit SHA the notes
-// describe. hunk ignores unknown top-level keys.
+// Package reviewnotes owns the version 1 review-notes.json sidecar that a
+// dispatched worker can write beside report.md. The optional head pins the
+// notes to the commit they describe.
 package reviewnotes
 
 import (
@@ -20,14 +15,14 @@ import (
 // FileName is the artifact's name in a run directory, beside report.md.
 const FileName = "review-notes.json"
 
-// Version is the only sidecar version hunk and kit understand.
+// Version is the current sidecar version.
 const Version = 1
 
 // Notes is one review-notes.json document.
 type Notes struct {
 	Version int    `json:"version,omitempty"`
 	Summary string `json:"summary,omitempty"`
-	// Head is kit's extension: the commit the notes describe. Review runs set
+	// Head is the commit the notes describe. Review runs set
 	// it to the SHA they reviewed so stale findings can be dropped.
 	Head  string `json:"head,omitempty"`
 	Files []File `json:"files"`
@@ -68,8 +63,7 @@ func (r Range) Start() int {
 	return r[0]
 }
 
-// Parse decodes and validates a document. Unknown fields are allowed, as hunk
-// allows them. An empty or whitespace-only input is an error.
+// Parse decodes and validates a document. Unknown fields are allowed for compatibility. An empty or whitespace-only input is an error.
 func Parse(b []byte) (Notes, error) {
 	var n Notes
 	if len(bytes.TrimSpace(b)) == 0 {
@@ -91,10 +85,9 @@ func Load(path string) (Notes, error) {
 	return Parse(b)
 }
 
-// Validate applies hunk's sidecar rules: version 1, a non-empty path on every
+// Validate applies the sidecar rules: version 1, a non-empty path on every
 // file, a summary on every annotation, and ranges that are two positive line
-// numbers with end >= start. It also checks confidence against hunk's
-// documented values. All problems are reported together.
+// numbers with end >= start. It also checks confidence against the documented values. All problems are reported together.
 func (n Notes) Validate() error {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }

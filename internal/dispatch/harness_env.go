@@ -56,7 +56,7 @@ func checkHarnesses(hs map[string]HarnessConfig) error {
 	for _, n := range names {
 		h := hs[n]
 		if _, ok := harness.DispatchFor(n); !ok {
-			return fmt.Errorf("harnesses.%s: unknown harness; want codex, claude or agy", n)
+			return fmt.Errorf("harnesses.%s: unknown harness; want one of %s", n, strings.Join(Harnesses, ", "))
 		}
 		for env, ref := range h.EnvRefs {
 			if !envNamePattern.MatchString(env) {
