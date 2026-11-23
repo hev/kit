@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,32 @@ import (
 
 // DefaultBaseURL is OpenRouter's OpenAI-compatible API root.
 const DefaultBaseURL = "https://openrouter.ai/api/v1"
+
+// DefaultKitServiceURL is the default Club Kit service API root.
+const DefaultKitServiceURL = "https://kit.hevmind.com"
+
+// InferenceMode identifies which inference backend a resolved key targets.
+type InferenceMode string
+
+const (
+	InferenceModeOpenRouter InferenceMode = "openrouter"
+	InferenceModeClubKit    InferenceMode = "club-kit"
+)
+
+// InferenceEndpoint is the resolved credential, base URL, and routing mode
+// for OpenAI-compatible inference requests.
+type InferenceEndpoint struct {
+	Mode    InferenceMode
+	BaseURL string
+	APIKey  string
+}
+
+// KitConfig is the optional [kit] sign-in table in ~/.hev/config.toml.
+type KitConfig struct {
+	Service string `toml:"service"`
+	API     string `toml:"api"`
+	Key     string `toml:"key"`
+}
 
 // DefaultModel is used when no flag, environment, config or favorite names one.
 const DefaultModel = "anthropic/claude-sonnet-5.5"
@@ -34,6 +62,8 @@ type Config struct {
 	SummaryModel string `toml:"summary_model"`
 	// Codex is the optional [foh.codex] table for the codex-sub provider.
 	Codex CodexConfig `toml:"codex"`
+	// Kit is the optional top-level [kit] sign-in table loaded alongside [foh].
+	Kit KitConfig `toml:"-"`
 }
 
 // CodexConfig is [foh.codex]: the OpenAI/Codex ChatGPT subscription provider.
@@ -66,14 +96,15 @@ func homeDir() string {
 	return h
 }
 
-// LoadConfig reads [foh] from path (ConfigPath when empty). A missing file or
-// table is an empty Config. Errors never carry the path or any value.
+// LoadConfig reads [foh] and optional [kit] from path (ConfigPath when empty).
+// A missing file or table is an empty Config. Errors never carry the path or any value.
 func LoadConfig(path string) (Config, error) {
 	if path == "" {
 		path = ConfigPath()
 	}
 	var file struct {
-		FOH Config `toml:"foh"`
+		FOH Config    `toml:"foh"`
+		Kit KitConfig `toml:"kit"`
 	}
 	md, err := toml.DecodeFile(path, &file)
 	if errors.Is(err, os.ErrNotExist) {
@@ -94,10 +125,12 @@ func LoadConfig(path string) (Config, error) {
 			return Config{}, fmt.Errorf("unknown field in [foh]: %s", key[1])
 		}
 	}
-	return file.FOH, nil
+	cfg := file.FOH
+	cfg.Kit = file.Kit
+	return cfg, nil
 }
 
-// BaseURL resolves HEV_FOH_BASE_URL, then [foh].base_url, then OpenRouter.
+// ResolvedBaseURL resolves HEV_FOH_BASE_URL, then [foh].base_url, then OpenRouter.
 func (c Config) ResolvedBaseURL() string {
 	for _, v := range []string{os.Getenv("HEV_FOH_BASE_URL"), c.BaseURL} {
 		if v = strings.TrimSpace(v); v != "" {
@@ -105,6 +138,91 @@ func (c Config) ResolvedBaseURL() string {
 		}
 	}
 	return DefaultBaseURL
+}
+
+// ResolvedKitServiceURL resolves HEV_KIT_SERVICE, then [kit].api, then
+// [kit].service, then DefaultKitServiceURL, trimmed of trailing slashes.
+func (c Config) ResolvedKitServiceURL() string {
+	for _, v := range []string{os.Getenv("HEV_KIT_SERVICE"), c.Kit.API, c.Kit.Service} {
+		if v = strings.TrimSpace(v); v != "" {
+			return strings.TrimRight(v, "/")
+		}
+	}
+	return DefaultKitServiceURL
+}
+
+// ResolvedHostedBaseURL resolves the Club Kit hosted inference endpoint:
+// explicit HEV_FOH_BASE_URL, then explicit [foh].base_url, then
+// <ResolvedKitServiceURL>/v1/inference.
+func (c Config) ResolvedHostedBaseURL() string {
+	for _, v := range []string{os.Getenv("HEV_FOH_BASE_URL"), c.BaseURL} {
+		if v = strings.TrimSpace(v); v != "" {
+			return strings.TrimRight(v, "/")
+		}
+	}
+	return c.ResolvedKitServiceURL() + "/v1/inference"
+}
+
+func isHostedInferenceKey(key string) bool {
+	k := strings.TrimSpace(key)
+	return strings.HasPrefix(k, "hev_") || strings.HasPrefix(k, "hvl_")
+}
+
+func isLegacyKitKey(key string) bool {
+	return strings.HasPrefix(strings.TrimSpace(key), "hk_")
+}
+
+func isKitScopedKey(key string) bool {
+	return isHostedInferenceKey(key) || isLegacyKitKey(key)
+}
+
+func isOpenRouterHost(host string) bool {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	return h == "openrouter.ai" || strings.HasSuffix(h, ".openrouter.ai")
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if h == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func validateHostedBaseURL(rawURL string) error {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Scheme == "" || u.Hostname() == "" {
+		return errors.New("club kit inference: invalid base URL")
+	}
+	host := u.Hostname()
+	if isOpenRouterHost(host) {
+		return ErrOpenRouterKeyMismatch
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(host) {
+			return nil
+		}
+		return errors.New("club kit inference: plain http:// is only allowed for loopback hosts (localhost, 127.0.0.1, [::1]); use https://")
+	default:
+		return fmt.Errorf("club kit inference: unsupported URL scheme %q (use https://)", u.Scheme)
+	}
+}
+
+func validateClientTarget(baseURL, key string) error {
+	key = strings.TrimSpace(key)
+	if isLegacyKitKey(key) {
+		return ErrLegacyKitKey
+	}
+	if isHostedInferenceKey(key) {
+		return validateHostedBaseURL(baseURL)
+	}
+	return nil
 }
 
 // ResolveModel picks the active model: flag, HEV_FOH_MODEL, [foh].model, the
@@ -143,34 +261,83 @@ var ResolveSecretRef = func(ctx context.Context, ref string) (string, error) {
 	return strings.TrimSpace(values["OPENROUTER_API_KEY"]), nil
 }
 
-// ErrNoAPIKey is returned when no OpenRouter key is configured.
-var ErrNoAPIKey = errors.New("no OpenRouter API key: set OPENROUTER_API_KEY, HEV_API_KEY or [foh].api_key_ref")
+// ErrNoAPIKey is returned when no inference API key is configured.
+var ErrNoAPIKey = errors.New("no inference API key: set OPENROUTER_API_KEY, HEV_API_KEY, [foh].api_key_ref, or sign in with `hev login`")
 
-// ErrNoProviders is returned when neither OpenRouter nor a Codex ChatGPT
-// subscription login is available.
-var ErrNoProviders = errors.New("no model provider: set OPENROUTER_API_KEY (or HEV_API_KEY, [foh].api_key_ref), or sign in to Codex with a ChatGPT plan (`codex login`)")
+// ErrNoProviders is returned when neither OpenRouter/Club Kit nor a Codex
+// ChatGPT subscription login is available.
+var ErrNoProviders = errors.New("no model provider: set OPENROUTER_API_KEY (or HEV_API_KEY, [foh].api_key_ref, or `hev login`), or sign in to Codex with a ChatGPT plan (`codex login`)")
 
-// ResolveAPIKey reads OPENROUTER_API_KEY, HEV_API_KEY, then
-// [foh].api_key_ref. The returned error never includes the key.
-func (c Config) ResolveAPIKey(ctx context.Context) (string, error) {
-	for _, name := range []string{"OPENROUTER_API_KEY", "HEV_API_KEY"} {
-		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-			return v, nil
-		}
+// ErrLegacyKitKey is returned when a legacy hk_ Club Kit key is resolved for
+// inference; legacy hk_ keys do not authorize hosted inference.
+var ErrLegacyKitKey = errors.New("legacy hk_ Club Kit keys do not authorize hosted inference: run `hev login` to obtain a hev_ key, or set OPENROUTER_API_KEY")
+
+// ErrOpenRouterKeyMismatch is returned when a Club Kit or Layer key (hev_,
+// hvl_, or hk_) would be sent to openrouter.ai.
+var ErrOpenRouterKeyMismatch = errors.New("refusing to send Club Kit/Layer key (hev_/hvl_/hk_) to openrouter.ai: use Club Kit hosted /v1/inference or set OPENROUTER_API_KEY")
+
+func (c Config) resolveKeySource(ctx context.Context) (key string, fromOpenRouterEnv bool, err error) {
+	if v := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")); v != "" {
+		return v, true, nil
+	}
+	if v := strings.TrimSpace(os.Getenv("HEV_API_KEY")); v != "" {
+		return v, false, nil
 	}
 	if ref := strings.TrimSpace(c.APIKeyRef); ref != "" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		v, err := ResolveSecretRef(ctx, ref)
 		if err != nil {
-			return "", fmt.Errorf("read [foh].api_key_ref: %s", Scrub(err.Error(), v))
+			return "", false, fmt.Errorf("read [foh].api_key_ref: %s", Scrub(err.Error(), v))
 		}
 		if v == "" {
-			return "", errors.New("read [foh].api_key_ref: empty")
+			return "", false, errors.New("read [foh].api_key_ref: empty")
 		}
-		return v, nil
+		return v, false, nil
 	}
-	return "", ErrNoAPIKey
+	if v := strings.TrimSpace(c.Kit.Key); v != "" && isKitScopedKey(v) {
+		return v, false, nil
+	}
+	return "", false, ErrNoAPIKey
+}
+
+// ResolveAPIKey reads OPENROUTER_API_KEY, HEV_API_KEY, [foh].api_key_ref, then
+// [kit].key (when [foh].api_key_ref is unset). Legacy hk_ keys fail closed.
+// The returned error never includes the key.
+func (c Config) ResolveAPIKey(ctx context.Context) (string, error) {
+	key, _, err := c.resolveKeySource(ctx)
+	if err != nil {
+		return "", err
+	}
+	if isLegacyKitKey(key) {
+		return "", ErrLegacyKitKey
+	}
+	return key, nil
+}
+
+// ResolveEndpoint resolves the inference credential and validated target base
+// URL. Direct OpenRouter keys target OpenRouter; hev_/hvl_ keys route to Club
+// Kit hosted /v1/inference with HTTPS/loopback enforcement and a hard guard
+// refusing openrouter.ai; legacy hk_ keys fail closed before any network call.
+func (c Config) ResolveEndpoint(ctx context.Context) (InferenceEndpoint, error) {
+	key, fromOpenRouterEnv, err := c.resolveKeySource(ctx)
+	if err != nil {
+		return InferenceEndpoint{}, err
+	}
+	if isLegacyKitKey(key) {
+		return InferenceEndpoint{}, ErrLegacyKitKey
+	}
+	if isHostedInferenceKey(key) {
+		baseURL := c.ResolvedHostedBaseURL()
+		if fromOpenRouterEnv {
+			baseURL = c.ResolvedBaseURL()
+		}
+		if err := validateHostedBaseURL(baseURL); err != nil {
+			return InferenceEndpoint{}, err
+		}
+		return InferenceEndpoint{Mode: InferenceModeClubKit, BaseURL: baseURL, APIKey: key}, nil
+	}
+	return InferenceEndpoint{Mode: InferenceModeOpenRouter, BaseURL: c.ResolvedBaseURL(), APIKey: key}, nil
 }
 
 // ResolvedDocsURL returns the documentation base URL from HEV_DOCS_URL,
@@ -195,4 +362,4 @@ func (c Config) DocsLLMsURL() string {
 }
 
 // secretEnv lists variables kept out of tool subprocesses.
-var secretEnv = []string{"OPENROUTER_API_KEY", "HEV_API_KEY"}
+var secretEnv = []string{"OPENROUTER_API_KEY", "HEV_API_KEY", "HEVLAYER_API_KEY"}

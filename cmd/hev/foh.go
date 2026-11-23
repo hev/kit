@@ -162,12 +162,12 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 func fohProviders(ctx context.Context, cfg foh.Config) (*foh.Router, []string, error) {
 	var providers []foh.Provider
 	var secrets []string
-	key, keyErr := cfg.ResolveAPIKey(ctx)
-	if keyErr == nil {
-		providers = append(providers, foh.NewClient(cfg.ResolvedBaseURL(), key))
-		secrets = append(secrets, key)
-	} else if !errors.Is(keyErr, foh.ErrNoAPIKey) {
-		return nil, nil, keyErr
+	ep, epErr := cfg.ResolveEndpoint(ctx)
+	if epErr == nil {
+		providers = append(providers, foh.NewClient(ep.BaseURL, ep.APIKey))
+		secrets = append(secrets, ep.APIKey)
+	} else if !errors.Is(epErr, foh.ErrNoAPIKey) {
+		return nil, nil, epErr
 	}
 	if codex, err := foh.NewCodexSub(cfg.Codex); err == nil && codex.Active() {
 		providers = append(providers, codex)

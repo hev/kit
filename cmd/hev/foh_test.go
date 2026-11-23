@@ -154,3 +154,57 @@ func TestFOHOnceCodexSub(t *testing.T) {
 		t.Fatalf("claude dir: code=%d stderr=%q", code, errOut)
 	}
 }
+
+func TestFOHOnceClubKitHostedAndLegacyKeyFailClosed(t *testing.T) {
+	hevKey := "hev_" + strings.Repeat("a1B2", 8)
+	hkKey := "hk_" + strings.Repeat("Ab9_-1", 7) + "A"
+
+	var gotPath, gotAuth string
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hosted pong %s\"}}]}\n\ndata: [DONE]\n\n", hevKey)
+	}))
+	defer srv.Close()
+
+	// Signed in via [kit] table in config.toml: routes to <kit_api>/v1/inference and scrubs hev_ key from session trace.
+	home := t.TempDir()
+	cfgDir := filepath.Join(home, ".hev")
+	os.MkdirAll(cfgDir, 0o700)
+	os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(fmt.Sprintf("[kit]\napi = %q\nkey = %q\n", srv.URL, hevKey)), 0o600)
+
+	out, errOut, code := runHevChild(t, home, nil, "foh", "--once", "ping", "--model", "test/model")
+	if code != 0 || !strings.Contains(out, "hosted pong") {
+		t.Fatalf("hosted code=%d out=%q stderr=%q", code, out, errOut)
+	}
+	if gotPath != "/v1/inference/chat/completions" || gotAuth != "Bearer "+hevKey {
+		t.Fatalf("path=%q auth ok=%v", gotPath, gotAuth == "Bearer "+hevKey)
+	}
+	sessions, _ := filepath.Glob(filepath.Join(home, ".hev", "foh", "sessions", "*.jsonl"))
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %v", sessions)
+	}
+	b, _ := os.ReadFile(sessions[0])
+	if strings.Contains(string(b), hevKey) || strings.Contains(string(b), hevKey[4:]) {
+		t.Fatalf("session leaked hev_ key: %s", b)
+	}
+
+	// Legacy hk_ key fails closed before any network request and never leaks the secret.
+	hitsBefore := hits
+	homeLegacy := t.TempDir()
+	os.MkdirAll(filepath.Join(homeLegacy, ".hev"), 0o700)
+	os.WriteFile(filepath.Join(homeLegacy, ".hev", "config.toml"), []byte(fmt.Sprintf("[kit]\napi = %q\nkey = %q\n", srv.URL, hkKey)), 0o600)
+	_, errOut, code = runHevChild(t, homeLegacy, nil, "foh", "--once", "ping")
+	if code == 0 || hits != hitsBefore {
+		t.Fatalf("legacy hk_ key: code=%d hits=%d (before=%d) stderr=%q", code, hits, hitsBefore, errOut)
+	}
+	if strings.Contains(errOut, hkKey) || strings.Contains(errOut, hkKey[3:]) {
+		t.Fatalf("legacy hk_ error leaked secret: %q", errOut)
+	}
+	if !strings.Contains(errOut, "hev login") || !strings.Contains(errOut, "OPENROUTER_API_KEY") {
+		t.Fatalf("legacy hk_ error missing guidance: %q", errOut)
+	}
+}
