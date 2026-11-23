@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +22,7 @@ type CatalogLoader func(ctx context.Context) ([]Model, CatalogSource, error)
 // TUIOptions configures the meta-harness TUI.
 type TUIOptions struct {
 	Agent        *Agent
+	HevCommands  []HevSlashCommand
 	Catalog      CatalogLoader
 	Favorites    *Favorites
 	Composer     PromptComposer
@@ -64,6 +66,9 @@ type TUI struct {
 	frame       int
 	scroll      int
 	cmdCursor   int
+	cmdStart    int
+	hevRunning  int
+	hevContext  []Message
 	cancel      context.CancelFunc
 	events      chan Event
 	expandCards bool
@@ -355,6 +360,18 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.scheduleSteerPoll()
 		}
 		return m, nil
+	case hevSlashDoneMsg:
+		if msg.background {
+			m.hevRunning--
+		}
+		m.finishHevSlash(msg)
+		return m, nil
+	case hevSlashTickMsg:
+		if m.hevRunning == 0 {
+			return m, nil
+		}
+		m.frame++
+		return m, hevSlashTick()
 	case cardSummaryMsg:
 		for i := len(m.entries) - 1; i >= 0; i-- {
 			if m.entries[i].callID == msg.callID && m.entries[i].kind == entryCard && m.entries[i].card != nil {
@@ -404,6 +421,8 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	case agentDoneMsg:
 		m.busy, m.events = false, nil
+		m.opts.Agent.append(m.hevContext...)
+		m.hevContext = nil
 		if m.cancel != nil {
 			m.cancel()
 			m.cancel = nil
@@ -469,11 +488,11 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case msg.Type == tea.KeyUp && len(m.matchingCommands()) > 0:
 		matches := m.matchingCommands()
-		m.cmdCursor = (m.cmdCursor - 1 + len(matches)) % len(matches)
+		m.moveCommandCursor(-1, len(matches))
 		return m, nil
 	case msg.Type == tea.KeyDown && len(m.matchingCommands()) > 0:
 		matches := m.matchingCommands()
-		m.cmdCursor = (m.cmdCursor + 1) % len(matches)
+		m.moveCommandCursor(1, len(matches))
 		return m, nil
 	case msg.Type == tea.KeyTab && len(m.matchingCommands()) > 0:
 		matches := m.matchingCommands()
@@ -484,7 +503,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.input.SetValue(fill)
 		m.input.CursorEnd()
-		m.cmdCursor = 0
+		m.cmdCursor, m.cmdStart = 0, 0
 		m.syncInputHeight()
 		return m, nil
 	case msg.Alt && msg.String() == "alt+m":
@@ -494,7 +513,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncInputHeight()
 		return m, nil
 	case msg.Type == tea.KeyEnter: // also Ctrl+M: terminals send the same byte
-		text := strings.TrimSpace(m.input.Value())
+		text := strings.TrimLeftFunc(m.input.Value(), unicode.IsSpace)
 		if text == "" {
 			return m, m.openPicker()
 		}
@@ -504,12 +523,13 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			text = sel.Name
 		}
 		m.input.Reset()
-		m.cmdCursor = 0
+		m.cmdCursor, m.cmdStart = 0, 0
 		m.scroll = 0
 		m.syncInputHeight()
 		if strings.HasPrefix(text, "/") || strings.HasPrefix(text, ":") {
 			return m, m.command(text)
 		}
+		text = strings.TrimSpace(text)
 		// Incoming peer messages pasted by `peers send`: always show in the
 		// lower status bar; background (agent-only) by default, or interrupt
 		// the main user thread when tagged [interrupt] / [urgent].
@@ -537,7 +557,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	m.cmdCursor = 0
+	m.cmdCursor, m.cmdStart = 0, 0
 	m.syncInputHeight()
 	return m, cmd
 }
@@ -577,6 +597,7 @@ type slashCmd struct {
 	Name     string
 	Summary  string
 	TakesArg bool
+	Group    string
 }
 
 var slashCommands = []slashCmd{
@@ -592,17 +613,47 @@ var slashCommands = []slashCmd{
 	{Name: "/quit", Summary: "exit hev kit"},
 }
 
+const commandPaletteRows = 8
+
+func (m *TUI) moveCommandCursor(delta, count int) {
+	m.cmdCursor = (m.cmdCursor + delta + count) % count
+	if m.cmdCursor < m.cmdStart {
+		m.cmdStart = m.cmdCursor
+	} else if m.cmdCursor >= m.cmdStart+commandPaletteRows {
+		m.cmdStart = m.cmdCursor - commandPaletteRows + 1
+	}
+}
+
+func (m *TUI) paletteCommands() []slashCmd {
+	commands := append([]slashCmd(nil), slashCommands...)
+	seen := make(map[string]bool, len(commands)+len(m.opts.HevCommands))
+	for _, command := range commands {
+		seen[command.Name] = true
+	}
+	for _, group := range []string{"Cluster:", "Other:"} {
+		for _, command := range m.opts.HevCommands {
+			name := "/" + command.Name
+			if seen[name] || (group == "Cluster:") != (command.Group == "cluster") {
+				continue
+			}
+			seen[name] = true
+			commands = append(commands, slashCmd{Name: name, Summary: command.Summary, TakesArg: command.TakesArg, Group: group})
+		}
+	}
+	return commands
+}
+
 // matchingCommands returns command suggestions when the input is typing a
 // slash or vim-style colon command (starts with "/" or ":" and has no whitespace yet).
 func (m *TUI) matchingCommands() []slashCmd {
 	raw := m.input.Value()
-	if (!strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, ":")) || strings.ContainsAny(raw, " \t\n") {
+	if (!strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, ":")) || strings.IndexFunc(raw, unicode.IsSpace) >= 0 {
 		return nil
 	}
 	prefixChar := raw[:1]
 	q := strings.ToLower(strings.TrimPrefix(raw, prefixChar))
 	if q == "" {
-		return slashCommands
+		return m.paletteCommands()
 	}
 	// Vim quit shortcuts (:q, :q!, :wq) resolve directly to /quit.
 	if prefixChar == ":" && (q == "q" || q == "q!" || q == "wq" || q == "qa" || q == "qa!") {
@@ -612,16 +663,18 @@ func (m *TUI) matchingCommands() []slashCmd {
 			}
 		}
 	}
-	var prefix, fuzzy []slashCmd
-	for _, sc := range slashCommands {
+	var exact, prefix, fuzzy []slashCmd
+	for _, sc := range m.paletteCommands() {
 		bare := strings.TrimPrefix(sc.Name, "/")
-		if strings.HasPrefix(bare, q) {
+		if bare == q {
+			exact = append(exact, sc)
+		} else if strings.HasPrefix(bare, q) {
 			prefix = append(prefix, sc)
 		} else if fuzzyScore(q, bare) >= 0 {
 			fuzzy = append(fuzzy, sc)
 		}
 	}
-	return append(prefix, fuzzy...)
+	return append(append(exact, prefix...), fuzzy...)
 }
 
 func (m *TUI) renderCommandSuggestions(width int) string {
@@ -630,23 +683,35 @@ func (m *TUI) renderCommandSuggestions(width int) string {
 		return ""
 	}
 	cur := min(m.cmdCursor, len(matches)-1)
+	start := min(m.cmdStart, cur)
+	start = max(start, cur-commandPaletteRows+1)
+	end := min(start+commandPaletteRows, len(matches))
 	var lines []string
-	for i, sc := range matches {
+	group := ""
+	for i := start; i < end; i++ {
+		sc := matches[i]
 		name := fmt.Sprintf("%-12s", sc.Name)
 		desc := sc.Summary
+		if sc.Group != group && sc.Group != "" {
+			desc = sc.Group + " " + desc
+		}
+		group = sc.Group
+		row := "  " + name + " " + desc
 		if i == cur {
-			if m.opts.Color {
-				lines = append(lines, hevBadgeStyle.Render("› ")+hevCmdStyle.Render(name)+" "+chromeName.Render(desc))
+			row = "› " + name + " " + desc
+		}
+		row = ansi.Truncate(row, max(1, width-2), "…")
+		if m.opts.Color {
+			if i == cur {
+				row = hevCmdStyle.Render(row)
 			} else {
-				lines = append(lines, "› "+name+" "+desc)
-			}
-		} else {
-			if m.opts.Color {
-				lines = append(lines, "  "+chromeName.Render(name)+" "+dimStyle.Render(desc))
-			} else {
-				lines = append(lines, "  "+name+" "+desc)
+				row = dimStyle.Render(row)
 			}
 		}
+		lines = append(lines, row)
+	}
+	if hidden := len(matches) - (end - start); hidden > 0 {
+		lines = append(lines, dimStyle.Render(ansi.Truncate(fmt.Sprintf("… %d more · type to filter", hidden), max(1, width-2), "…")))
 	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(lines, "\n"))
 }
@@ -657,11 +722,15 @@ const helpText = `Enter send (steers while a turn runs) · Shift+Enter newline �
 /resume [query]           resume a local session from hev, claude, codex, agy or pi
 /model [slug]             pick or switch model       /prompt  show composed system prompt
 /reload                   recompose the prompt       /clear   new thread       /help  this help
-/quit                     exit                       Ctrl+O   expand hev cards  Ctrl+C cancel / quit`
+/quit                     exit                       Ctrl+O   expand hev cards  Ctrl+C cancel / quit
+Type / to browse hev CLI commands. Use ↑/↓ to select and Tab to complete.`
 
 func (m *TUI) command(text string) tea.Cmd {
-	name, arg, _ := strings.Cut(text, " ")
-	arg = strings.TrimSpace(arg)
+	name, rawArg := text, ""
+	if i := strings.IndexFunc(text, unicode.IsSpace); i >= 0 {
+		name, rawArg = text[:i], text[i:]
+	}
+	arg := strings.TrimSpace(rawArg)
 	if strings.HasPrefix(name, ":") {
 		name = "/" + strings.TrimPrefix(name, ":")
 	}
@@ -762,6 +831,11 @@ func (m *TUI) command(text string) tea.Cmd {
 		}
 		return tea.Quit
 	default:
+		for _, command := range m.opts.HevCommands {
+			if name == "/"+command.Name {
+				return m.runHevSlash(command, rawArg)
+			}
+		}
 		m.system("unknown command " + name + " (try /help)")
 	}
 	return nil
