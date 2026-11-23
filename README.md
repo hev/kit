@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/hev-head.png" alt="hev kit" width="120" height="120" />
+</p>
+
 # hev kit
 
 hev kit is a **meta-harness** for Claude Code, Codex, Antigravity (agy), Pi,
@@ -40,77 +44,55 @@ them with grep and needs no Docker or database.
 
 ## Five-minute quickstart
 
-Start the capture daemon and the local dashboard, then check them:
+Install with Homebrew and start kit:
 
 ```sh
+brew tap hev/tap
+brew trust hev/tap
+brew install hev/tap/hev
 hev up
-hev s
 ```
 
-On a terminal, the first `hev up` on a new machine runs `hev onboard`: pick the
-agent harnesses kit found, confirm the workspace (default `~/workspace`), and
-it creates the data directories, starts kit and opens the Picker when one is
-installed ([onboarding](https://hevkit.com/docs/onboard)). Without a terminal, or with
-`hev up --non-interactive`, it asks nothing and takes the defaults.
+On a new machine, `hev up` runs `hev onboard`: confirm your detected harnesses
+and workspace (default `~/workspace`), and it creates `~/.hev/` (`traces`,
+`board`, `orders`, `peers`, `hooks`, `evidence`), writes a local
+`~/.config/hev/dispatch.toml` naming this machine `here`, installs bundled
+agent skills, and starts `hevd` and the local dashboard
+(`http://127.0.0.1:8099`). Check status any time with `hev s`.
 
-kit keeps its data under `~/.hev/<surface>/`: `traces`, `board`, `orders`
-(dispatch run records), `peers`, `hooks` and `evidence`, one directory per
-hev layer `/v1` surface. A machine set up before this layout keeps its
-`~/.hev/archive`, `~/dispatch` and `~/.local/state/peers-v2`; see
-[the trace archive](https://hevkit.com/docs/trace-archive#where-it-lives) for the rule.
+Open your harness:
 
-`hev up` also writes `~/.config/hev/dispatch.toml` when there is none, naming
-this machine as host `here`, so dispatch works with no hand-edited TOML. It
-needs Git, tmux, the Codex CLI, and an existing clone at `~/workspace/sample`
-with an `origin` remote. Use a repository you want an agent to work on, and
-replace `sample` below with its directory name. The written config is
-equivalent to:
-
-```toml
-cap = 2
-workspace = "~/workspace"
-
-[hosts.here]
-local = true
+```sh
+hev kit                # built-in harness (free routes on Starter Kit, no key required)
 ```
 
-Save an order as `order.md`:
+Or use your existing harness—`hev up` already installed kit's bundled skills
+(re-run `hev skills setup` any time):
 
-```markdown
----
-name: explain-project
-host: here
-repo: sample
-base: main
-harness: codex
-validation: none
----
-Read the project and write a short architecture guide in ARCHITECTURE.md.
-Do not push or open a PR.
-
-## Acceptance
-- The guide explains the entry points and how to run the project.
+```sh
+hev skills setup
+claude                 # or codex, agy, pi, opencode
 ```
 
-Dispatch it, follow its log, and inspect the result:
+Then ask your harness to dispatch your first item (for example: *"Dispatch an
+order to add a short Development section to README.md in `sample`, commit on a
+branch, and don't push"*). On the first run, the agent walks you through
+repository admission, creates an isolated Git worktree, follows the run, and
+shows you the receipt.
+
+Prefer driving from the shell? Dispatch an order and search its trace directly:
 
 ```sh
 hev dispatch order.md
 hev dispatch logs explain-project -f
 hev dispatch show explain-project
-```
-
-Dispatch creates an isolated Git worktree and keeps the order, status, report,
-and logs under `~/dispatch/explain-project/`. Once capture has indexed the
-session, search its trace:
-
-```sh
 hev traces search 'architecture' --order explain-project
 ```
 
-The [dispatch guide](https://hevkit.com/docs/dispatch) covers remote hosts, inline tasks,
-notifications, validation, and rework. The [online docs](https://hevkit.com/docs)
-walk through the cluster setup.
+The [quickstart](https://hevkit.com/docs/quickstart),
+[dispatch guide](https://hevkit.com/docs/dispatch), and
+[online docs](https://hevkit.com/docs) cover admission, orders, validation,
+rework, and clusters.
 
 ## Dispatch
 
