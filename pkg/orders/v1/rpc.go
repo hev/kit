@@ -165,18 +165,10 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 		}
 		return Reply{Receipt: object(receipt)}, nil
 	}
-	if req.Action == "clean" || req.Action == "stop" && strings.HasPrefix(out.Message, "cancelled queued ") {
+	if req.Action == "clean" {
 		return Reply{}, nil
 	}
-	reply, err := get(q.Name, q.WorkspaceName)
-	if err == nil && req.Action == "stop" {
-		if reply.Active {
-			reply.Order["state"] = "halting"
-		} else {
-			reply.Order["state"] = "halted"
-		}
-	}
-	return reply, err
+	return get(q.Name, q.WorkspaceName)
 }
 
 func list(workspaceName string) ([]map[string]any, error) {
@@ -215,6 +207,18 @@ func get(id, workspaceName string) (Reply, error) {
 			if text := out.Files[file]; text != "" {
 				var value any
 				if json.Unmarshal([]byte(scrub(text)), &value) == nil && value != nil {
+					if field == "result" {
+						result, ok := value.(map[string]any)
+						if !ok {
+							continue
+						}
+						if verdict, ok := result["verdict"].(map[string]any); ok {
+							result["verdict"] = verdict["verdict"]
+						}
+						if _, ok := result["verdict"].(string); !ok {
+							delete(result, "verdict")
+						}
+					}
 					row[field] = value
 				}
 			}
@@ -234,10 +238,24 @@ func object(v any) map[string]any {
 func summary(row dispatch.Row) map[string]any {
 	value := object(row)
 	out := map[string]any{"id": row.Name}
-	for _, key := range strings.Fields("name host repo base harness model validation preview reply issue class timeout every until max_lifetime context skills kind state position orchestrator requested_by branch head_sha outcome start trace_id steer") {
+	for _, key := range strings.Fields("name host repo base model preview reply issue class timeout every until max_lifetime context skills kind state position orchestrator requested_by branch head_sha outcome start trace_id steer") {
 		if field, ok := value[key]; ok {
 			out[key] = field
 		}
+	}
+	switch row.Order.Harness {
+	case "codex", "claude":
+		out["harness"] = row.Order.Harness
+	}
+	switch row.Order.Validation {
+	case "none", "browser":
+		out["validation"] = row.Order.Validation
+	}
+	if row.Order.Timeout < 1 || row.Order.Timeout > 525600 {
+		delete(out, "timeout")
+	}
+	if row.Base == "" {
+		delete(out, "base")
 	}
 	if row.Start.IsZero() {
 		delete(out, "start")

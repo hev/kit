@@ -1319,6 +1319,15 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, err
 		}
 		defer unlockStop()
+		if q.APILocalOnly {
+			if readJSON(filepath.Join(dir, "meta.json"), &m) != nil || m.Forward != nil || checkRunWorkspace(q.WorkspaceName, m) != nil {
+				return r, fmt.Errorf("order not found")
+			}
+			var ended Result
+			if readJSON(filepath.Join(dir, "result.json"), &ended) == nil && !ended.End.IsZero() {
+				return r, fmt.Errorf("order already ended")
+			}
+		}
 		e = os.WriteFile(filepath.Join(dir, "stop"), nil, 0600)
 		if !supervisorLive(dir) {
 			clearRunLaunch(dir)
@@ -1357,6 +1366,9 @@ func Handle(q Request) (r Response, handleErr error) {
 		if m.Forward != nil {
 			return r, fmt.Errorf("run moved to another host")
 		}
+		if q.APILocalOnly && checkRunWorkspace(q.WorkspaceName, m) != nil {
+			return r, fmt.Errorf("order not found")
+		}
 		if live[q.Name] {
 			return r, fmt.Errorf("stop running order before clean")
 		}
@@ -1372,7 +1384,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		if _, err := os.Stat(filepath.Join(dir, "wt")); err == nil && (!failedAdmission || m.WorktreeCreated) {
 			_, e = command("", "git", "-C", filepath.Join(dir, "wt"), "worktree", "remove", filepath.Join(dir, "wt"))
 		}
-		if e == nil && failedAdmission {
+		if e == nil && failedAdmission && !q.APILocalOnly {
 			// A failed supervisor launch may already have created the branch.
 			// Only remove a merged implementation branch, never the
 			// existing source branch used by a detached validator worktree.
@@ -1381,9 +1393,9 @@ func Handle(q Request) (r Response, handleErr error) {
 					_, e = command("", "git", "-C", m.ResolvedRepo, "branch", "-d", "--", m.Branch)
 				}
 			}
-			if e == nil {
-				e = os.RemoveAll(dir)
-			}
+		}
+		if e == nil && (failedAdmission || q.APILocalOnly) {
+			e = os.RemoveAll(dir)
 		}
 		r.Message = "cleaned " + q.Name
 	default:

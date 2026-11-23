@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAPILogBoundsAndRedactsOnlyCompleteRecords(t *testing.T) {
@@ -70,4 +71,51 @@ func TestQueueAPICancelKeepsHaltedRecord(t *testing.T) {
 	if err := readJSON(filepath.Join(Root(), q.Name, "result.json"), &result); err != nil || State(&result, false) != "halted" {
 		t.Fatalf("cancelled run is not readable as halted: %v", err)
 	}
+}
+
+func TestAPIPurgeKeepsBranchAndRefusesDirtyWorktree(t *testing.T) {
+	queueTestHome(t)
+	repo := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		if _, err := command(repo, append([]string{"git"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "--initial-branch=main")
+	git("-c", "user.name=Example", "-c", "user.email=example@example.com", "commit", "--allow-empty", "-m", "Initial")
+	dir := filepath.Join(Root(), "example")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(dir, "wt")
+	git("worktree", "add", "-b", "d/example", wt)
+	if err := WriteJSON(filepath.Join(dir, "meta.json"), Meta{Order: Order{Name: "example", Repo: repo}, Branch: "d/example", ResolvedRepo: repo, BranchCreated: true, WorktreeCreated: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteJSON(filepath.Join(dir, "result.json"), Result{End: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	dirty := filepath.Join(wt, "untracked")
+	if err := os.WriteFile(dirty, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	purge := Request{Action: "clean", Name: "example", APILocalOnly: true}
+	if _, err := Handle(purge); err == nil {
+		t.Fatal("purge removed a dirty worktree")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "result.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dirty); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Handle(purge); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("purge left the run directory: %v", err)
+	}
+	git("show-ref", "--verify", "refs/heads/d/example")
+	git("branch", "-d", "d/example") // Also proves worktree registration was removed.
 }

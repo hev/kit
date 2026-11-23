@@ -71,7 +71,7 @@ func (p *P) nativeSender() (who, bool) {
 
 func (p *P) allowsNative(peer nativeinbox.Presence) bool {
 	return participates(peer.Role) && (!p.scope.Enabled ||
-		p.scope.Workspace.AllowsHost(p.selfLabel()) && p.scope.allowsLocal(nativeRow(peer)))
+		p.scope.Workspace.AllowsHost(p.selfLabel()) && p.scope.AllowsLocal(nativeRow(peer)))
 }
 
 var nativeOrigin = regexp.MustCompile(`^[A-Za-z0-9._:%$/-]{1,160}$`)
