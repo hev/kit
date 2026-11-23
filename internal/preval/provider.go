@@ -232,7 +232,9 @@ func (p Provider) Lookup(ctx context.Context, pr PullRequest) (Observation, erro
 	if pr.Repository != p.Repository || !p.Repository.valid() || pr.ID <= 0 || p.Token == "" {
 		return Observation{}, errInvalid
 	}
-	result := Observation{Source: Source{PullRequest: pr}}
+	// Start time orders overlapping lookups even when an older response arrives
+	// after a newer one. An observed provider change can advance that time.
+	result := Observation{Source: Source{PullRequest: pr}, ObservedAt: time.Now().UTC()}
 	if p.Repository.Provider == GitHub {
 		if !identifier.MatchString(p.Name) {
 			return Observation{}, errInvalid
@@ -308,7 +310,12 @@ func (p Provider) Lookup(ctx context.Context, pr PullRequest) (Observation, erro
 	if !identifier.MatchString(result.Source.Revision) {
 		return Observation{}, errLookup
 	}
-	result.ObservedAt = time.Now().UTC()
+	if result.LastActivity.After(time.Now().UTC()) {
+		return Observation{}, errLookup
+	}
+	if result.LastActivity.After(result.ObservedAt) {
+		result.ObservedAt = result.LastActivity
+	}
 	id := sha256.Sum256([]byte(result.Outcome + "\x00" + result.Source.Revision + "\x00" + result.LastActivity.Format(time.RFC3339Nano)))
 	result.Source.EventID = "api_" + hex.EncodeToString(id[:])
 	return result, nil
