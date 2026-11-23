@@ -152,6 +152,9 @@ func (p *P) inboxPaths(session string) (string, string) {
 func (p *P) inboxPath(session string) string { path, _ := p.inboxPaths(session); return path }
 
 func (p *P) paneIncarnation(r *Row) string {
+	if r.Native != nil {
+		return fmt.Sprintf("native:%s:%d:%d", p.selfLabel(), r.Native.PID, r.Native.StartedAt.UnixNano())
+	}
 	if r.Managed != nil {
 		return p.incarnation(r.Session, r.Managed.Str("incarnation"), true)
 	}

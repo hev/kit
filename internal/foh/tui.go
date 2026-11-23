@@ -83,6 +83,7 @@ type TUI struct {
 	peers         *peersOverlay
 	steerer       *steerOverlay
 	quitting      bool
+	nativePeer    *nativePeers
 }
 
 type resumePicker struct {
@@ -152,7 +153,7 @@ func NewTUI(opts TUIOptions) *TUI {
 
 // Init loads the catalog and cluster chrome in the background.
 func (m *TUI) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.loadCatalog(), m.fetchChrome(), m.scheduleChrome())
+	return tea.Batch(textarea.Blink, m.loadCatalog(), m.fetchChrome(), m.scheduleChrome(), m.pollPeers())
 }
 
 func (m *TUI) fetchChrome() tea.Cmd {
@@ -209,6 +210,8 @@ func waitEvent(ch <-chan Event) tea.Cmd {
 // Update handles keys, agent events and catalog loads.
 func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case nativePeerTick:
+		return m, m.receivePeers(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.SetWidth(max(10, msg.Width-4))
@@ -296,7 +299,7 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.replyTo != "" {
 			m.recordPeer("→", msg.replyTo, msg.replyBody)
 		}
-		return m, nil
+		return m, m.deliverPeerBackground()
 	case steerListMsg:
 		if m.steerer != nil {
 			m.steerer.loading = false
@@ -400,10 +403,14 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, waitEvent(m.events))
 		return m, tea.Batch(cmds...)
 	case agentDoneMsg:
-		m.busy, m.events = false, nil
+		m.setBusy(false)
+		m.events = nil
 		if m.cancel != nil {
 			m.cancel()
 			m.cancel = nil
+		}
+		if cmd := m.finishPeerSteer(); cmd != nil {
+			return m, cmd
 		}
 		if len(m.pendingAuto) > 0 {
 			next := m.pendingAuto[0]
@@ -774,7 +781,7 @@ func (m *TUI) startAutoTurn(text string) tea.Cmd {
 }
 
 func (m *TUI) runAgentTurn(text string) tea.Cmd {
-	m.busy = true
+	m.setBusy(true)
 	m.thinkVerb = pickAlpineVerb()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
@@ -961,6 +968,9 @@ func (m *TUI) applyEvent(ev Event) tea.Cmd {
 			}
 		}
 	case EventSteer:
+		if m.nativePeer != nil && m.nativePeer.steering == ev.Text {
+			m.nativePeer.steering = ""
+		}
 		m.system("↪ steer injected: " + ev.Text)
 	case EventError:
 		m.entries = append(m.entries, entry{kind: entryError, text: ev.Err.Error()})
@@ -1525,7 +1535,9 @@ func (m *TUI) View() string {
 	if suggestions != "" {
 		footer = suggestions + "\n" + footer
 	}
-
+	if status := m.peerStatus(innerWidth); status != "" {
+		footer = status + "\n" + footer
+	}
 	if m.picker != nil {
 		header := " " + m.headerBar()
 		room := max(3, m.height-lipgloss.Height(header)-lipgloss.Height(footer)-2)

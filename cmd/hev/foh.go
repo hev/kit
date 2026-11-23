@@ -143,6 +143,11 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 			return router.Models(ctx, false)
 		},
 	})
+	closePeers, peerErr := tui.RegisterNativePeer(ctx)
+	if peerErr != nil {
+		fmt.Fprintln(cmd.ErrOrStderr(), "hev kit: native peers unavailable")
+	}
+	defer closePeers()
 	_, err = tea.NewProgram(tui, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx)).Run()
 	if errors.Is(err, tea.ErrProgramKilled) || errors.Is(err, context.Canceled) {
 		return nil

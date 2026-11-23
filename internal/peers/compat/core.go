@@ -278,7 +278,12 @@ func (p *P) tilde(path string) string {
 
 func (p *P) hostname() string {
 	r := p.run([]string{"hostname", "-s"}, nil)
-	return strings.ToLower(strings.TrimSpace(r.stdout))
+	if r.code == 0 && strings.TrimSpace(r.stdout) != "" {
+		return strings.ToLower(strings.TrimSpace(r.stdout))
+	}
+	host, _ := os.Hostname()
+	short, _, _ := strings.Cut(host, ".")
+	return strings.ToLower(short)
 }
 
 // selfLabel is what other machines call this one.

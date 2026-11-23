@@ -99,6 +99,10 @@ func (m *TUI) summarizeCardAsync(callID, tool, action, rawOutput string) tea.Cmd
 	if m.opts.Agent == nil || m.opts.Agent.Provider == nil {
 		return nil
 	}
+	// Dispatch receipts have an exact run address in their summary.
+	if tool == "hev_dispatch" && action == "send" {
+		return nil
+	}
 	// Skip tiny or empty outputs where the deterministic summary is already ideal.
 	trimmed := strings.TrimSpace(rawOutput)
 	if len(trimmed) < 40 {
