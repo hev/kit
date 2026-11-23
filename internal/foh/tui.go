@@ -857,6 +857,16 @@ func (m *TUI) applyEvent(ev Event) tea.Cmd {
 		if IsHevTool(ev.Call.Function.Name) {
 			m.entries = append(m.entries, entry{kind: entryCard, callID: ev.Call.ID, running: true,
 				card: &Card{Tool: ev.Call.Function.Name, Action: action, Summary: "running…"}})
+		} else if ev.Call.Function.Name == "bash" {
+			if htool, hact, ok := detectBashHevCommand(ev.Call.Function.Arguments); ok {
+				if m.callArgs != nil {
+					m.callArgs[ev.Call.ID] = struct{ tool, action, args string }{htool, hact, ev.Call.Function.Arguments}
+				}
+				m.entries = append(m.entries, entry{kind: entryCard, callID: ev.Call.ID, running: true,
+					card: &Card{Tool: htool, Action: hact, Summary: "running…"}})
+			} else {
+				m.entries = append(m.entries, entry{kind: entryTool, callID: ev.Call.ID, running: true, text: ev.Call.Function.Name + " " + argsSummary(ev.Call.Function.Arguments)})
+			}
 		} else {
 			m.entries = append(m.entries, entry{kind: entryTool, callID: ev.Call.ID, running: true, text: ev.Call.Function.Name + " " + argsSummary(ev.Call.Function.Arguments)})
 		}
@@ -869,6 +879,15 @@ func (m *TUI) applyEvent(ev Event) tea.Cmd {
 			e.running = false
 			if e.kind == entryCard && ev.Result.Card != nil {
 				e.card = ev.Result.Card
+			} else if e.kind == entryCard && e.card != nil {
+				// Promoted `bash hev ...` card.
+				e.card.OK = !ev.Result.IsError
+				e.card.Body = strings.TrimSpace(ev.Result.Content)
+				if ev.Result.IsError {
+					e.card.Summary = "failed: " + firstLine(ev.Result.Content, 80)
+				} else {
+					e.card.Summary = summarize(e.card.Tool, e.card.Action, ev.Result.Content)
+				}
 			} else {
 				e.detail = ev.Result.Content
 				if ev.Result.IsError {
@@ -931,8 +950,8 @@ func (m *TUI) applyEvent(ev Event) tea.Cmd {
 					return nil
 				}
 			}
-			// Kick off an async small-model summary for kept hev cards (when not errored).
-			if IsHevTool(info.tool) && !ev.Result.IsError {
+			// Kick off an async small-model summary for kept hev cards (including promoted `bash hev ...` cards).
+			if (IsHevTool(info.tool) || strings.HasPrefix(info.tool, "hev ")) && !ev.Result.IsError {
 				if c := m.summarizeCardAsync(ev.Call.ID, info.tool, info.action, ev.Result.Content); c != nil {
 					cmds = append(cmds, c)
 				}

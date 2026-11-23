@@ -10,29 +10,62 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// hevToolEmoji maps each first-class hev tool to a distinct icon for TUI cards.
+// hevToolEmoji maps each first-class hev tool or hev subcommand to a distinct icon for TUI cards.
 func hevToolEmoji(tool string, color bool) string {
 	if !color {
 		return "◆"
 	}
 	switch tool {
-	case "hev_dispatch":
+	case "hev_dispatch", "hev dispatch":
 		return "🚀"
-	case "hev_steer":
+	case "hev_steer", "hev steer":
 		return "🧭"
-	case "hev_peers":
+	case "hev_peers", "hev peers":
 		return "💬"
-	case "hev_board":
+	case "hev_board", "hev board":
 		return "📋"
-	case "hev_traces":
+	case "hev_traces", "hev traces":
 		return "🔍"
-	case "hev_status":
+	case "hev_status", "hev status", "hev s":
 		return "📡"
-	case "hev_docs":
+	case "hev_docs", "hev docs":
 		return "📖"
+	case "hev_cluster", "hev cluster", "hev nodes":
+		return "🌐"
+	case "hev orchestrate":
+		return "🎯"
+	case "hev workspace":
+		return "🗂️"
+	case "hev secrets":
+		return "🔐"
+	case "hev cron":
+		return "⏰"
+	case "hev service":
+		return "⚙️"
 	default:
+		if strings.HasPrefix(tool, "hev") {
+			return "🛠️"
+		}
 		return "◆"
 	}
+}
+
+// detectBashHevCommand inspects a bash tool call's arguments and returns
+// ("hev <subcmd>", "<rest>") when the command invokes `hev ...` directly.
+func detectBashHevCommand(argsJSON string) (tool, action string, ok bool) {
+	cmd := strings.TrimSpace(argField(argsJSON, "command"))
+	if cmd == "" || strings.ContainsAny(cmd, "\n;|&") {
+		return "", "", false
+	}
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 || fields[0] != "hev" {
+		return "", "", false
+	}
+	tool = "hev " + fields[1]
+	if len(fields) > 2 {
+		action = truncateLine(strings.Join(fields[2:], " "), 40)
+	}
+	return tool, action, true
 }
 
 type cardSummaryMsg struct {

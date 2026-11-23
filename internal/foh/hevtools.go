@@ -216,6 +216,13 @@ var hevToolDefs = []struct {
 		map[string]hevAction{
 			"": {func(hevArgs) ([]string, string, error) { return []string{"--json"}, "", nil }},
 		}},
+	{"hev_cluster", "Inspect cluster membership, nodes, and host hygiene: ls, status, pending.",
+		`{"type":"object","properties":{"action":{"type":"string","enum":["ls","status","pending"]}},"required":["action"]}`,
+		map[string]hevAction{
+			"ls":      {func(hevArgs) ([]string, string, error) { return []string{"cluster", "ls", "--json"}, "", nil }},
+			"status":  {func(hevArgs) ([]string, string, error) { return []string{"cluster", "status", "--json"}, "", nil }},
+			"pending": {func(hevArgs) ([]string, string, error) { return []string{"cluster", "pending", "--json"}, "", nil }},
+		}},
 }
 
 func (t *Toolset) hevTools() []Tool {

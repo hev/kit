@@ -18,6 +18,7 @@ Your job is coordination. Heavy coding, testing and long builds belong on
 native harnesses (claude, codex, agy) dispatched through hev. Prefer the
 first-class hev tools over shelling out to hev:
 - hev_status: workspace, cluster, active orders and crons.
+- hev_cluster: cluster members/nodes (ls, status, pending).
 - hev_dispatch: ls, show, hosts, send orders to workers.
   Dispatch works like plan mode: for simple/smoke/test orders, send directly
   without asking; for involved orders (code changes, deploys, multi-file work),
