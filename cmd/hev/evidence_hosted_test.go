@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -10,8 +11,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHostedEvidenceCLINeverMirrors(t *testing.T) {
@@ -102,5 +105,88 @@ func TestHostedEvidenceUsesSavedAPIOrigin(t *testing.T) {
 	client, err := hostedEvidence(context.Background())
 	if err != nil || client == nil || client.base != "https://api.example.test" {
 		t.Fatalf("saved API origin was not used: %v", err)
+	}
+}
+
+func TestHostedEvidenceStagingKeepsKitBearerOffS3(t *testing.T) {
+	const size = hostedEvidenceBlobCap + 1
+	const uploadID = "evu_00000000000000000000000001"
+	key := "hk_" + strings.Repeat("s", 43)
+	src, err := os.CreateTemp(t.TempDir(), "clip-*.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	if _, err := src.Write([]byte("\x00\x00\x00\x0cftypisom")); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.Truncate(size); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.New()
+	if _, err := io.Copy(digest, src); err != nil {
+		t.Fatal(err)
+	}
+	sum := digest.Sum(nil)
+	checksum := base64.StdEncoding.EncodeToString(sum)
+	hash := hex.EncodeToString(sum)
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+
+	const capability = "synthetic-signature"
+	storage := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Query().Get("signature") != capability || r.ContentLength != size ||
+			r.Header.Get("Authorization") != "" || r.Header.Get("Content-Type") != "application/octet-stream" ||
+			r.Header.Get("If-None-Match") != "*" || r.Header.Get("X-Amz-Checksum-Sha256") != checksum {
+			t.Error("incorrect signed PUT")
+			w.WriteHeader(403)
+			return
+		}
+		received := sha256.New()
+		if n, err := io.Copy(received, r.Body); err != nil || n != size || hex.EncodeToString(received.Sum(nil)) != hash {
+			t.Error("streamed bytes differ")
+			w.WriteHeader(400)
+			return
+		}
+		// An S3 error can arrive after bytes were committed. Finalize once.
+		w.WriteHeader(500)
+	}))
+	defer storage.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+key {
+			t.Error("Kit upload request lacked its bearer")
+			w.WriteHeader(403)
+			return
+		}
+		switch r.URL.Path {
+		case hostedEvidencePath + "/blobs/uploads":
+			var spec map[string]any
+			if json.NewDecoder(r.Body).Decode(&spec) != nil || spec["sha256"] != hash || spec["size"] != float64(size) || spec["content_type"] != "video/mp4" {
+				t.Error("incorrect grant request")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"upload_id": uploadID, "upload_url": storage.URL + "?signature=" + capability,
+				"method": "PUT", "expires_at": time.Now().Add(time.Minute),
+				"headers": map[string]string{
+					"content-length": strconv.Itoa(size), "content-type": "application/octet-stream",
+					"if-none-match": "*", "x-amz-checksum-sha256": checksum,
+				},
+			})
+		case hostedEvidencePath + "/blobs/uploads/" + uploadID + "/complete":
+			_ = json.NewEncoder(w).Encode(map[string]string{"sha256": hash, "modality": "video"})
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer api.Close()
+
+	client := &remoteEvidence{ctx: context.Background(), client: storage.Client(), base: api.URL, key: key}
+	item, err := client.uploadStaged(src, size)
+	if err != nil || item.Hash != hash || item.Modality != "video" {
+		t.Fatalf("staged upload failed: %v", err)
 	}
 }

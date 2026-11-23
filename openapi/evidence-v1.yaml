@@ -16,7 +16,8 @@ info:
 
     The initial hosted persistence slice implements package create, list,
     read, patch and evaluation, direct blob upload, limits and blob reads.
-    Its direct upload cap is 10 MiB (text 5 MiB, video 60 seconds).
+    Its direct upload cap is 10 MiB (text 5 MiB, video 60 seconds). S3-enabled deployments
+    support staged video over 10 MiB through 100 MiB.
     Staged upload, deletion, multimodal search and federated search are planned.
     The persistence slice uses machine bearer keys.
 
@@ -320,10 +321,11 @@ paths:
     post:
       tags: [Evidence blobs]
       operationId: createEvidenceBlobUpload
-      summary: Initiate a staged/presigned upload for larger videos or artifacts
+      summary: Initiate a presigned S3 upload for a larger video
       description: |
         Returns a short-lived presigned upload URL so clips up to 100 MiB stream
-        straight to object storage without buffering through the API gateway.
+        straight to private object storage. Send only the returned headers on the S3
+        PUT. The URL expires within 15 minutes and must be kept private.
         Call `POST /v1/evidence/blobs/uploads/{upload_id}/complete` once bytes
         are uploaded.
       requestBody:
@@ -353,16 +355,12 @@ paths:
       summary: Finalize a staged media upload
       description: |
         Verifies sha256, sniffs media container and dimensions/duration (refusing
-        clips over `max_video_duration_ms`), generates a poster thumbnail for
-        videos, and promotes the object into content-addressed storage.
+        clips over `max_video_duration_ms`), and promotes the object into
+        content-addressed storage. Repeated completion before grant expiry
+        returns the same blob.
       responses:
         '200':
-          description: Blob already existed; deduplicated.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/EvidenceBlob'}
-        '201':
-          description: Blob verified and stored.
+          description: Blob verified and stored or deduplicated.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/EvidenceBlob'}
@@ -1005,15 +1003,16 @@ components:
 
     EvidenceBlobUploadCreate:
       type: object
-      required: [size, sha256]
+      required: [size, sha256, content_type]
       properties:
-        size: {type: integer, format: int64, minimum: 1, maximum: 104857600}
+        size: {type: integer, format: int64, minimum: 10485761, maximum: 104857600}
         sha256: {$ref: '#/components/schemas/Sha256'}
-        modality: {$ref: '#/components/schemas/EvidenceModality'}
+        modality: {type: string, enum: [video]}
+        content_type: {type: string, enum: [video/mp4, video/quicktime, video/webm]}
 
     EvidenceBlobUpload:
       type: object
-      required: [upload_id, upload_url, method, expires_at]
+      required: [upload_id, upload_url, method, headers, expires_at]
       properties:
         upload_id: {type: string, pattern: '^evu_[0-9a-z]{26}$'}
         upload_url: {type: string, format: uri}

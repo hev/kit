@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,7 @@ const hostedEvidenceBlobCap = 10 << 20
 
 var hostedEvidenceKey = regexp.MustCompile(`^hk_[A-Za-z0-9_-]{43}$`)
 var hostedEvidenceID = regexp.MustCompile(`^ev_[0-9a-hjkmnp-tv-z]{26}$`)
+var hostedEvidenceUploadID = regexp.MustCompile(`^evu_[0-7][0-9a-hjkmnp-tv-z]{25}$`)
 var hostedEvidenceHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var hostedEvidenceLocalPath = regexp.MustCompile(`(?i)(?:/(?:users|home|private|tmp|var|etc|mnt|opt)/|[a-z]:[\\/]|\\\\)[^\s"'<>]+`)
 var hostedEvidenceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._ -]{0,199}$`)
@@ -170,7 +173,7 @@ type remoteEvidenceItem struct {
 }
 
 func (s *remoteEvidence) upload(it evidence.ItemInput) (remoteEvidenceItem, error) {
-	in := io.Reader(bytes.NewReader(it.Data))
+	var in io.ReadSeeker = bytes.NewReader(it.Data)
 	size, name := int64(len(it.Data)), it.Name
 	if it.Path != "" {
 		initial, err := os.Stat(it.Path)
@@ -189,12 +192,36 @@ func (s *remoteEvidence) upload(it evidence.ItemInput) (remoteEvidenceItem, erro
 		in, size = f, stat.Size()
 		name = defaultString(name, filepath.Base(it.Path))
 	}
-	if size < 1 || size > hostedEvidenceBlobCap {
+	if size < 1 || size > evidence.MaxVideoBytes {
 		return remoteEvidenceItem{}, evidence.ErrTooLarge
 	}
 	if !hostedEvidenceName.MatchString(name) || strings.Contains(name, "..") || s.scrub(name) != name {
 		return remoteEvidenceItem{}, evidence.ErrInvalid
 	}
+	var b remoteEvidenceItem
+	var err error
+	if size > hostedEvidenceBlobCap {
+		b, err = s.uploadStaged(in, size)
+	} else {
+		b, err = s.uploadDirect(in, size)
+	}
+	if err != nil {
+		return remoteEvidenceItem{}, err
+	}
+	b.Name, b.Caption, b.URL, b.App, b.Step = name, s.scrub(it.Caption), s.scrub(it.URL), s.scrub(it.App), s.scrub(it.Step)
+	if len(it.Metadata) != 0 {
+		b.Metadata = make(map[string]string, len(it.Metadata))
+		for key, value := range it.Metadata {
+			if s.scrub(key) != key {
+				return remoteEvidenceItem{}, evidence.ErrInvalid
+			}
+			b.Metadata[key] = s.scrub(value)
+		}
+	}
+	return b, nil
+}
+
+func (s *remoteEvidence) uploadDirect(in io.Reader, size int64) (remoteEvidenceItem, error) {
 	reader := bufio.NewReaderSize(io.LimitReader(in, size), 512)
 	prefix, _ := reader.Peek(512)
 	if strings.HasPrefix(http.DetectContentType(prefix), "text/") {
@@ -219,15 +246,94 @@ func (s *remoteEvidence) upload(it evidence.ItemInput) (remoteEvidenceItem, erro
 	if json.NewDecoder(io.LimitReader(res.Body, 8192)).Decode(&b) != nil || !hostedEvidenceHash.MatchString(b.Hash) {
 		return remoteEvidenceItem{}, errors.New("invalid hosted evidence blob response")
 	}
-	b.Name, b.Caption, b.URL, b.App, b.Step = name, s.scrub(it.Caption), s.scrub(it.URL), s.scrub(it.App), s.scrub(it.Step)
-	if len(it.Metadata) != 0 {
-		b.Metadata = make(map[string]string, len(it.Metadata))
-		for key, value := range it.Metadata {
-			if s.scrub(key) != key {
-				return remoteEvidenceItem{}, evidence.ErrInvalid
-			}
-			b.Metadata[key] = s.scrub(value)
+	return b, nil
+}
+
+func (s *remoteEvidence) uploadStaged(in io.ReadSeeker, size int64) (remoteEvidenceItem, error) {
+	var prefix [12]byte
+	if _, err := io.ReadFull(in, prefix[:]); err != nil {
+		return remoteEvidenceItem{}, evidence.ErrUnsupported
+	}
+	var mime string
+	switch {
+	case bytes.Equal(prefix[:4], []byte{0x1a, 0x45, 0xdf, 0xa3}):
+		mime = "video/webm"
+	case string(prefix[4:8]) == "ftyp":
+		mime = "video/mp4"
+		if string(prefix[8:12]) == "qt  " {
+			mime = "video/quicktime"
 		}
+	default:
+		return remoteEvidenceItem{}, evidence.ErrUnsupported
+	}
+	digest := sha256.New()
+	_, _ = digest.Write(prefix[:])
+	if n, err := io.CopyN(digest, in, size-int64(len(prefix))); err != nil || n != size-int64(len(prefix)) {
+		return remoteEvidenceItem{}, errors.New("could not read evidence input")
+	}
+	sum := digest.Sum(nil)
+	hash := hex.EncodeToString(sum)
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return remoteEvidenceItem{}, errors.New("could not rewind evidence input")
+	}
+	var grant struct {
+		ID      string            `json:"upload_id"`
+		URL     string            `json:"upload_url"`
+		Method  string            `json:"method"`
+		Headers map[string]string `json:"headers"`
+		Expires time.Time         `json:"expires_at"`
+	}
+	path := hostedEvidencePath + "/blobs/uploads"
+	input := map[string]any{"sha256": hash, "size": size, "content_type": mime}
+	if _, err := s.json(http.MethodPost, path, input, "", "", &grant); err != nil {
+		return remoteEvidenceItem{}, err
+	}
+	u, err := url.Parse(grant.URL)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
+		u.RawQuery == "" || u.Fragment != "" || !grant.Expires.After(time.Now()) ||
+		!hostedEvidenceUploadID.MatchString(grant.ID) || grant.Method != http.MethodPut {
+		return remoteEvidenceItem{}, errors.New("invalid hosted evidence upload grant")
+	}
+	expected := map[string]string{
+		"content-length": strconv.FormatInt(size, 10), "content-type": "application/octet-stream",
+		"if-none-match": "*", "x-amz-checksum-sha256": base64.StdEncoding.EncodeToString(sum),
+	}
+	for name, value := range expected {
+		if grant.Headers[name] != value {
+			return remoteEvidenceItem{}, errors.New("invalid hosted evidence upload headers")
+		}
+	}
+	req, err := http.NewRequestWithContext(s.ctx, http.MethodPut, u.String(), io.LimitReader(in, size))
+	if err != nil {
+		return remoteEvidenceItem{}, errors.New("could not prepare staged evidence upload")
+	}
+	req.ContentLength = size
+	for name, value := range expected {
+		if name != "content-length" {
+			req.Header.Set(name, value)
+		}
+	}
+	// The signed URL authorizes this upload. The Kit key stays on the Kit origin.
+	client := *s.client
+	client.Timeout = 2 * time.Minute
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	res, putErr := client.Do(req)
+	if putErr == nil {
+		res.Body.Close()
+		if res.StatusCode/100 != 2 && res.StatusCode != 409 && res.StatusCode != 412 && res.StatusCode < 500 {
+			return remoteEvidenceItem{}, fmt.Errorf("staged evidence upload refused (HTTP %d)", res.StatusCode)
+		}
+	}
+	// Upload may have succeeded before a connection failed. Try completion
+	// once and let Layer verify the committed bytes.
+	var b remoteEvidenceItem
+	finalize := *s
+	finalize.client = &client
+	if _, err := finalize.json(http.MethodPost, path+"/"+grant.ID+"/complete", nil, "", "", &b); err != nil {
+		return remoteEvidenceItem{}, err
+	}
+	if b.Hash != hash || b.Modality != "video" {
+		return remoteEvidenceItem{}, errors.New("invalid hosted evidence completion")
 	}
 	return b, nil
 }
@@ -383,10 +489,16 @@ func (s *remoteEvidence) Path(id string) string {
 }
 
 func (s *remoteEvidence) download(item evidence.Item, out io.Writer) error {
-	if !hostedEvidenceHash.MatchString(item.SHA256) || item.Size < 1 || item.Size > hostedEvidenceBlobCap {
+	if !hostedEvidenceHash.MatchString(item.SHA256) || item.Size < 1 || item.Size > evidence.MaxVideoBytes {
 		return evidence.ErrIntegrity
 	}
-	res, err := s.request(http.MethodGet, hostedEvidencePath+"/blobs/"+item.SHA256, nil, 0, "", "", "")
+	download := *s
+	if item.Size > hostedEvidenceBlobCap {
+		client := *s.client
+		client.Timeout = 2 * time.Minute
+		download.client = &client
+	}
+	res, err := download.request(http.MethodGet, hostedEvidencePath+"/blobs/"+item.SHA256, nil, 0, "", "", "")
 	if err != nil {
 		return err
 	}
