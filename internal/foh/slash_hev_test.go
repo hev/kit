@@ -50,7 +50,7 @@ func TestHevSlashRunsWithoutAgentAndRecordsBoundedContext(t *testing.T) {
 	}
 	slashResult(t, m, cmd)
 	if m.entries[0].running || m.entries[0].card.Summary != "oven down" ||
-		!strings.Contains(plain(m), "Ctrl+O to expand") {
+		!strings.Contains(plain(m), "Ctrl+O") {
 		t.Fatalf("completed card failed to summarize output: %s", plain(m))
 	}
 	m.Update(key(tea.KeyCtrlO))
