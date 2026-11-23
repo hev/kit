@@ -320,8 +320,8 @@ func (p *P) hold(session, header, message, sender string, extra *Obj) (*Obj, err
 		extra = NewObj()
 	}
 	extra = extra.Copy()
-	role := strings.TrimSpace(p.tmuxQ("show-options", "-t", "="+session+":", "-qv", "@peers-role"))
-	if role != "" && role != "foh" && role != "boh" {
+	role := p.resolveRole(session, strings.TrimSpace(p.tmuxQ("show-options", "-t", "="+session+":", "-qv", "@peers-role")))
+	if !participates(role) {
 		return nil, refuse("recipient is offline")
 	}
 	identity := p.incarnation(session, "", false)

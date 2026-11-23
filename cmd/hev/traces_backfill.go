@@ -110,9 +110,18 @@ func newTracesBackfillCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			w, err := currentWorkspace()
+			if err != nil {
+				return err
+			}
 			sources := trace.Sources(map[string]string{harness.Pi: cfg.PiSessionsDir, harness.OpenCode: cfg.OpenCodeDataDir, harness.Agy: cfg.AgyDataDir})
 			home, _ := os.UserHomeDir()
 			journalPath := filepath.Join(home, ".hev", "traces-backfill.json")
+			if w.IsolatedStorage() {
+				sources = trace.WorkspaceSources(w)
+				journalPath = filepath.Join(w.Root(), "traces-backfill.json")
+			}
+
 			open := func() (index.Archive, *trace.ImageCapture, error) { return tracesWithImages(namespace) }
 			return runTracesBackfill(cmd.OutOrStdout(), cmd.ErrOrStderr(), sources, open, journalPath, namespace, window, apply, restart, asJSON, limit, time.Now())
 		},

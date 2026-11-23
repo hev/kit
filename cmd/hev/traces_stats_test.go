@@ -41,7 +41,7 @@ func statsFixture(t *testing.T) (*filearchive.Store, []tracepkg.Source, string) 
 	}
 	now := time.Now().UTC()
 	ts := func(s int) string { return now.Add(-time.Hour + time.Duration(s)*time.Second).Format(time.RFC3339) }
-	worker := filepath.Join(home, "dispatch", "fix-bug", "wt")
+	worker := filepath.Join(home, ".hev", "orders", "fix-bug", "wt")
 	write(filepath.Join(codexRoot, "2026", "11", "16", "rollout-w.jsonl"), strings.Join([]string{
 		`{"timestamp":"` + ts(0) + `","type":"session_meta","payload":{"id":"0a0a0a0a-0000-4000-8000-000000000001","cwd":"` + worker + `"}}`,
 		`{"timestamp":"` + ts(1) + `","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<skills_instructions>\n- peers: talk (file: /h/.codex/skills/peers/SKILL.md)\n</skills_instructions>"}]}}`,

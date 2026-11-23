@@ -1,11 +1,8 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"github.com/hev/kit/internal/layerenv"
-	"github.com/hev/kit/internal/update"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,13 +11,18 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
+	"github.com/hev/kit/internal/workspace"
 )
 
 type Config struct {
+	captureTargets []captureTarget
+
 	ConfigPath string
 
 	// Layer archive target.
@@ -32,7 +34,7 @@ type Config struct {
 	LayerStore string `json:"HEVLAYER_STORE"`
 
 	// ArchiveDir is where traces are kept as files when there is no Layer
-	// key ([archive] dir; HEV_ARCHIVE_DIR wins). Empty is ~/.hev/archive.
+	// key ([archive] dir; HEV_ARCHIVE_DIR wins). Empty is ~/.hev/traces (or a legacy ~/.hev/archive).
 	ArchiveDir string
 
 	// Local is the stack `hev up` owns.
@@ -151,18 +153,24 @@ type localFileConfig struct {
 }
 
 type fileConfig struct {
-	Skills       *skillsources.Config `toml:"skills,omitempty"`
-	Invite       *InviteConfig        `toml:"invite,omitempty"`
-	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
-	Layer        layerConfig          `toml:"layer"`
-	Archive      *archiveConfig       `toml:"archive,omitempty"`
-	Local        *localFileConfig     `toml:"local,omitempty"`
-	ActiveBucket string               `toml:"active_bucket"`
-	Capture      captureConfig        `toml:"capture"`
-	Buckets      []BucketConfig       `toml:"buckets"`
+	Workspaces   map[string]workspace.Workspace `toml:"workspaces,omitempty"`
+	Skills       *skillsources.Config           `toml:"skills,omitempty"`
+	Invite       *InviteConfig                  `toml:"invite,omitempty"`
+	InviteLocal  *layerConfig                   `toml:"invite_local,omitempty"`
+	Layer        layerConfig                    `toml:"layer"`
+	Archive      *archiveConfig                 `toml:"archive,omitempty"`
+	Local        *localFileConfig               `toml:"local,omitempty"`
+	ActiveBucket string                         `toml:"active_bucket"`
+	Capture      captureConfig                  `toml:"capture"`
+	Buckets      []BucketConfig                 `toml:"buckets"`
 	// Update is read by internal/update; kept here so a rewrite of the file
 	// (hev bucket use) carries it over.
 	Update *update.Config `toml:"update,omitempty"`
+	// Preserve license settings on config rewrites. License decoding and
+	// entitlement are independent of daemon capture configuration.
+	License any `toml:"license,omitempty"`
+	// Preserve [hygiene] settings on config rewrites.
+	Hygiene any `toml:"hygiene,omitempty"`
 }
 
 type archiveConfig struct {
@@ -181,20 +189,21 @@ type layerConfig struct {
 }
 
 type captureConfig struct {
-	Instructions       *bool    `toml:"instructions,omitempty"`
-	Redact             *bool    `toml:"redact,omitempty"`
-	RedactSalt         string   `toml:"redact_salt,omitempty"`
-	ScanInterval       string   `toml:"scan_interval"`
-	ScanRoots          []string `toml:"scan_roots"`
-	RawAPIBodies       *bool    `toml:"raw_api_bodies"`
-	ToolContent        *bool    `toml:"tool_content"`
-	Images             *bool    `toml:"images,omitempty"`
-	UnknownProject     string   `toml:"unknown_project"`
-	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
-	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
-	PiSessionsDir      string   `toml:"pi_sessions_dir"`
-	OpenCodeDataDir    string   `toml:"opencode_data_dir"`
-	AgyDataDir         string   `toml:"agy_data_dir"`
+	Targets            []targetConfig `toml:"targets,omitempty"`
+	Instructions       *bool          `toml:"instructions,omitempty"`
+	Redact             *bool          `toml:"redact,omitempty"`
+	RedactSalt         string         `toml:"redact_salt,omitempty"`
+	ScanInterval       string         `toml:"scan_interval"`
+	ScanRoots          []string       `toml:"scan_roots"`
+	RawAPIBodies       *bool          `toml:"raw_api_bodies"`
+	ToolContent        *bool          `toml:"tool_content"`
+	Images             *bool          `toml:"images,omitempty"`
+	UnknownProject     string         `toml:"unknown_project"`
+	ClaudeRawBodiesDir string         `toml:"claude_raw_bodies_dir"`
+	CodexSessionsDir   string         `toml:"codex_sessions_dir"`
+	PiSessionsDir      string         `toml:"pi_sessions_dir"`
+	OpenCodeDataDir    string         `toml:"opencode_data_dir"`
+	AgyDataDir         string         `toml:"agy_data_dir"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -276,7 +285,7 @@ func DefaultConfigText() string {
 	return `# hev kit daemon configuration.
 # Env vars still override these values when present.
 
-# With no Layer API key, traces are kept in files under ~/.hev/archive.
+# With no Layer API key, traces are kept in files under ~/.hev/traces.
 # An endpoint or namespace under [layer] says this machine uses hev layer:
 # kit then refuses to fall back to files when it finds no key. To use hev
 # layer, run "hev up" with HEVLAYER_API_KEY exported, or uncomment:
@@ -334,8 +343,13 @@ func SetActiveBucket(name string) (string, error) {
 		return "", err
 	}
 
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	// Validate bucket definitions using the usual typed config.
 	var fc fileConfig
-	if _, err := toml.DecodeFile(path, &fc); err != nil {
+	if _, err := toml.Decode(string(raw), &fc); err != nil {
 		return "", fmt.Errorf("read config %s: %w", path, err)
 	}
 	found := false
@@ -348,13 +362,18 @@ func SetActiveBucket(name string) (string, error) {
 	if !found {
 		return "", fmt.Errorf("bucket %q not found in %s", name, path)
 	}
-	fc.ActiveBucket = name
-
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(fc); err != nil {
-		return "", fmt.Errorf("encode config: %w", err)
+	// Update the full document so independently loaded settings such as cron,
+	// cluster and notifications survive a bucket change.
+	var doc map[string]any
+	if _, err := toml.Decode(string(raw), &doc); err != nil {
+		return "", fmt.Errorf("read bucket configuration: %w", err)
 	}
-	if err := platformops.WriteFileAtomic(path, buf.Bytes(), 0o600); err != nil {
+	doc["active_bucket"] = name
+	data, err := tomlBytes(doc)
+	if err != nil {
+		return "", err
+	}
+	if err := platformops.WriteFileAtomic(path, data, 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -373,7 +392,7 @@ func applyConfigFile(c *Config) error {
 	var fc fileConfig
 	md, err := toml.DecodeFile(c.ConfigPath, &fc)
 	if err != nil {
-		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
+		return fmt.Errorf("read config %s: invalid TOML or daemon settings", c.ConfigPath)
 	}
 	if md.IsDefined("projects") {
 		fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")
@@ -391,6 +410,7 @@ func applyConfigFile(c *Config) error {
 		c.LayerStore = fc.Layer.Store
 	}
 	c.Invite = fc.Invite
+	c.captureTargets = captureTargets(fc.Capture.Targets, fc.Workspaces, c.Host)
 	if fc.Archive != nil && fc.Archive.Namespace != "" && fc.Layer.Namespace == "" {
 		c.LayerNamespace = fc.Archive.Namespace
 	}
@@ -658,7 +678,11 @@ func valueOrEnv(value, envName, fallback string) string {
 func resolveGHUser() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gh", "config", "get", "-h", "github.com", "user").Output()
+	cmd := exec.CommandContext(ctx, "gh", "config", "get", "-h", "github.com", "user")
+	// Keep this background lookup read-only. gh telemetry can spawn a
+	// detached child that inherits HOME and writes after gh has exited.
+	cmd.Env = append(cmd.Environ(), "GH_TELEMETRY=disabled", "GH_NO_UPDATE_NOTIFIER=1")
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

@@ -5,7 +5,7 @@
 // installs beside the running binary and switches atomically, keeping the
 // build it replaced for rollback.
 //
-// The design and the trust model are in site/src/content/docs/updating.mdx.
+// The design and the trust model are in https://hevkit.com/docs/updating.
 package update
 
 import (

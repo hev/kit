@@ -13,13 +13,17 @@ type InventoryEvidence struct {
 }
 
 func SelectInventoryEvidence(inv map[string]Response, include func(Row) bool) ([]InventoryEvidence, error) {
+	return selectInventoryEvidence(inv, func(_ string, row Row) bool { return include(row) })
+}
+
+func selectInventoryEvidence(inv map[string]Response, include func(string, Row) bool) ([]InventoryEvidence, error) {
 	out := []InventoryEvidence{}
 	for host, r := range inv {
 		if r.Error != "" {
 			return nil, fmt.Errorf("cannot snapshot %s: %s", host, r.Error)
 		}
 		for _, row := range r.Rows {
-			if include(row) {
+			if include(host, row) {
 				out = append(out, InventoryEvidence{host, row})
 			}
 		}

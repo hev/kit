@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -188,7 +189,7 @@ func TestNoKeyCaptureListShowSearch(t *testing.T) {
 		log, _ := os.ReadFile(filepath.Join(home, ".hev", "hev.log"))
 		t.Fatalf("status = %s (%v)\n%s", raw, err, log)
 	}
-	archive := filepath.Join(home, ".hev", "archive", "hev-traces")
+	archive := filepath.Join(home, ".hev", "traces", "hev-traces")
 	if _, err := os.Stat(filepath.Join(archive, "sessions", session[:2], session+".json")); err != nil {
 		t.Fatalf("session not in the file archive: %v", err)
 	}
@@ -312,7 +313,90 @@ func TestWithKeyTracesUseLayerAndWriteNoFiles(t *testing.T) {
 	if len(paths) < 2 {
 		t.Fatalf("Layer was not asked: %v", paths)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".hev", "archive")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".hev", "traces")); !os.IsNotExist(err) {
 		t.Fatalf("archive directory exists in Layer mode: %v", err)
+	}
+}
+
+func TestCaptureTargetsStatusRedactsRemoteErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the hev binary")
+	}
+	const (
+		key          = "extra-capture-private-token"
+		ref          = "env://EXTRA_CAPTURE_KEY"
+		privatePath  = "/private/workstation/storage"
+		endpointPath = "/private-gateway-prefix"
+	)
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+key {
+			t.Error("target did not use its own key")
+		}
+		http.Error(w, fmt.Sprintf("%s %s %s", key, ref, privatePath), http.StatusUnauthorized)
+	}))
+	defer gateway.Close()
+	bin := buildHev(t)
+	home := t.TempDir()
+	env := append(noKeyEnv(home, newTrap(t)), "EXTRA_CAPTURE_KEY="+key)
+	mustMkdir(t, filepath.Join(home, ".hev"))
+	mustWrite(t, filepath.Join(home, ".hev", "config.toml"), []byte(fmt.Sprintf(`
+[archive]
+namespace = "primary-traces"
+
+[[capture.targets]]
+name = "extra"
+endpoint = %q
+namespace = "extra-traces"
+api_key_ref = %q
+`, gateway.URL+endpointPath, ref)))
+	dir := filepath.Join(home, ".claude", "projects", "fixture")
+	mustMkdir(t, dir)
+	mustWrite(t, filepath.Join(dir, "session.jsonl"), []byte(claudeTranscript("session", "/repo", time.Now(), "capture accepted", "ok")))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	capture := exec.CommandContext(ctx, bin, "daemon")
+	capture.Env = env
+	if err := capture.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = capture.Process.Signal(syscall.SIGTERM)
+		_ = capture.Wait()
+	}()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("daemon did not publish primary capture and secondary auth failure")
+		case <-ticker.C:
+		}
+		data, err := os.ReadFile(filepath.Join(home, ".hev", "daemon-status.json"))
+		var status struct {
+			Targets []struct {
+				Units int    `json:"units_indexed"`
+				Error string `json:"last_error"`
+			} `json:"targets"`
+		}
+		if err == nil && json.Unmarshal(data, &status) == nil && len(status.Targets) == 2 &&
+			status.Targets[0].Units == 1 && status.Targets[1].Error != "" {
+			break
+		}
+	}
+	output := runHev(t, bin, env, "status")
+	for _, secret := range []string{key, ref, "EXTRA_CAPTURE_KEY", privatePath, endpointPath} {
+		if strings.Contains(output, secret) {
+			t.Error("status contained a private capture diagnostic")
+		}
+	}
+	for _, want := range []string{
+		"Capture target primary (mirror, filesystem) namespace primary-traces",
+		"Capture target extra (mirror, layer) namespace extra-traces at " + gateway.URL + " (key from environment)",
+		"Units indexed: 1",
+		"Last error: reconcile archive query filters: HTTP 401",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("status omitted %q", want)
+		}
 	}
 }

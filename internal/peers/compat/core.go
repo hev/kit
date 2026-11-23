@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hevpaths"
 	"io"
 	"os"
 	"os/exec"
@@ -60,6 +61,7 @@ const sandboxed = "can't reach tmux or ps: this looks like a sandboxed shell (Co
 
 // P is one invocation: the reference's module globals.
 type P struct {
+	scope                                         Scope
 	observe                                       func(Message)
 	home, stateDir                                string
 	snapshots, outbox, pending, sentLog, relayLog string
@@ -72,7 +74,8 @@ type P struct {
 	self                                          string // the executable remote() and hooks re-run
 	sleep                                         func(time.Duration)
 	exe                                           string
-	tmuxQuoted                                    bool // tmux vis-encodes its output (3.4): use tmuxFields' q form
+	tmuxQuoted                                    bool   // tmux vis-encodes its output (3.4): use tmuxFields' q form
+	untagged                                      string // resolved [peers] untagged_role, read once
 }
 
 func newP(in io.Reader, out, errw io.Writer) *P {
@@ -86,10 +89,7 @@ func newP(in io.Reader, out, errw io.Writer) *P {
 	p.hostLabel = os.Getenv("PEERS_HOST_LABEL")
 	// HEV_PEERS_STATE is the native engine's isolation override; honouring it
 	// keeps compat and native (dispatch notifications) on one inbox tree.
-	p.stateDir = os.Getenv("HEV_PEERS_STATE")
-	if p.stateDir == "" {
-		p.stateDir = filepath.Join(home, ".local/state/peers-v2")
-	}
+	p.stateDir = hevpaths.Dir(hevpaths.Peers)
 	p.snapshots = filepath.Join(p.stateDir, "hosts")
 	p.outbox = filepath.Join(p.stateDir, "outbox")
 	p.pending = filepath.Join(p.stateDir, "pending")
@@ -299,12 +299,14 @@ func (p *P) selfLabel() string {
 func (p *P) peerHosts() []string {
 	me := map[string]bool{p.selfLabel(): true, p.hostname(): true, "localhost": true}
 	hosts, ok := os.LookupEnv("PEERS_HOSTS")
-	if !ok {
+	if len(p.scope.Workspace.Hosts) > 0 {
+		hosts = strings.Join(p.scope.Workspace.Hosts, " ")
+	} else if !ok {
 		hosts = "mini oven"
 	}
 	out := []string{}
 	for _, h := range strings.Fields(hosts) {
-		if !me[strings.ToLower(h)] {
+		if !me[strings.ToLower(h)] && p.scope.Workspace.AllowsHost(h) {
 			out = append(out, h)
 		}
 	}

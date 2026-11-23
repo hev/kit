@@ -3,6 +3,7 @@ package layer
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -81,7 +82,7 @@ func (c *Client) PatchBackfill(ctx context.Context, row trace.SessionRow) error 
 }
 
 func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkage bool) error {
-	unlock, e := lockSessionEnrichment(true)
+	unlock, e := c.lockSessionEnrichment(true)
 	if e != nil {
 		return e
 	}
@@ -335,7 +336,7 @@ func (c *Client) patchOutcomes(ctx context.Context, row trace.SessionRow, linkag
 
 // A distinct local lock also works inside archive migration's outer lock.
 // Sweep uses nonblocking acquisition and retries on the next cycle.
-func lockSessionEnrichment(nonblocking bool) (func(), error) {
+func (c *Client) lockSessionEnrichment(nonblocking bool) (func(), error) {
 	if err := platformops.RequireTraceWrites(); err != nil {
 		return nil, err
 	}
@@ -346,7 +347,8 @@ func lockSessionEnrichment(nonblocking bool) (func(), error) {
 	if e = platformops.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return nil, e
 	}
-	release, e := platformops.LockPath(path+".sessions.lock", nonblocking)
+	scope := sha256.Sum256([]byte(strings.TrimRight(c.Endpoint, "/") + "\x00" + c.Namespace))
+	release, e := platformops.LockPath(fmt.Sprintf("%s.sessions.lock.%x", path, scope), nonblocking)
 	if e != nil {
 		return nil, fmt.Errorf("session enrichment writer busy: %w", e)
 	}

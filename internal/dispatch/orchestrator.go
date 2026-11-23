@@ -8,17 +8,21 @@ import (
 	"fmt"
 	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
+	"github.com/hev/kit/internal/workspace"
 	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
 
 type OrchestratorState struct {
+	WorkspaceName       string              `json:"workspace,omitempty"`
 	Attempts            []HarnessAttempt    `json:"attempts,omitempty"`
 	Stalls              int                 `json:"stalls,omitempty"`
 	StallReason         string              `json:"stall_reason,omitempty"`
@@ -75,15 +79,21 @@ func GatherOrchestratorEvidence(ctx context.Context, s OrchestratorSpec) ([]Orch
 	if e != nil {
 		return nil, e
 	}
-	inv := Inventory(cfg, "")
+	cfg, required, e := orchestratorSnapshotHosts(s, cfg)
+	if e != nil {
+		return nil, e
+	}
+	ctx = WorkspaceContext(ctx, cfg.SelectedWorkspace)
 	out := []OrchestratorEvidence{}
-	rows, e := SelectInventoryEvidence(inv, func(row Row) bool { return row.Kind != "orch" && s.Includes(row.Order) })
+	rows, e := orchestratorSnapshotRows(s, Inventory(cfg, ""), required)
 	if e != nil {
 		return nil, e
 	}
 	for _, r := range rows {
 		host, row := r.Host, r.Row
-		detail, e := RPC(ctx, cfg.Hosts[host], Request{Action: "show", Name: row.Name})
+		detailCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		detail, e := RPC(detailCtx, cfg.Hosts[host], Request{Action: "show", Name: row.Name})
+		cancel()
 		if e != nil {
 			return nil, e
 		}
@@ -122,7 +132,11 @@ func DefaultOrchestratorDriver() OrchestratorDriver {
 	return OrchestratorDriver{Gather: GatherOrchestratorEvidence, Session: orchestratorSession, Now: time.Now, Tick: swarmSupervisorTick}
 }
 func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p OrchestratorPacket) error {
-	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Only for an open decision the owner must make, start reply.md with [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice, and repeating the same question is not raised again. Do not write code or merge. Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
+	mergeRule := "Do not write code or merge."
+	if slices.Contains(s.Authority, "merge") {
+		mergeRule = "Do not write code. When merge authority is granted, you may merge an open PR with gh pr merge --merge --match-head-commit <reviewed sha> only after your review of that exact head is clean and all checks are green."
+	}
+	prompt := "Read packet.json. Read-only inspection of exact PR heads with gh pr view/diff/checks and reading run reports/worktrees is always allowed. Use authorized hev dispatch verbs for interventions. Independent verification uses hev dispatch validate NAME --host HOST; inspect validation.json/verdict.json next round and require the current head. If unavailable, report [needs you] with the reason once. Only for an open decision the owner must make, start reply.md with [needs you] needs-decision KEY: QUESTION (KEY a short word); only that raises a needs-you notice, and repeating the same question is not raised again. " + mergeRule + " Record named waits under ## Named waits and release conditions, with one stable wait name and release condition per line. Write checkpoint.md here before exiting: goal status, open threads by run name, named waits and release conditions, next action, and reply notes. When the owner should know about a decision needed, blocker, ready-to-merge result (include head SHA and evidence), goal met, or rework sent, also write a short reply.md here. Nothing to say means no reply.md. Keep reply notes in checkpoint.md as the record; code delivers reply.md after acceptance when notify authority is granted. Do not send it yourself. If the goal is complete, write goal-met.json containing {\"met\":true}."
 	// A login shell may reset PATH to an older installed release. Round verbs
 	// must use the supervisor's executable, preserving its admission protocol.
 	if exe, err := os.Executable(); err == nil {
@@ -139,7 +153,7 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	args, hookEnv := wireHooks(s.Harness, filepath.Join(OrchestratorDir(s.Name), "steer"), "orch:"+s.Name, args, nil)
 	baseEnv := append(childEnvironment(s.Name), descriptor.Dispatch.Env...)
 	baseEnv = append(baseEnv, hookEnv...)
-	env, args, err := roundHarnessLaunch(ctx, s, args, baseEnv)
+	env, args, secretValues, err := roundHarnessLaunch(ctx, s, args, baseEnv)
 	if err != nil {
 		return err
 	}
@@ -153,8 +167,8 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 		return e
 	}
 	defer f.Close()
-	c.Stdout = f
-	c.Stderr = f
+	// Output reaches the trace with resolved env_refs values redacted.
+	wait := harnessOutput(c, f, secretValues)
 	cleanup, e := startChild(c)
 	if e != nil {
 		return e
@@ -162,22 +176,22 @@ func orchestratorSession(ctx context.Context, s OrchestratorSpec, dir string, p 
 	defer cleanup()
 	if e = recordHarness(OrchestratorDir(s.Name), c); e != nil {
 		killTree(c)
-		_ = c.Wait()
+		_ = wait()
 		return e
 	}
 	defer os.Remove(filepath.Join(OrchestratorDir(s.Name), "harness.json"))
 	if exists(filepath.Join(OrchestratorDir(s.Name), "stop")) {
 		killTree(c)
 	}
-	return superviseOrchestratorRound(OrchestratorDir(s.Name), c.Wait, func() { killTree(c) })
+	return superviseOrchestratorRound(OrchestratorDir(s.Name), wait, func() { killTree(c) })
 }
 
 // roundHarnessLaunch applies the host's [harnesses.HARNESS] settings to one
 // round: resolved env_refs join env and agy gets its model provider.
-func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []string) ([]string, []string, error) {
+func roundHarnessLaunch(ctx context.Context, s OrchestratorSpec, args, env []string) ([]string, []string, []string, error) {
 	rctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	return harnessLaunch(rctx, "", s.Harness, secrets.DefaultCaller("hev orchestrate "+s.Name), env, args)
+	return workspaceHarnessLaunch(s.WorkspaceName, rctx, "", s.Harness, secrets.DefaultCaller("hev orchestrate "+s.Name), env, args)
 }
 
 // orchestratorArgs is one fresh round's harness argv, prompt last.
@@ -224,6 +238,9 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 			out = append(out, danglingOrchestrator(n, e))
 			continue
 		}
+		if spec, err := LoadOrchestrator(n); err == nil {
+			s.WorkspaceName = spec.WorkspaceName
+		}
 		if s.Signals, e = OrchestratorSignals(n); e != nil {
 			out = append(out, danglingOrchestrator(n, e))
 			continue
@@ -256,6 +273,23 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	s, e := ParseOrchestrator(text)
 	if e != nil {
 		return s, e
+	}
+	if s.WorkspaceName != "" {
+		w, err := workspace.Named(s.WorkspaceName)
+		if err != nil {
+			return s, err
+		}
+		if err = w.RequireHost(hostlabel.Self(os.Hostname)); err != nil {
+			return s, err
+		}
+		if s.Host != "" {
+			if err = w.RequireHost(s.Host); err != nil {
+				return s, err
+			}
+		}
+		if previous, err := LoadOrchestrator(s.Name); err == nil && workspaceOfRun(previous.WorkspaceName) != s.WorkspaceName {
+			return s, fmt.Errorf("workspace boundary: orchestrator belongs to workspace %q", workspaceOfRun(previous.WorkspaceName))
+		}
 	}
 	if s.Fallbacks == nil {
 		cfg, err := loadTarget("", "")
@@ -959,7 +993,7 @@ func addOrchestratorRows(r *Response) error {
 		if exists(filepath.Join(OrchestratorDir(st.Name), "order.md")) {
 			until = "all followed runs merged or abandoned"
 		}
-		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name))})
+		r.Rows = append(r.Rows, Row{Kind: "orch", Meta: Meta{WorkspaceName: spec.WorkspaceName, Order: Order{Name: "o-" + st.Name, Host: st.Host, Reply: spec.Reply, Until: until}, Start: st.Start}, State: st.State, Schedule: Schedule{Rounds: st.Rounds, Next: st.Next, Reason: st.StallReason}, Error: st.Error, Steer: steerCounts(OrchestratorDir(st.Name)), Attention: attentionStatus(OrchestratorDir(st.Name))})
 	}
 	return nil
 }

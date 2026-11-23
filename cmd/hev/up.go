@@ -22,8 +22,10 @@ import (
 )
 
 var (
-	upNoDashboard bool
-	upStore       string
+	upNoDashboard    bool
+	upStore          string
+	upNonInteractive bool
+	upNoPicker       bool
 )
 
 var upCmd = &cobra.Command{
@@ -38,7 +40,7 @@ With no hev layer key (Starter Kit), up writes the config and installs the
 capture daemon and the dashboard (` + "`hev serve`" + `) under launchd (macOS) or
 systemd (Linux), plus the bundled agent skills for Claude Code and Codex.
 Nothing runs in Docker. Traces are kept in files on this machine
-(~/.hev/archive, or [archive] dir / HEV_ARCHIVE_DIR), after the same
+(~/.hev/traces, or [archive] dir / HEV_ARCHIVE_DIR), after the same
 redaction hev layer gets. Search there is grep: it matches the words you type,
 not their meaning. The dashboard listens on 127.0.0.1:[local] serve_port
 (8099 by default).
@@ -59,9 +61,20 @@ to files: up exports its rows when its containers start, otherwise it
 re-indexes the transcripts still on disk and says how many sessions could not
 be recovered. The containers and the Docker volume are left alone.
 
-Bring-your-own Turbopuffer is hosted-only now: there is no local gateway lane.`,
+Bring-your-own Turbopuffer is hosted-only now: there is no local gateway lane.
+
+Data lives under ~/.hev/<surface>/ (traces, board, orders, peers, hooks,
+evidence). A machine that already has ~/.hev/archive, ~/dispatch or
+~/.local/state/peers-v2 keeps using them; see https://hevkit.com/docs/trace-archive. With no
+dispatch config, up writes one naming this machine as the local host "here".
+
+On a terminal, the first ` + "`hev up`" + ` on an unconfigured machine runs ` + "`hev onboard`" + `
+first. Without a terminal, or with --non-interactive, up never asks anything.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		if !upNonInteractive && interactive(cmd.InOrStdin(), cmd.OutOrStdout()) && unconfigured() {
+			return runOnboard(cmd.Context(), onboardOptions{In: cmd.InOrStdin(), Out: cmd.OutOrStdout(), NoPicker: upNoPicker, NoDashboard: upNoDashboard})
+		}
 		return runUp(cmd.Context(), cmd.OutOrStdout(), upNoDashboard)
 	},
 }
@@ -87,6 +100,8 @@ func init() {
 		c.SilenceUsage, c.SilenceErrors = true, true
 	}
 	upCmd.Flags().BoolVar(&upNoDashboard, "no-dashboard", false, "Skip the local dashboard service or hosted dashboard instructions")
+	upCmd.Flags().BoolVar(&upNonInteractive, "non-interactive", false, "Never prompt, even on a terminal (CI and scripts; up never prompts without a terminal)")
+	upCmd.Flags().BoolVar(&upNoPicker, "no-picker", false, "When up runs first-run onboarding, do not launch the Picker afterwards")
 	upCmd.Flags().StringVar(&upStore, "store", "", "hosted (hev layer, needs HEVLAYER_API_KEY) or files (no key; the default without one)")
 	rootCmd.AddCommand(upCmd)
 	rootCmd.AddCommand(downCmd)
@@ -216,6 +231,9 @@ func runUp(ctx context.Context, out io.Writer, noDashboard bool) error {
 	if err != nil {
 		return err
 	}
+	if err := bootstrapDispatch(out, upWorkspace); err != nil {
+		return err
+	}
 	if store == "hosted" {
 		cfg, err := daemon.LoadConfig()
 		if err != nil {
@@ -281,6 +299,9 @@ func runFilesUp(ctx context.Context, out io.Writer, home string, noDashboard boo
 		return fmt.Errorf("a Layer API key is configured: run `hev up` to capture into hev layer")
 	}
 	tick(out, "no hev layer key: traces are kept in files under %s, searched with %s", target.Files.Dir(), grepEngine())
+	if err := ensureSurfaces(out); err != nil {
+		return err
+	}
 	configPath, err := filepath.Abs(w.Path)
 	if err != nil {
 		return err

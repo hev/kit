@@ -931,17 +931,6 @@ func TestSeedCheckpoint(t *testing.T) {
 	}
 }
 
-// F13: the docs state the trust boundary of a remote orchestrator-apply.
-func TestOrchestratorApplyRPCBoundaryDocumented(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "orchestrators.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "`orchestrator-apply`") || !strings.Contains(string(b), "any caller that can run `hev dispatch rpc`") {
-		t.Fatal("orchestrator-apply trust boundary is undocumented")
-	}
-}
-
 func TestNoticeMissingRouteFallsBackToPull(t *testing.T) {
 	orchHome(t)
 	s := applyOrch(t)

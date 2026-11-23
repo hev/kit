@@ -207,7 +207,7 @@ sessions search the board, how many dispatches fail at launch), run
 `hev traces stats [--since 5d] [--by kind|harness|host|repo|order]
 [--installed] [--json]` instead of dumping sessions one by one. It groups by
 derived run kind (worker, orchestrator-round, loop, interactive) by default;
-`--json` is a stable report documented in `docs/traces-stats.md`, and
+`--json` is a stable report documented in `https://hevkit.com/docs/traces-stats`, and
 `hev traces show <id> --json` now includes tool results, each call's
 `is_error`, `exit_code` and `result_bytes`, and per-turn usage.
 

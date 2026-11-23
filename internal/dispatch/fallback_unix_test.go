@@ -32,6 +32,9 @@ func TestWorkerCandidates(t *testing.T) {
 				if err := os.Chmod(filepath.Join(bin, "claude"), 0600); err != nil {
 					t.Fatal(err)
 				}
+				// PATH holds the fakes and system tools only, so lookup cannot fall through
+				// to a real claude installed on the host.
+				t.Setenv("PATH", strings.Join([]string{bin, "/usr/bin", "/bin"}, string(os.PathListSeparator)))
 			case "clean":
 				primary = "exit 0"
 			case "stop":
@@ -70,8 +73,11 @@ func TestWorkerCandidates(t *testing.T) {
 			r := readResult(t, dir)
 			log, _ := os.ReadFile(filepath.Join(dir, "log"))
 			cwd, _ := os.ReadFile(filepath.Join(dir, "fallback-cwd"))
+			// pwd reports the resolved path (macOS temp dirs sit behind /var).
+			wantCwd, _ := filepath.EvalSymlinks(filepath.Join(dir, "wt"))
+			gotCwd, _ := filepath.EvalSymlinks(strings.TrimSpace(string(cwd)))
 			want := mode == "launch" || mode == "exit"
-			if (len(r.Attempts) == 2) != want || strings.Contains(string(log), "dispatch.fallback") != want || (strings.TrimSpace(string(cwd)) == filepath.Join(dir, "wt")) != want {
+			if (len(r.Attempts) == 2) != want || strings.Contains(string(log), "dispatch.fallback") != want || (gotCwd != "" && gotCwd == wantCwd) != want {
 				t.Fatalf("attempts %+v cwd %q log %s", r.Attempts, cwd, log)
 			}
 			if want && exists(filepath.Join(dir, "steer", wiredFile)) {

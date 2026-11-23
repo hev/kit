@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hevkit.com/schemas/evidence_event.schema.json",
+  "title": "hev.evidence.event/v1",
+  "description": "The kit observe-only evidence-* hook event (RFC 0022). It carries package and item metadata and claims that were redacted before they reached the disk; never item bytes or text.",
+  "type": "object",
+  "required": ["schema", "id", "time", "event", "host", "cwd", "harness", "package", "items", "added_item_ids", "added_claim_ids"],
+  "properties": {
+    "schema": {"const": "hev.evidence.event/v1"},
+    "id": {"type": "string", "minLength": 1},
+    "time": {"type": "string", "format": "date-time"},
+    "event": {"enum": ["evidence-created", "evidence-updated", "evidence-sealed"]},
+    "host": {"type": "string"},
+    "cwd": {"type": "string"},
+    "harness": {"const": "kit"},
+    "package": {"type": "object", "description": "EvidencePackageSummary (openapi/evidence-v1.yaml): metadata, item counts and redacted claims."},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "seq", "modality", "name", "mime", "sha256", "size"],
+        "properties": {
+          "id": {"type": "string"},
+          "seq": {"type": "integer", "minimum": 1},
+          "modality": {"enum": ["text", "image", "video"]},
+          "name": {"type": "string"},
+          "mime": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size": {"type": "integer", "minimum": 0},
+          "width": {"type": "integer"},
+          "height": {"type": "integer"},
+          "duration_ms": {"type": "integer"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "added_item_ids": {"type": "array", "items": {"type": "string"}},
+    "added_claim_ids": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

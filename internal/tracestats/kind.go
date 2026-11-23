@@ -24,8 +24,9 @@ const (
 var Kinds = []string{KindWorker, KindOrchestrator, KindLoop, KindInteractive}
 
 // dispatchDir matches a working directory inside a dispatch root
-// (~/dispatch/NAME/...), on any host's home layout.
-var dispatchDir = regexp.MustCompile(`^(?:/home/[^/]+|/Users/[^/]+|/root|[A-Za-z]:\\Users\\[^\\]+)[/\\]dispatch[/\\]([^/\\]+)(?:[/\\]|$)`)
+// (~/.hev/orders/NAME/... or the legacy ~/dispatch/NAME/...), on any host's
+// home layout.
+var dispatchDir = regexp.MustCompile(`^(?:/home/[^/]+|/Users/[^/]+|/root|[A-Za-z]:\\Users\\[^\\]+)[/\\](?:dispatch|\.hev[/\\]orders)[/\\]([^/\\]+)(?:[/\\]|$)`)
 
 // loopTools are tools that schedule the session's own next run.
 var loopTools = map[string]bool{"ScheduleWakeup": true, "CronCreate": true}
@@ -34,7 +35,7 @@ var loopTools = map[string]bool{"ScheduleWakeup": true, "CronCreate": true}
 // same prompt in the window for them to count as a loop.
 const LoopRepeats = 3
 
-// RunKind derives a session's run kind (see docs/traces-stats.md):
+// RunKind derives a session's run kind (see https://hevkit.com/docs/traces-stats):
 //
 //  1. orchestrator-round: the dispatch order is an orchestrator's (orch-*),
 //     or the working directory is under a dispatch root's orch-* directory.

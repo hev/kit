@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/reviewnotes"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/steer"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
+	"github.com/hev/kit/internal/workspace"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,7 +29,8 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
-	ScopeOwner      *Host `json:"scope_owner,omitempty"`
+	WorkspaceName   string `json:"workspace_name,omitempty"`
+	ScopeOwner      *Host  `json:"scope_owner,omitempty"`
 	excludeFinished string
 	Dequeue         bool `json:"dequeue,omitempty"`
 	AdmissionOnly   bool `json:"admission_only,omitempty"`
@@ -113,7 +116,7 @@ type Row struct {
 	// Steer counts the run's steering receipts by state.
 	Steer *steer.Counts `json:"steer,omitempty"`
 	// Attention reports a Slack notice still retrying or failed here
-	// (docs/notify.md); empty when every post went through.
+	// (https://hevkit.com/docs/notify); empty when every post went through.
 	Attention string `json:"attention,omitempty"`
 }
 type Response struct {
@@ -195,6 +198,13 @@ func orchestratorRPCAction(action string) bool {
 
 func Quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
 func RPC(ctx context.Context, h Host, q Request) (Response, error) {
+	if q.WorkspaceName == "" && ctx != nil {
+		q.WorkspaceName, _ = ctx.Value(workspaceContextKey{}).(string)
+	}
+	if q.Action == "start" && q.Meta.WorkspaceName == "" {
+		q.Meta.WorkspaceName = q.WorkspaceName
+	}
+
 	requestOrchestratorIdentity(&q)
 	if q.Orchestrator != "" && !q.AdmissionOnly && !workerInternal(q.Action) {
 		// Pin a live say to inbox-only delivery so a liveness race cannot turn
@@ -238,7 +248,18 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	if e != nil {
 		return r, e
 	}
-	remote := RemoteCommand(h, "hev dispatch rpc")
+	verb := "hev dispatch rpc"
+	name := q.WorkspaceName
+	if name == "" {
+		name = q.Meta.WorkspaceName
+	}
+	if name != "" && name != workspace.Default {
+		if !workspace.ValidName(name) {
+			return r, fmt.Errorf("invalid workspace name")
+		}
+		verb = "hev --workspace=" + name + " dispatch rpc"
+	}
+	remote := RemoteCommand(h, verb)
 	c := helperCommand(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
 	var errout strings.Builder
 	c.Stderr = &errout
@@ -292,7 +313,7 @@ func Inventory(c Config, host string) map[string]Response {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer cancel()
-			r, e := RPC(ctx, h, Request{Action: "list"})
+			r, e := RPC(ctx, h, Request{Action: "list", WorkspaceName: c.SelectedWorkspace.Name})
 			if e != nil {
 				r.Error = e.Error()
 			}
@@ -331,6 +352,22 @@ func Handle(q Request) (r Response, handleErr error) {
 				releaseRejectedClassSlot(slot, handleErr)
 			}
 		}()
+	}
+	name := q.WorkspaceName
+	if q.Action == "start" && q.Meta.WorkspaceName != "" {
+		name = q.Meta.WorkspaceName
+	}
+	if q.WorkspaceName != "" && q.Meta.WorkspaceName != "" && q.WorkspaceName != q.Meta.WorkspaceName {
+		return r, fmt.Errorf("workspace boundary: request and run workspace disagree")
+	}
+	if name != "" {
+		selected, err := workspace.Named(name)
+		if err != nil {
+			return r, err
+		}
+		if err = selected.RequireHost(hostlabel.Self(os.Hostname)); err != nil {
+			return r, err
+		}
 	}
 	if workerInternal(q.Action) {
 		q.Orchestrator = ""
@@ -411,14 +448,20 @@ func Handle(q Request) (r Response, handleErr error) {
 		if e != nil {
 			return r, e
 		}
-		if e = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(q.Note), 0600); e != nil {
-			return r, e
+		if q.Note != "" {
+			if e = os.WriteFile(filepath.Join(OrchestratorDir(s.Name), "order.md"), []byte(q.Note), 0600); e != nil {
+				return r, e
+			}
 		}
 		return r, LaunchOrchestrator(s.Name)
 	}
 	if strings.HasPrefix(q.Name, "o-") && orchestratorRPCAction(q.Action) {
 		name := strings.TrimPrefix(q.Name, "o-")
-		if _, e := LoadOrchestrator(name); e != nil {
+		spec, e := LoadOrchestrator(name)
+		if e != nil {
+			return r, e
+		}
+		if e = checkRunWorkspace(q.WorkspaceName, Meta{WorkspaceName: spec.WorkspaceName}); e != nil {
 			return r, e
 		}
 		switch q.Action {
@@ -486,6 +529,15 @@ func Handle(q Request) (r Response, handleErr error) {
 	if q.Action == "sweep" {
 		return r, SweepQueue()
 	}
+	if q.Action == "workspace-gc" {
+		count, err := gcWorkspaceSlots(time.Now())
+		r.Message = fmt.Sprintf("removed %d idle workspace slots", count)
+		return r, err
+	}
+	if q.Action == "compact-all" {
+		r.Message, e = compactDispatch("", true)
+		return r, e
+	}
 	if q.Action == "list" {
 		policy, err := targetPolicy()
 		if err != nil {
@@ -506,7 +558,7 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, e
 		}
 		for _, d := range dirs {
-			if d.IsDir() && ValidName(d.Name()) {
+			if q.WorkspaceName == "" && d.IsDir() && ValidName(d.Name()) {
 				r.Names = append(r.Names, d.Name())
 			}
 			var m Meta
@@ -519,7 +571,10 @@ func Handle(q Request) (r Response, handleErr error) {
 				reconcileLaunch(filepath.Join(Root(), d.Name()), &result)
 				rp = &result
 			}
-			if m.Imported {
+			if q.WorkspaceName != "" && checkRunWorkspace(q.WorkspaceName, m) == nil && ValidName(d.Name()) {
+				r.Names = append(r.Names, d.Name())
+			}
+			if m.Imported || checkRunWorkspace(q.WorkspaceName, m) != nil {
 				continue
 			}
 			if m.Forward != nil {
@@ -559,11 +614,23 @@ func Handle(q Request) (r Response, handleErr error) {
 			return r, err
 		}
 		for i, entry := range entries {
+			if checkRunWorkspace(q.WorkspaceName, entry.Request.Meta) != nil {
+				continue
+			}
 			r.Names = append(r.Names, entry.Request.Name)
 			r.Rows = append(r.Rows, Row{Kind: "run", Meta: entry.Request.Meta, State: "queued", Position: i + 1, Error: entry.Waiting})
 		}
 		if e := addOrchestratorRows(&r); e != nil {
 			return r, e
+		}
+		if q.WorkspaceName != "" {
+			rows := r.Rows[:0]
+			for _, row := range r.Rows {
+				if checkRunWorkspace(q.WorkspaceName, row.Meta) == nil {
+					rows = append(rows, row)
+				}
+			}
+			r.Rows = rows
 		}
 		return r, nil
 	}
@@ -572,6 +639,24 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	dir := filepath.Join(Root(), q.Name)
 	var m Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &m) == nil {
+		if err := checkRunWorkspace(q.WorkspaceName, m); err != nil {
+			return r, err
+		}
+		switch q.Action {
+		case "rework", "retry", "amend", "say":
+			if m.WorkspaceName != "" {
+				w, err := workspace.Named(m.WorkspaceName)
+				if err != nil {
+					return r, err
+				}
+				if err = w.RequireHost(hostlabel.Self(os.Hostname)); err != nil {
+					return r, err
+				}
+				q.WorkspaceName = w.Name
+			}
+		}
+	}
 	if q.Action == "attach-route" {
 		if err := readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
 			return r, err
@@ -789,6 +874,16 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, e
 			}
 			m = q.Meta
+			if m.WorkspaceName != "" {
+				selected, err := workspace.Named(m.WorkspaceName)
+				if err != nil {
+					return r, err
+				}
+				if err = selected.RequireHost(hostlabel.Self(os.Hostname)); err != nil {
+					return r, err
+				}
+			}
+			m.Compacted, m.HeadSHA, m.WorkspaceBase, m.WorkspaceCap = false, "", "", 0
 			if m.Sender == "" {
 				m.Sender = LocalSender()
 			}
@@ -881,12 +976,28 @@ func Handle(q Request) (r Response, handleErr error) {
 			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
 				return r, fmt.Errorf("target config: %w", err)
 			}
-			resolveLaunch(&m, cfg)
-			workspace := q.Workspace
-			if workspace == "" {
-				workspace = cfg.Workspace
+			pro, err := workspacePro(policy.WorkspacePolicy)
+			if err != nil {
+				return r, err
 			}
-			repo := resolveRepo(m.Repo, workspace)
+			if pro {
+				m.WorkspaceCap = policy.Cap
+			}
+			resolveLaunch(&m, cfg)
+			repoRoot := q.Workspace
+			if repoRoot == "" {
+				repoRoot = cfg.Workspace
+			}
+			if m.WorkspaceName != "" {
+				selected, err := workspace.Named(m.WorkspaceName)
+				if err != nil {
+					return r, err
+				}
+				if m.WorkspaceName != workspace.Default {
+					repoRoot = selected.Dir
+				}
+			}
+			repo := resolveRepo(m.Repo, repoRoot)
 			m.ResolvedRepo = repo
 			if e = admitTargetRepo(repo, m.Repo, m.Host); e != nil {
 				return r, e
@@ -904,7 +1015,17 @@ func Handle(q Request) (r Response, handleErr error) {
 				gitArgs = []string{"-C", repo, "worktree", "add", "--detach", filepath.Join(dir, "wt"), m.Revision}
 				_ = os.MkdirAll(filepath.Join(dir, "evidence"), 0700)
 			}
-			if _, e = command("", append([]string{"git"}, gitArgs...)...); e != nil {
+			if pro {
+				base := "refs/remotes/origin/" + m.Base
+				if m.Parent != "" {
+					base = m.Revision
+				}
+				if m.WorkspaceBase, e = command(repo, "git", "rev-parse", "--verify", "--end-of-options", base+"^{commit}"); e != nil {
+					return r, fmt.Errorf("cannot resolve workspace base")
+				}
+				gitArgs[len(gitArgs)-1] = m.WorkspaceBase
+			}
+			if e = addDispatchWorkspace(gitArgs, m.WorkspaceBase, pro && policy.WorkspacePolicy.Driver != "git"); e != nil {
 				return r, e
 			}
 			m.WorktreeCreated = true
@@ -916,15 +1037,31 @@ func Handle(q Request) (r Response, handleErr error) {
 			if e = admitClass(policy.Classes, m.Class, q.Name, live); e != nil {
 				return r, e
 			}
+			cfg, err := loadTarget(m.ConfigPath, m.Host)
+			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
+				return r, err
+			}
+			pro, err := workspacePro(policy.WorkspacePolicy)
+			if err != nil {
+				return r, err
+			}
+			if m.Compacted {
+				if e = admitTargetRepo(m.ResolvedRepo, m.Repo, m.Host); e != nil {
+					return r, e
+				}
+				if e = restoreWorkspace(dir, &m); e != nil {
+					return r, e
+				}
+			}
 			if _, e = os.Stat(filepath.Join(dir, "wt")); e != nil {
 				return r, fmt.Errorf("worktree was cleaned")
 			}
 			if e = admitTargetRepo(filepath.Join(dir, "wt"), m.Repo, m.Host); e != nil {
 				return r, e
 			}
-			cfg, err := loadTarget(m.ConfigPath, m.Host)
-			if err != nil && (!os.IsNotExist(err) || m.ConfigPath != "") {
-				return r, err
+			m.WorkspaceCap = 0
+			if pro {
+				m.WorkspaceCap = policy.Cap
 			}
 
 			if q.FromValidation {
@@ -1116,6 +1253,8 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 	case "review-fetch":
 		r.Review, e = reviewFetch(dir, m, q)
+	case "compact":
+		r.Message, e = compactDispatch(q.Name, false)
 	case "close":
 		var closed Response
 		closed, e = closeRun(dir, q)
@@ -1173,6 +1312,24 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		r.Message = "stopping " + q.Name
 	case "clean":
+		unlock, err := lockRoot()
+		if err != nil {
+			return r, err
+		}
+		defer unlock()
+		live, err = liveNames()
+		if err == nil {
+			err = addReservations(live)
+		}
+		if err != nil {
+			return r, err
+		}
+		if err := readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
+			return r, fmt.Errorf("order not found: %s", q.Name)
+		}
+		if m.Forward != nil {
+			return r, fmt.Errorf("run moved to another host")
+		}
 		if live[q.Name] {
 			return r, fmt.Errorf("stop running order before clean")
 		}

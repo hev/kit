@@ -18,6 +18,8 @@ const (
 	Agy      = "agy"
 	Dot      = "dot"
 	Grok     = "grok"
+	// FOH is hev foh, kit's optional native front-of-house harness (RFC 0029).
+	FOH = "hev"
 )
 
 type Descriptor struct {
@@ -155,6 +157,11 @@ var registry = []Descriptor{
 			UserInstructions: ".codex/AGENTS.md", ProjectInstructions: []string{"AGENTS.md"},
 			InstallTarget: ".codex", InstallMarker: ".codex", CoveredBy: "agents"}},
 	{Name: Dot, Binary: Dot, TraceName: Dot, Trace: &Trace{Path: ".dot/traces", RequireHome: true, PreviewTail: true}},
+	// hev kit (alias: hev foh) writes its own JSONL sessions and is matched as a
+	// peer only when invoked as `hev kit` or `hev foh` (never for ordinary hev subcommands).
+	{Name: FOH, Binary: FOH, TraceName: "hev_foh", Aliases: []string{"hev_foh", "foh", "kit"},
+		Peers: &Peers{Paste: true, MatchProcess: matchHevKit, Headless: hevKitHeadless},
+		Trace: &Trace{Path: ".hev/foh/sessions", Override: "HEV_FOH_SESSIONS_DIR", RequireHome: true}},
 	{Name: Pi, Binary: Pi, TraceName: Pi,
 		Peers: &Peers{InboxOnly: true, MatchProcess: matchPi},
 		Trace: &Trace{Path: ".pi/agent/sessions", Override: "HEV_PI_SESSIONS_DIR"},
@@ -172,6 +179,21 @@ var registry = []Descriptor{
 			Args:          []string{"--dangerously-skip-permissions", "--output-format", "stream-json"},
 			EffortArgs:    func(effort string) []string { return []string{"--effort", effort} },
 			ProjectSkills: ".agents/skills", SessionEnv: []string{"ANTIGRAVITY_CONVERSATION_ID"}},
+		Peers: &Peers{Paste: true, MatchProcess: func(_ []string, exe, _, _ string) bool {
+			return exe == Agy
+		}, Headless: func(words []string) bool {
+			for i := 1; i < len(words); i++ {
+				word := words[i]
+				if word == "--" {
+					break
+				}
+				flag, _, _ := strings.Cut(word, "=")
+				if flag == "-p" || flag == "--print" || flag == "--prompt" {
+					return true
+				}
+			}
+			return false
+		}},
 		Trace:  &Trace{Path: ".gemini/antigravity-cli", Override: "HEV_AGY_DATA_DIR", PreviewTail: true},
 		Skills: &Skills{UserInstructions: ".gemini/GEMINI.md", ProjectInstructions: []string{"GEMINI.md", "AGENTS.md"}}},
 	{Name: Grok, Binary: Grok, TraceName: Grok,
@@ -278,7 +300,24 @@ func SkillTargets() []SkillTarget {
 	return targets
 }
 
-func CompatDetectionOrder() []string { return []string{Pi, Claude, Codex, Grok} }
+func CompatDetectionOrder() []string { return []string{FOH, Agy, Pi, Claude, Codex, Grok} }
+
+func matchHevKit(words []string, exe, _, _ string) bool {
+	return exe == FOH && len(words) >= 2 && (words[1] == "kit" || words[1] == "foh")
+}
+
+func hevKitHeadless(words []string) bool {
+	for i := 2; i < len(words); i++ {
+		if words[i] == "--" {
+			break
+		}
+		flag, _, _ := strings.Cut(words[i], "=")
+		if flag == "--once" || flag == "--show-mascot" {
+			return true
+		}
+	}
+	return false
+}
 
 func matchClaude(_ []string, exe, entry, base string) bool {
 	return exe == Claude || strings.Contains(entry, "/@anthropic-ai/claude-code/") || base == Claude

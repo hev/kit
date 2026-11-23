@@ -11,6 +11,7 @@ func TestLookup(t *testing.T) {
 	want := map[string]string{
 		"claude": Claude, "claude_code": Claude, "codex": Codex, "codex_cli": Codex,
 		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot, "grok": Grok,
+		"hev": FOH, "hev_foh": FOH, "foh": FOH, "kit": FOH,
 	}
 	for _, d := range All() {
 		for _, name := range append([]string{d.Name}, d.Aliases...) {
@@ -42,6 +43,7 @@ func TestCapabilities(t *testing.T) {
 	t.Setenv("HEV_PI_SESSIONS_DIR", "")
 	t.Setenv("HEV_OPENCODE_DATA_DIR", "")
 	t.Setenv("HEV_AGY_DATA_DIR", "")
+	t.Setenv("HEV_FOH_SESSIONS_DIR", "")
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -61,11 +63,12 @@ func TestCapabilities(t *testing.T) {
 			[]string{".pi/agent/skills", ".agents/skills"}, []string{".pi/skills", ".agents/skills"}, nil, false, true},
 		{"opencode", ".local/share/opencode", "HEV_OPENCODE_DATA_DIR", "", "", nil, nil, nil, false, false},
 		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", ".agents/skills", nil, nil,
-			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, false, false},
+			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, true, false},
 		{"grok", ".grok/sessions", "GROK_HOME", ".grok/hooks/hev-kit.json", ".grok/skills",
 			[]string{".grok/skills", ".agents/skills", ".claude/skills"}, []string{".grok/skills", ".claude/skills"},
 			[]string{"--output-format", "streaming-json", "--no-auto-update", "--model", "sample", "--reasoning-effort", "high", "--single=prompt"}, false, false},
 		{"dot", ".dot/traces", "", "", "", nil, nil, nil, false, false},
+		{"hev", ".hev/foh/sessions", "HEV_FOH_SESSIONS_DIR", "", "", nil, nil, nil, true, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			d, ok := Lookup(tt.name)

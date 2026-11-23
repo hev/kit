@@ -1,4 +1,4 @@
-// Package attention is kit's one "needs you" notice (docs/notify.md): a typed
+// Package attention is kit's one "needs you" notice (https://hevkit.com/docs/notify): a typed
 // record of a run, orchestrator, swarm or steer moment. needs-you
 // is only an open decision or a halt escalated to a hard stop, keyed by its
 // subject; the opt-in ready and done kinds carry everything else. A
@@ -48,6 +48,8 @@ const (
 	SourceFollow       = "follow"
 	SourceSwarm        = "swarm"
 	SourceSteer        = "steer"
+	SourceCron         = "cron"
+	SourceService      = "service"
 )
 
 // SourceLegacyExpedite is what edge builds before the orchestrator rename
@@ -128,6 +130,10 @@ func NewID(source, host, name, kind, key string) string {
 // follow-through or swarm flavour, by host and name.
 func threadKey(source, host, name string) string {
 	switch source {
+	case SourceCron:
+		return "cron:" + host + "/" + name
+	case SourceService:
+		return "service:" + host + "/" + name
 	case SourceRun, SourceSteer:
 		return "run:" + host + "/" + name
 	}

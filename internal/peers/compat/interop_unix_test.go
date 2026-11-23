@@ -248,6 +248,11 @@ func (h *host) agent(name string, inbox bool) {
 	if inbox {
 		h.tmux("set-option", "-t", "="+name+":", "@peers-inbox", "on")
 	}
+	// The pinned Python reference reads untagged sessions as boh, where hev
+	// now reads them as local. Tag them so both list the same role.
+	if h.c.reference != "" {
+		h.tmux("set-option", "-t", "="+name+":", "@peers-role", "boh")
+	}
 }
 
 type impl string
@@ -710,16 +715,21 @@ func TestInteropWaitPasteAndErrors(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"send", "alpha", "to myself"}, {"send", "bravo", "   "}, {"send", "bravo"}, {"send", "bravo", "x", "--id", "bad id"},
-		{"bogus"}, {"chef-notify"}, {"chat", "frob", "abc"}, {"chat", "show", "nope"}, {"read"}, {"role", "a", "b", "c"},
+		{"bogus"}, {"chef-notify"}, {"chat", "frob", "abc"}, {"chat", "show", "nope"}, {"read"},
 		{"inbox", "--session"}, {"inbox", "--session", "bravo", "ack"}, {"inbox", "consume", "missing"},
 		{"managed", "register", "x"}, {"send", "--from"}, {"send", "elsewhere/x", "y"},
 	} {
 		h.same("alpha", nil, args...)
 	}
+	// hev adds the local role to the reference's role usage.
+	if _, errout, code := h.run(goImpl, "alpha", "", "role", "a", "b", "c"); code != 1 || errout != "peers: role [SESSION] [foh|local|boh|offline]\n" {
+		t.Fatalf("%d %q", code, errout)
+	}
 	// Without a pane the sender comes from process ancestry (or is refused), identically.
 	h.same("", norm, "send", "bravo", "who am I")
 	// Help is the reference text plus the two folded-in helpers.
 	py, goHelp := h.ok(pyImpl, "", "", "--help"), h.ok(goImpl, "", "", "--help")
+	goHelp = strings.Replace(goHelp, "  peers role [SESSION] [foh|local|boh|offline]  inspect/set participation\n", "  peers role [SESSION] [foh|boh|offline]  inspect/set local participation\n", 1)
 	if strings.Replace(goHelp, "  peers inbox-hook                 UserPromptSubmit hook: inject the bound inbox (peers-inbox-hook)\n  peers runtime codex|claude|pi [ARGS...]\n                                   launch a harness owning a receipt capability (peers-runtime)\n", "", 1) != py {
 		t.Fatalf("help drifted\npython: %s\ngo: %s", py, goHelp)
 	}
@@ -1099,5 +1109,133 @@ sleep 900
 	_, errout, code := h.run(goImpl, "alpha", "", "managed", "register", "dot2", "--root", root)
 	if code == 0 || !strings.Contains(errout, "stopped") {
 		t.Fatal(code, errout)
+	}
+}
+
+func TestAgyInteractiveDelivery(t *testing.T) {
+	c := newGoCluster(t)
+	h := c.host("local", "go")
+	h.agent("sender", false)
+	const rule = "────────────────────────────────────────"
+	// Use a private terminal to observe the submitted input. Disable echo so
+	// seeing the receipt proves the receiver read the message after Enter.
+	fixture := `import sys, termios
+tty = termios.tcgetattr(0)
+tty[3] &= ~termios.ECHO
+termios.tcsetattr(0, termios.TCSANOW, tty)
+print(sys.argv[1], flush=True)
+while True:
+    header = input()
+    message = input()
+    print("received: " + message + " " + header, flush=True)
+`
+	start := func(name, prompt string) {
+		screen := "> transcript quote\n" + rule + "\n" + prompt + "\n" + rule + "\n? for shortcuts"
+		command := "exec -a agy " + shlexQuote(c.python) + " -c " + shlexQuote(fixture) + " " + shlexQuote(screen)
+		h.tmux("new-session", "-d", "-s", name, "-c", h.home, "bash -c "+shlexQuote(command))
+		h.panes[name] = h.tmux("display-message", "-p", "-t", "="+name+":", "#{pane_id}")
+	}
+	waitScreen := func(name, want string) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			got := h.tmux("capture-pane", "-p", "-t", h.panes[name])
+			if strings.Contains(got, want) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: did not see %q on screen %q", name, want, got)
+			}
+		}
+	}
+	start("ready", "> ")
+	start("drafting", "> unsent text")
+	waitScreen("ready", "? for shortcuts")
+	waitScreen("drafting", "? for shortcuts")
+
+	doc := decodeObj(t, h.ok(goImpl, "sender", "", "ls", "--json"))
+	listed := map[string]string{}
+	for _, v := range doc.List("panes") {
+		row := v.(*Obj)
+		if row.Str("agent") == "agy" {
+			listed[row.Str("session")] = row.Str("state")
+		}
+	}
+	if listed["ready"] != "idle" || listed["drafting"] != "draft" {
+		t.Fatalf("expected idle and draft agy panes, got %v in %s", listed, Dumps(doc))
+	}
+	_, errout, code := h.run(goImpl, "sender", "", "send", "drafting", "must stay out")
+	if code == 0 || !strings.Contains(errout, "draft") {
+		t.Fatalf("draft send: exit %d, stderr %q", code, errout)
+	}
+	h.ok(goImpl, "sender", "", "send", "ready", "hello agy")
+	waitScreen("ready", "received: hello agy [peer message from sender")
+}
+
+// TestRolesLocalAndOptInDiscovery: untagged interactive sessions are local
+// peers by default and drop out entirely when untagged_role is offline; boh
+// stays with factory sessions and explicit tags, foh with its tag. Go only:
+// the pinned Python reference reads untagged sessions as boh.
+func TestRolesLocalAndOptInDiscovery(t *testing.T) {
+	c := newGoCluster(t)
+	h := c.host("laptop", "go")
+	for _, name := range []string{"alpha", "shell", "front", "back", "o-train", "quiet"} {
+		h.agent(name, false)
+	}
+	for name, role := range map[string]string{"front": "foh", "back": "boh", "o-train": "orchestrator", "quiet": "offline"} {
+		h.tmux("set-option", "-t", "="+name+":", "@peers-role", role)
+	}
+	roles := func() map[string]string {
+		t.Helper()
+		got := map[string]string{}
+		for _, r := range decodeObj(t, h.ok(goImpl, "front", "", "ls", "--json")).List("panes") {
+			got[r.(*Obj).Str("session")] = r.(*Obj).Str("role")
+		}
+		return got
+	}
+	want := map[string]string{"alpha": "local", "shell": "local", "front": "foh", "back": "boh", "o-train": "boh"}
+	if got := roles(); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("default roles %v, want %v", got, want)
+	}
+	if ls := h.ok(goImpl, "front", "", "ls"); !strings.Contains(ls, "LOCAL") || !strings.Contains(ls, "FOH") || !strings.Contains(ls, "BOH") {
+		t.Fatalf("ls flags:\n%s", ls)
+	}
+	if out := h.ok(goImpl, "front", "", "role", "shell"); out != "shell: local\n" {
+		t.Fatalf("role: %q", out)
+	}
+	h.ok(goImpl, "front", "", "send", "shell", "hello local")
+	// An orchestrator is reached through its owner, never pasted into.
+	if _, errout, code := h.run(goImpl, "front", "", "send", "o-train", "hi"); code != 1 || !strings.Contains(errout, "o-train is hev dispatch run o-train, but hev isn't on PATH here") {
+		t.Fatalf("send to orchestrator: %d %s", code, errout)
+	}
+
+	// Opt-in discovery: untagged sessions are offline; tagged and factory are not.
+	for _, extra := range [][]string{{"HEV_PEERS_UNTAGGED_ROLE=offline"}, {"HEV_CONFIG=" + filepath.Join(h.home, "peers.toml")}} {
+		must(t, os.WriteFile(filepath.Join(h.home, "peers.toml"), []byte("[peers]\nuntagged_role = \"offline\"\n"), 0o600))
+		h.extra = extra
+		want := map[string]string{"front": "foh", "back": "boh", "o-train": "boh"}
+		if got := roles(); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("%v: roles %v, want %v", extra, got, want)
+		}
+		if _, errout, code := h.run(goImpl, "front", "", "send", "shell", "hi"); code != 1 || !strings.Contains(errout, "no pane matches 'shell'") {
+			t.Fatalf("%v: send to offline untagged: %d %s", extra, code, errout)
+		}
+		if out := h.ok(goImpl, "front", "", "role", "shell"); out != "shell: offline\n" {
+			t.Fatalf("role: %q", out)
+		}
+		h.ok(goImpl, "front", "", "send", "back", "factory still reachable")
+	}
+	// A session tagged local stays a peer when untagged ones are offline.
+	h.tmux("set-option", "-t", "=shell:", "@peers-role", "local")
+	if got := roles(); got["shell"] != "local" {
+		t.Fatalf("tagged local: %v", got)
+	}
+
+	// Invalid settings refuse instead of guessing a role.
+	must(t, os.WriteFile(filepath.Join(h.home, "peers.toml"), []byte("[peers]\nuntagged_role = \"boh\"\n"), 0o600))
+	for _, extra := range [][]string{{"HEV_PEERS_UNTAGGED_ROLE=boh"}, {"HEV_CONFIG=" + filepath.Join(h.home, "peers.toml")}} {
+		h.extra = extra
+		if out, errout, code := h.run(goImpl, "front", "", "ls"); code != 1 || !strings.Contains(errout, `must be "local" or "offline"`) || out != "" {
+			t.Fatalf("%v: %d %q %q", extra, code, out, errout)
+		}
 	}
 }

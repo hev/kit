@@ -42,11 +42,11 @@ func (p *P) sendTo(target string, rows []*Row, header, message, sender string, f
 		return nil, "", refuse("recipient is offline")
 	}
 	// Recheck current role: a beacon's inventory can predate an offline switch.
-	role := "boh"
+	role := pane.Role
 	if !pane.Headless {
-		role = strings.TrimSpace(p.tmuxQ("show-options", "-t", "="+pane.Session+":", "-qv", "@peers-role"))
+		role = p.resolveRole(pane.Session, strings.TrimSpace(p.tmuxQ("show-options", "-t", "="+pane.Session+":", "-qv", "@peers-role")))
 	}
-	if role != "" && role != "foh" && role != "boh" {
+	if !participates(role) {
 		return nil, "", refuse("recipient is offline")
 	}
 	if Truthy(extra.Get("recipient_incarnation")) {

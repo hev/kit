@@ -3,6 +3,7 @@ package compat
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hev/kit/internal/hevpaths"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,8 +20,9 @@ func steerSummary(session string) string {
 	}
 	dir := filepath.Join(home, ".hev", "steer", "peers", session)
 	if name, ok := strings.CutPrefix(session, "d-"); ok {
-		if _, err := os.Stat(filepath.Join(home, "dispatch", name, "meta.json")); err == nil {
-			dir = filepath.Join(home, "dispatch", name, "steer")
+		orders := hevpaths.Dir(hevpaths.Orders)
+		if _, err := os.Stat(filepath.Join(orders, name, "meta.json")); err == nil {
+			dir = filepath.Join(orders, name, "steer")
 		}
 	}
 	entries, err := os.ReadDir(dir)

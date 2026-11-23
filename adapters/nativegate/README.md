@@ -47,7 +47,7 @@ business and node/parent maintenance guards without the file-chef DecideSpawn or
 Apply path. DB lease/claim fences never replace original native issuance.
 `DBGate.WithStart` rejects legacy receivers; `WithSpawn` passes a live checker
 into the native journal after durable receipt persistence, immediately before
-actual Start. See [the native boundary](../../docs/native-jobs/db-receiver.md).
+actual Start. See the native receiver design decision on `hev board`.
 
 Build and invoke from this optional module:
 

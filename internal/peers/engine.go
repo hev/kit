@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hev/kit/internal/hevpaths"
 	"io"
 	"os"
 	"os/exec"
@@ -145,16 +146,12 @@ type Engine struct {
 }
 
 func New() *Engine {
-	home, _ := os.UserHomeDir()
 	incarnation := os.Getenv("PEERS_SELF")
 	if incarnation == "" {
 		incarnation, _ = os.Hostname()
 		incarnation = strings.SplitN(incarnation, ".", 2)[0]
 	}
-	state := os.Getenv("HEV_PEERS_STATE")
-	if state == "" {
-		state = filepath.Join(home, ".local", "state", "peers-v2")
-	}
+	state := hevpaths.Dir(hevpaths.Peers)
 	return &Engine{State: state, Host: hostlabel.Self(os.Hostname), incarnationHost: incarnation, Transport: configuredTransport{}, Command: command}
 }
 
@@ -757,7 +754,7 @@ func (e *Engine) Run(ctx context.Context, args []string, in io.Reader, out, erro
 		if err != nil {
 			return err
 		}
-		state := screenState(screen)
+		state := screenState(p.Agent, screen)
 		if !harness.CanPaste(p.Agent) && state != "prompt" && state != "draft" {
 			state = "?"
 		}

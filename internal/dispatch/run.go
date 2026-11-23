@@ -10,16 +10,23 @@ import (
 	"github.com/hev/kit/internal/hostlabel"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/secrets"
+	"github.com/hev/kit/internal/workspace"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 type Meta struct {
+	WorkspaceName   string          `json:"workspace,omitempty"`
+	Compacted       bool            `json:"compacted,omitempty"`
+	HeadSHA         string          `json:"head_sha,omitempty"`
+	WorkspaceBase   string          `json:"workspace_base,omitempty"`
+	WorkspaceCap    int             `json:"workspace_cap,omitempty"`
 	Implementer     *FallbackTarget `json:"implementer,omitempty"`
 	AllowSameModel  bool            `json:"allow_same_model,omitempty"`
 	RequestedBy     string          `json:"requested_by,omitempty"`
@@ -218,7 +225,7 @@ func workerPrompt(dir string, m Meta) string {
 
 // reviewNotesPrompt asks a worker for ../review-notes.json: anchored notes in
 // hunk's agent-context format that hev review shows beside the diff (see
-// internal/reviewnotes and docs/review.md).
+// internal/reviewnotes and https://hevkit.com/docs/review).
 func reviewNotesPrompt(m Meta) string {
 	author := strings.TrimSpace(m.Name + " " + m.Model)
 	if author == "" {
@@ -464,6 +471,14 @@ func superviseRound(name string) (superviseErr error) {
 		}
 	}
 	cfg, configErr := Load(m.ConfigPath)
+	if configErr == nil && m.WorkspaceName != "" {
+		selected, err := workspace.Named(m.WorkspaceName)
+		if err != nil {
+			configErr = err
+		} else {
+			cfg.ScopeWorkspace(selected)
+		}
+	}
 	if configErr != nil && m.Parent == "" {
 		r.NotifyError = "target notification config: " + configErr.Error()
 		noticeRunEnd(dir, m, r)
@@ -745,12 +760,38 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	// [harnesses.NAME] adds resolved secret env and agy's model provider.
 	// Values live only in this process and the child's environment.
 	harnessCtx, harnessCancel := context.WithTimeout(context.Background(), time.Minute)
-	childEnv, args, harnessErr := harnessLaunch(harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
+	childEnv, args, secretValues, harnessErr := workspaceHarnessLaunch(m.WorkspaceName, harnessCtx, m.ConfigPath, m.Harness, secrets.DefaultCaller("hev dispatch "+m.Name), childEnv, args)
 	harnessCancel()
+	var slotLock *os.File
+	var workspaceCap int
+	if m.WorkspaceCap > 0 && harnessErr == nil {
+		workspaceCap, err = dispatchWorkspaceCap()
+		if err != nil {
+			return err
+		}
+	}
+	if workspaceCap > 0 {
+		pool, err := workspacePool(wt)
+		if err != nil {
+			return err
+		}
+		slot, lock, release, err := leaseWorkspaceSlot(pool, workspaceCap)
+		if err != nil {
+			return err
+		}
+		defer release()
+		slotLock = lock
+		childEnv = cargoWorkspaceEnvironment(childEnv, wt, slot)
+	}
 	child := harnessCommand(harnessWrapper(m), descriptor.Binary, args)
 	child.Dir = wt
-	child.Stdout = log
-	child.Stderr = log
+	// On Unix the harness keeps the flock if the supervisor is killed first.
+	// Windows launches the harness in a kill-on-close job.
+	if slotLock != nil && runtime.GOOS != "windows" {
+		child.ExtraFiles = append(child.ExtraFiles, slotLock)
+	}
+	// Output reaches the log with resolved env_refs values redacted.
+	waitChild := harnessOutput(child, log, secretValues)
 	child.Env = childEnv
 	// The assembled context reaches the harness on standard input; a recipe
 	// without its verified bundle fails here instead of launching without it.
@@ -789,7 +830,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 	if startErr == nil {
 		if err := recordHarness(dir, child); err != nil {
 			kill()
-			_ = child.Wait()
+			_ = waitChild()
 			startErr = err
 		}
 	}
@@ -798,7 +839,7 @@ func workerAttempt(dir, wt, resultPath string, m Meta, r *Result, log *os.File, 
 		r.Error = e.Error()
 	} else {
 		done := make(chan error, 1)
-		go func() { done <- child.Wait() }()
+		go func() { done <- waitChild() }()
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		deadline := time.NewTimer(workerRemaining(m, r.Start))

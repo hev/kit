@@ -34,7 +34,7 @@ func storageHome(t *testing.T, config string) (home, archive string) {
 		}
 	}
 	t.Setenv("HEV_CONFIG", path)
-	return home, filepath.Join(home, ".hev", "archive")
+	return home, filepath.Join(home, ".hev", "traces")
 }
 
 // fakeDaemon holds daemon.lock, as a running hevd does, and leaves the
@@ -103,6 +103,21 @@ func TestStatusAgreesWhenShellHasTheDaemonsKey(t *testing.T) {
 	}
 	if strings.Contains(out, "shell-key") {
 		t.Fatal("status printed the key")
+	}
+}
+
+func TestStatusKeepsLayerOriginAndHidesPrivateStorageDiagnostics(t *testing.T) {
+	storageHome(t, "[layer]\nendpoint = \"https://gateway.example/private-endpoint-token\"\nnamespace = \"team\"\n")
+	t.Setenv("HEVLAYER_API_KEY", "shell-key")
+	fakeDaemon(t, strings.Replace(layerRecord, "gateway.example", "gateway.example/private-endpoint-token", 1))
+	out := statusOutput(t)
+	if !strings.Contains(out, "https://gateway.example") || strings.Contains(out, "private-endpoint-token") {
+		t.Fatalf("status did not redact the endpoint path: %s", out)
+	}
+	t.Setenv("HEVLAYER_API_KEY", "")
+	out = statusOutput(t)
+	if !strings.Contains(out, "this machine is set up for hev layer") || strings.Contains(out, "private-endpoint-token") || strings.Contains(out, daemon.DefaultConfigPath()) {
+		t.Fatal("status omitted storage guidance or leaked a private diagnostic")
 	}
 }
 

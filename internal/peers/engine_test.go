@@ -59,7 +59,7 @@ func TestUnknownHarnessInboxAndRead(t *testing.T) {
 }
 func TestScreenRefusals(t *testing.T) {
 	for s, want := range map[string]string{"❯ ": "idle", "› human draft": "draft", "Do you trust this folder?": "prompt", "opaque": "idle"} {
-		if got := screenState(s); got != want {
+		if got := screenState("claude", s); got != want {
 			t.Fatalf("%q: %s", s, got)
 		}
 	}
@@ -125,7 +125,7 @@ func TestScreenActivityAndPlaceholder(t *testing.T) {
 		"❯ typed\nfooter":                       "draft",
 		"› 1. Yes\nEnter to confirm":            "prompt",
 	} {
-		if got := screenState(screen); got != want {
+		if got := screenState("claude", screen); got != want {
 			t.Errorf("%q: %s, want %s", screen, got, want)
 		}
 	}
@@ -209,4 +209,57 @@ func TestEngineGrokProcessFingerprint(t *testing.T) {
 			t.Errorf("engineHarness(%q) = %q, want %q", cmd, got, want)
 		}
 	}
+}
+
+func TestAgyScreenStateMatchesCompat(t *testing.T) {
+	for _, tt := range agyScreens {
+		if got := screenState(tt.agent, tt.screen); got != tt.want {
+			t.Errorf("%s: state = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	// The native engine reads the whole capture: agy's view is its last 20 lines.
+	long := strings.Repeat("transcript\n", 40) + agyEditor + agyCancelFooter
+	if got := screenState("agy", long); got != "working" {
+		t.Errorf("long screen: %q", got)
+	}
+}
+
+const (
+	agyRule         = "────────────────────────"
+	agyIdle         = "? for shortcuts          Gemini 4 Neon · medium"
+	agyCancelFooter = "esc to cancel · 12s          Gemini 4 Neon · medium"
+	agyEditor       = agyRule + "\n>  \n" + agyRule + "\n"
+)
+
+// agyScreens: agy's running footer reads "esc to cancel" and is working; a
+// real dialog or the feedback survey is a prompt; Claude and Codex keep
+// "Esc to cancel" as a dialog. This is a copy of the compat CLI's table: the two must agree.
+var agyScreens = []struct{ name, agent, screen, want string }{
+	{"empty editor", "agy", agyEditor + agyIdle, "idle"},
+	{"typed editor", "agy", agyRule + "\n> unsent text\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"numbered draft", "agy", agyRule + "\n> 1. unsent text\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"multiline draft", "agy", agyRule + "\n>  \nsecond line\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"blockquote above editor", "agy", "> some quote\n" + agyEditor + agyIdle, "idle"},
+	{"blockquote alone", "agy", "> some quote", "?"},
+	{"esc to interrupt", "agy", "Thinking… (esc to interrupt)\n" + agyEditor + agyIdle, "working"},
+	{"finished thought is not a turn", "agy", "○ Thought for 3s\n" + agyEditor + agyIdle, "idle"},
+	{"cancel footer under editor", "agy", agyEditor + agyCancelFooter, "working"},
+	{"cancel footer with spinner", "agy", "⣯ Running command...\n" + agyEditor + agyCancelFooter, "working"},
+	{"cancel footer after thought", "agy", "○ Thought for 3s\n⣽ Reading files...\n" + agyEditor + agyCancelFooter, "working"},
+	{"cancel footer, spinner, no editor", "agy", "⣯ Running command...\n" + agyCancelFooter, "working"},
+	{"spinner alone", "agy", "⣾ Generating...", "working"},
+	{"draft while running", "agy", "⣯ Running command...\n" + agyRule + "\n> next idea\n" + agyRule + "\n" + agyCancelFooter, "draft"},
+	{"typed cancel words are a draft", "agy", agyRule + "\n> esc to cancel\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"cancel footer alone is a dialog", "agy", "Allow this command?\n  1. Yes\n  2. No\nEsc to cancel", "prompt"},
+	{"dialog", "agy", "Do you want to proceed?\n> 1. Yes\n  2. No", "prompt"},
+	{"dialog during a turn", "agy", "⣯ Running command...\nDo you want to proceed?\n> 1. Yes\n  2. No\nEsc to cancel", "prompt"},
+	{"feedback survey", "agy", "○ Thought for 3s\nHow's the CLI experience so far? Help us improve:\n[1] Good  [2] Fine  [3] Bad  [0] Skip", "prompt"},
+	{"survey choices alone", "agy", "[1] Good  [2] Fine  [3] Bad  [0] Skip", "prompt"},
+	{"survey above editor", "agy", "How's the CLI experience so far? Help us improve:\n" + agyEditor + agyIdle, "prompt"},
+	{"claude dialog", "claude", "Do you want to make this edit?\n❯ 1. Yes\nEsc to cancel", "prompt"},
+	{"claude cancel footer", "claude", "Esc to cancel\n❯ ", "prompt"},
+	{"codex cancel footer", "codex", "Esc to cancel\n› ", "prompt"},
+	{"claude esc to interrupt", "claude", "✻ Thinking… (12s · esc to interrupt)\n❯ ", "working"},
+	{"codex esc to interrupt", "codex", "• Working (3s • esc to interrupt)\n› ", "working"},
+	{"claude idle", "claude", "❯ ", "idle"},
 }

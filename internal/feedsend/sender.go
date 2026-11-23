@@ -1,4 +1,4 @@
-// Package feedsend is the Slack feed's sender (docs/feed.md): it drains the
+// Package feedsend is the Slack feed's sender (https://hevkit.com/docs/feed): it drains the
 // spool the hook side writes, summarizes turns with a small model, and posts
 // one thread per session, run, orchestrator, board thread or evidence
 // record through attention's Slack poster.

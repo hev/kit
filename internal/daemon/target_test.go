@@ -37,7 +37,7 @@ func isolate(t *testing.T, config string) (*Config, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return cfg, filepath.Join(home, ".hev", "archive")
+	return cfg, filepath.Join(home, ".hev", "traces")
 }
 
 func TestOpenTargetNoKeyIsFiles(t *testing.T) {

@@ -258,7 +258,7 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 	if out := must(teamHome, "dispatch", order, "--host", alias); !strings.Contains(out, "started noticed") {
 		t.Fatalf("dispatch: %s", out)
 	}
-	result := filepath.Join(ownerHome, "dispatch", "noticed", "result.json")
+	result := filepath.Join(ownerHome, ".hev", "orders", "noticed", "result.json")
 	for deadline := time.Now().Add(60 * time.Second); ; {
 		var r struct {
 			End      time.Time `json:"end"`
@@ -271,14 +271,14 @@ func TestMemberNoticesOverForcedCommandSSH(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			log, _ := os.ReadFile(filepath.Join(ownerHome, "dispatch", "noticed", "log"))
+			log, _ := os.ReadFile(filepath.Join(ownerHome, ".hev", "orders", "noticed", "log"))
 			t.Fatalf("run did not end: %s", log)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	// The supervisor queues before it returns; give it a moment to exit.
 	for deadline := time.Now().Add(10 * time.Second); ; {
-		if entries, _ := filepath.Glob(filepath.Join(ownerHome, "dispatch", ".member-notices", "*", "*.json")); len(entries) == 1 {
+		if entries, _ := filepath.Glob(filepath.Join(ownerHome, ".hev", "orders", ".member-notices", "*", "*.json")); len(entries) == 1 {
 			break
 		}
 		if time.Now().After(deadline) {

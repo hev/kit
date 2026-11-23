@@ -14,6 +14,21 @@ import (
 	"github.com/hev/kit/internal/platformops"
 )
 
+var publicToken = regexp.MustCompile(`v4\.public\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?`)
+
+// PublicTokens removes license tokens from diagnostics and derived metadata.
+func PublicTokens(value string) string {
+	return publicToken.ReplaceAllString(value, "[REDACTED]")
+}
+
+// ConfigSecret masks a configured credential, including malformed values.
+func ConfigSecret(value string) string {
+	if value == "" {
+		return ""
+	}
+	return "[REDACTED]"
+}
+
 // ConfigPath follows the same HEV_CONFIG override as the daemon.
 func ConfigPath() (string, error) {
 	if p := os.Getenv("HEV_CONFIG"); p != "" {
@@ -74,7 +89,7 @@ func LoadFile(path string) (*Scrubber, error) {
 		} `toml:"capture"`
 	}
 	if _, err = toml.Decode(string(b), &cfg); err != nil {
-		return nil, fmt.Errorf("redaction config: %w", err)
+		return nil, fmt.Errorf("invalid TOML in redaction config")
 	}
 	if cfg.Capture.Redact != nil && !*cfg.Capture.Redact {
 		return nil, nil
@@ -161,6 +176,11 @@ func LoadFile(path string) (*Scrubber, error) {
 // LockArchive serializes current-version archive writers with upgrade cleanup.
 // Older daemons must be stopped before upgrading; they do not honor this lock.
 func LockArchive() (func(), error) {
+	return LockArchiveScope("")
+}
+
+// LockArchiveScope serializes writers and migration for one destination.
+func LockArchiveScope(scope string) (func(), error) {
 	if err := platformops.RequireTraceWrites(); err != nil {
 		return nil, err
 	}
@@ -171,5 +191,9 @@ func LockArchive() (func(), error) {
 	if err = platformops.MkdirAll(filepath.Dir(config), 0700); err != nil {
 		return nil, err
 	}
-	return platformops.LockPath(config+".archive.lock", false)
+	name := config + ".archive.lock"
+	if scope != "" {
+		name += "." + scope
+	}
+	return platformops.LockPath(name, false)
 }

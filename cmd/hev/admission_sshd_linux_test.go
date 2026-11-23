@@ -253,14 +253,14 @@ func TestAdmissionAddRemoveOverForcedCommandSSH(t *testing.T) {
 		Sender      string `json:"sender"`
 		RequestedBy string `json:"requested_by"`
 	}
-	b, err := os.ReadFile(filepath.Join(ownerHome, "dispatch", "after-add", "meta.json"))
+	b, err := os.ReadFile(filepath.Join(ownerHome, ".hev", "orders", "after-add", "meta.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = json.Unmarshal(b, &meta); err != nil || meta.Sender != "alex" || meta.RequestedBy != "alex" {
 		t.Fatalf("meta %s %v", b, err)
 	}
-	if _, err = os.Stat(filepath.Join(ownerHome, "dispatch", "after-add", "wt", "README.md")); err != nil {
+	if _, err = os.Stat(filepath.Join(ownerHome, ".hev", "orders", "after-add", "wt", "README.md")); err != nil {
 		t.Fatalf("worktree not created: %v", err)
 	}
 
@@ -278,7 +278,7 @@ func TestAdmissionAddRemoveOverForcedCommandSSH(t *testing.T) {
 	if names := workspaceEntries(); len(names) != 1 || names[0] != "widget" {
 		t.Fatalf("remove touched workspace %v", names)
 	}
-	if _, err = os.Stat(filepath.Join(ownerHome, "dispatch", "after-add", "wt", "README.md")); err != nil {
+	if _, err = os.Stat(filepath.Join(ownerHome, ".hev", "orders", "after-add", "wt", "README.md")); err != nil {
 		t.Fatalf("remove touched the started run: %v", err)
 	}
 	if out, err := run(teamHome, "dispatch", order("after-remove"), "--host", alias); err == nil || !strings.Contains(out, "not admitted") {

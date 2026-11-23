@@ -39,7 +39,7 @@ Outputs must be new directories. review binds loopback addresses only.
 Name a recipe with "context: PATH" in an order's frontmatter and dispatch
 builds the bundle at launch and gives it to the worker, or pass a local recipe
 for one dispatch with hev dispatch ORDER.md --context-file R.json; see
-docs/context.md.`,
+https://hevkit.com/docs/context.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}

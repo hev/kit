@@ -8,6 +8,7 @@ import (
 	"github.com/hev/kit/internal/layerenv"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -325,6 +326,10 @@ it is opt-in.
 		if indexSummarize && indexDryRun {
 			return fmt.Errorf("--summarize and --dry-run cannot be used together")
 		}
+		w, err := currentWorkspace()
+		if err != nil {
+			return err
+		}
 		claudeRoot := indexRoot
 		if claudeRoot == "" {
 			claudeRoot = trace.DefaultClaudeRoot()
@@ -360,6 +365,13 @@ it is opt-in.
 		}
 		piRoot := cfg.PiSessionsDir
 		sources := trace.Sources(map[string]string{harness.Claude: claudeRoot, harness.Pi: piRoot, harness.OpenCode: cfg.OpenCodeDataDir, harness.Agy: cfg.AgyDataDir})
+		if w.IsolatedStorage() {
+			if indexRoot != "" {
+				return fmt.Errorf("workspace boundary: configure the workspace's Claude profile instead of passing --root")
+			}
+			sources = trace.WorkspaceSources(w)
+			st = index.LoadStateAt(filepath.Join(w.Root(), "index-state.json"))
+		}
 		rep := &index.Report{}
 		existingSummaries := map[string]string{}
 		existingSessions := map[string]bool{}
@@ -469,7 +481,7 @@ it is opt-in.
 			// This host's dispatch runs, as trace facts for the Asks view on
 			// other hosts sharing the archive. An archive in files is this
 			// host's alone; its dashboard reads the run records directly.
-			spans, err := index.RunTraceSpans(dispatch.Root(), sw, st, indexDryRun)
+			spans, err := index.RunWorkspaceTraceSpans(dispatch.Root(), w.Name, sw, st, indexDryRun)
 			if err != nil {
 				return err
 			}

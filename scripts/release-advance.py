@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """After a release ships: fast-forward main to its tag and open the next train.
 
-Kit's train (docs/runbooks/release-train.md): features merge into the train
+Kit's train (the release-train runbook on hev board): features merge into the train
 branch vX.Y; main does not move between releases and is always the latest
 published release. Once release.yml has built, shipped and verified vX.Y.Z:
 

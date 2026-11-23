@@ -1,5 +1,10 @@
 # AGENTS.md
 
+hev kit is a meta-harness for Claude Code, Codex, Antigravity, Pi, and OpenCode
+on macOS, Linux, and Windows. A workspace binds subscriptions and authentication
+to a home folder and a private network with a cluster. The cluster is the set
+of machines running hevd and using SWIM for membership.
+
 Rules for every agent run in this repository. Each one is here because a
 past run broke it. Keep this file short: link to docs instead of copying them.
 
@@ -7,9 +12,11 @@ past run broke it. Keep this file short: link to docs instead of copying them.
 
 - [`MISSION.md`](MISSION.md): what kit is for and how additions are judged.
 - [`README.md`](README.md): install, build and the command surface.
-- [`docs/`](docs/): user-facing behavior, one page per feature.
-- [`docs/rfcs/README.md`](docs/rfcs/README.md): the RFC index and its conventions.
-- [`docs/runbooks/release-train.md`](docs/runbooks/release-train.md): how `v0.x` trains open, merge and ship.
+- [User docs](https://hevkit.com/docs) live in `hev/kit-cloud/site/`.
+- Decisions, design memos, runbooks and learnings live on `hev board`.
+- Proof packages live in `hev evidence`.
+- Proposals and specs live in dispatch orders (`hev dispatch`, stored in `~/.hev/orders`).
+- [Release notes](releases/) and [Layer schema policy](schemas/layer/) stay in this repository.
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml): the checks a PR must pass.
 
 ## Don't damage the host
@@ -35,9 +42,8 @@ Dispatch hosts run other agents' live tmux sessions and the operator's real conf
 
 ## Where things go
 
-- Docs first: document user-facing behavior in `docs/` in the same PR that
-  changes it.
-- Design goes in an RFC under `docs/rfcs/` and a row in its index.
+- Document changes to user-facing behavior in the site source in `hev/kit-cloud`.
+- Record proposed work in an order and design decisions on `hev board`.
 
 ## Writing code and tests
 

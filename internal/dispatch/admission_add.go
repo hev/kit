@@ -229,7 +229,7 @@ func AddRepo(ctx context.Context, raw string, caller RepoCaller) (Response, erro
 		return r, fmt.Errorf("authenticated sender required")
 	}
 	if caller.Restricted && !caller.CanAdd {
-		return r, fmt.Errorf("permission denied: your access does not include adding repos (the owner can run: hev nodes allow NAME %s)", RepoCapability)
+		return r, fmt.Errorf("permission denied: your access does not include adding repos (the owner can run: hev cluster allow NAME %s)", RepoCapability)
 	}
 	a, err := parseAddURL(strings.TrimSpace(raw), true)
 	if err != nil {

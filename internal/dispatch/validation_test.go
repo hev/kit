@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,5 +202,77 @@ func TestIndependentReviewPromptAndVerdict(t *testing.T) {
 	var got Verdict
 	if e := readJSON(filepath.Join(dir, "verdict.json"), &got); e != nil || got.Verdict != "pass" {
 		t.Fatal(got, e)
+	}
+}
+
+func TestWrappedCheckboxAcceptanceItems(t *testing.T) {
+	dir := t.TempDir()
+	order := "---\nname: test\nrepo: kit\n---\nTask\n\n## Acceptance\n- [ ] First line of wrapped\n  acceptance item.\n- [x] Second checked item.\n- Plain bullet\n  continuation.\n"
+	if err := os.WriteFile(filepath.Join(dir, "order.md"), []byte(order), 0600); err != nil {
+		t.Fatal(err)
+	}
+	evDir := filepath.Join(dir, "evidence")
+	if err := os.MkdirAll(evDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	evFile := filepath.Join(evDir, "proof.txt")
+	if err := os.WriteFile(evFile, []byte("ok"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	v := &Verdict{
+		Verdict: "pass",
+		Items: []VerdictItem{
+			{Item: "First line of wrapped acceptance item.", Result: "pass", Evidence: []string{evFile}},
+			{Item: "[ ] Second checked item.", Result: "pass", Evidence: []string{evFile}},
+			{Item: "Plain bullet continuation.", Result: "pass", Evidence: []string{evFile}},
+		},
+	}
+	if err := VerifyVerdict(dir, v); err != nil {
+		t.Fatalf("expected wrapped checkbox verdict to pass, got %v", err)
+	}
+	bad := &Verdict{
+		Verdict: "pass",
+		Items: []VerdictItem{
+			{Item: "First line of wrapped acceptance item.", Result: "pass", Evidence: []string{evFile}},
+			{Item: "[ ] First line of wrapped acceptance item.", Result: "pass", Evidence: []string{evFile}},
+			{Item: "Plain bullet continuation.", Result: "pass", Evidence: []string{evFile}},
+		},
+	}
+	if err := VerifyVerdict(dir, bad); err == nil {
+		t.Fatal("expected duplicate checkbox item to fail")
+	}
+}
+
+func TestOrchestratorValidateHonorsAllowSameModel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if _, err := ApplyOrchestrator("---\nkind: orchestrator\nname: test-orch\ngoal: test\nmode: once\nauthority: [validate]\nmanages:\n  runs: {names: [impl-run]}\n---\ntest\n", false); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_ORCHESTRATOR", "test-orch")
+	runDir := filepath.Join(Root(), "impl-run")
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteJSON(filepath.Join(runDir, "meta.json"), Meta{Order: Order{Name: "impl-run", Repo: "kit", Harness: "codex", Model: "same-model"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteJSON(filepath.Join(runDir, "result.json"), Result{ExitCode: 0, End: time.Now(), Head: "abc123"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{
+		Hosts: map[string]Host{
+			"src": {Local: true},
+			"val": {SSH: "val.example"},
+		},
+		Validation: ValidationConfig{Host: "val", Harness: "codex", Model: "same-model"},
+	}
+	if _, err := Validate(context.Background(), cfg, "impl-run", "src", false); err == nil || !strings.Contains(err.Error(), "use --allow-same-model") {
+		t.Fatalf("expected same-model refusal, got %v", err)
+	}
+	_, err := Validate(context.Background(), cfg, "impl-run", "src", true)
+	if err != nil && strings.Contains(err.Error(), "use --allow-same-model") {
+		t.Fatalf("expected --allow-same-model to bypass same-model check inside orchestrator, got %v", err)
 	}
 }

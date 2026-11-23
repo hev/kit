@@ -178,6 +178,8 @@ func TestClassify(t *testing.T) {
 	for cmd, want := range map[string]string{
 		"claude 600": "claude", "/usr/bin/node /x/@anthropic-ai/claude-code/cli.js": "claude", "codex exec hi": "codex",
 		"node /x/bin/codex.js": "codex", "pi": "pi", "node /lib/@earendil-works/pi-coding-agent/dist/cli.js": "pi",
+		"agy --settings /tmp/settings.json": "agy", "/path/to/agy": "agy",
+		"fzf --prompt harness: agy --settings": "", "fzf /path/to/agy": "",
 		"node /x/gemini": "gemini", "opencode": "opencode", "bash": "", "pi --foo": "",
 		"node /opt/node_modules/@xai-official/grok/bin/grok": "grok", "/usr/bin/grok -p fixture --output-format streaming-json": "grok", "/usr/bin/grok -p pattern": "",
 	} {
@@ -191,6 +193,73 @@ func TestClassify(t *testing.T) {
 	if got := promptOf(`claude -p fix the\012bug   now`); got != "fix the bug now" {
 		t.Fatal(got)
 	}
+}
+
+func TestAgyHeadless(t *testing.T) {
+	for command, want := range map[string]bool{
+		"agy --settings settings.json": false,
+		"agy --print=prompt":           true,
+		"agy --print prompt":           true,
+		"agy -p prompt":                true,
+		"agy --prompt=prompt":          true,
+		"agy --prompt-interactive hi":  false,
+		"agy -- --print":               false,
+	} {
+		if got := headless("agy", command); got != want {
+			t.Errorf("headless(%q) = %v, want %v", command, got, want)
+		}
+	}
+}
+
+func TestAgyScreenState(t *testing.T) {
+	for _, tt := range agyScreens {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := strings.Split(tt.screen, "\n")
+			if got := screenState(tt.agent, lines, lines); got != tt.want {
+				t.Errorf("state = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+const (
+	agyRule         = "────────────────────────"
+	agyIdle         = "? for shortcuts          Gemini 4 Neon · medium"
+	agyCancelFooter = "esc to cancel · 12s          Gemini 4 Neon · medium"
+	agyEditor       = agyRule + "\n>  \n" + agyRule + "\n"
+)
+
+// agyScreens: agy's running footer reads "esc to cancel" and is working; a
+// real dialog or the feedback survey is a prompt; Claude and Codex keep
+// "Esc to cancel" as a dialog. The native engine keeps a copy of this table.
+var agyScreens = []struct{ name, agent, screen, want string }{
+	{"empty editor", "agy", agyEditor + agyIdle, "idle"},
+	{"typed editor", "agy", agyRule + "\n> unsent text\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"numbered draft", "agy", agyRule + "\n> 1. unsent text\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"multiline draft", "agy", agyRule + "\n>  \nsecond line\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"blockquote above editor", "agy", "> some quote\n" + agyEditor + agyIdle, "idle"},
+	{"blockquote alone", "agy", "> some quote", "?"},
+	{"esc to interrupt", "agy", "Thinking… (esc to interrupt)\n" + agyEditor + agyIdle, "working"},
+	{"finished thought is not a turn", "agy", "○ Thought for 3s\n" + agyEditor + agyIdle, "idle"},
+	{"cancel footer under editor", "agy", agyEditor + agyCancelFooter, "working"},
+	{"cancel footer with spinner", "agy", "⣯ Running command...\n" + agyEditor + agyCancelFooter, "working"},
+	{"cancel footer after thought", "agy", "○ Thought for 3s\n⣽ Reading files...\n" + agyEditor + agyCancelFooter, "working"},
+	{"cancel footer, spinner, no editor", "agy", "⣯ Running command...\n" + agyCancelFooter, "working"},
+	{"spinner alone", "agy", "⣾ Generating...", "working"},
+	{"draft while running", "agy", "⣯ Running command...\n" + agyRule + "\n> next idea\n" + agyRule + "\n" + agyCancelFooter, "draft"},
+	{"typed cancel words are a draft", "agy", agyRule + "\n> esc to cancel\n" + agyRule + "\n" + agyIdle, "draft"},
+	{"cancel footer alone is a dialog", "agy", "Allow this command?\n  1. Yes\n  2. No\nEsc to cancel", "prompt"},
+	{"dialog", "agy", "Do you want to proceed?\n> 1. Yes\n  2. No", "prompt"},
+	{"dialog during a turn", "agy", "⣯ Running command...\nDo you want to proceed?\n> 1. Yes\n  2. No\nEsc to cancel", "prompt"},
+	{"feedback survey", "agy", "○ Thought for 3s\nHow's the CLI experience so far? Help us improve:\n[1] Good  [2] Fine  [3] Bad  [0] Skip", "prompt"},
+	{"survey choices alone", "agy", "[1] Good  [2] Fine  [3] Bad  [0] Skip", "prompt"},
+	{"survey above editor", "agy", "How's the CLI experience so far? Help us improve:\n" + agyEditor + agyIdle, "prompt"},
+	{"claude dialog", "claude", "Do you want to make this edit?\n❯ 1. Yes\nEsc to cancel", "prompt"},
+	{"claude cancel footer", "claude", "Esc to cancel\n❯ ", "prompt"},
+	{"codex cancel footer", "codex", "Esc to cancel\n› ", "prompt"},
+	{"claude esc to interrupt", "claude", "✻ Thinking… (12s · esc to interrupt)\n❯ ", "working"},
+	{"codex esc to interrupt", "codex", "• Working (3s • esc to interrupt)\n› ", "working"},
+	{"claude idle", "claude", "❯ ", "idle"},
 }
 
 func TestFindAndAddress(t *testing.T) {
@@ -241,8 +310,17 @@ func TestStateDirFollowsNativeOverride(t *testing.T) {
 		t.Fatalf("stateDir %q inboxDir %q, want %q", p.stateDir, p.inboxDir, state)
 	}
 	t.Setenv("HEV_PEERS_STATE", "")
-	if p := newP(nil, io.Discard, io.Discard); p.stateDir != filepath.Join(os.Getenv("HOME"), ".local/state/peers-v2") {
+	// A fresh HOME keeps peers under the unified ~/.hev/peers ...
+	if p := newP(nil, io.Discard, io.Discard); p.stateDir != filepath.Join(os.Getenv("HOME"), ".hev", "peers") {
 		t.Fatalf("default stateDir %q", p.stateDir)
+	}
+	// ... and a host that already has the legacy tree keeps reading it.
+	legacy := filepath.Join(os.Getenv("HOME"), ".local", "state", "peers-v2")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if p := newP(nil, io.Discard, io.Discard); p.stateDir != legacy {
+		t.Fatalf("legacy stateDir %q", p.stateDir)
 	}
 }
 

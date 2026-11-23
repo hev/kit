@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"os/exec"
@@ -98,7 +97,7 @@ func newFollowCommand() *cobra.Command {
 	c.Flags().StringVar(&every, "every", "10m", "Round interval")
 	c.Flags().StringVar(&lifetime, "max-lifetime", "24h", "Maximum lifetime")
 	c.Flags().StringVar(&repo, "repo", "", "Repository for the orchestrator worktree (defaults to first followed run)")
-	load := func() (dispatch.Config, error) { path = dispatch.ConfigPath(path); return dispatch.Load(path) }
+	load := func() (dispatch.Config, error) { path = dispatch.ConfigPath(path); return loadWorkspaceDispatch(path) }
 	c.RunE = func(cmd *cobra.Command, _ []string) error {
 		cfg, err := load()
 		if err != nil {
@@ -112,7 +111,7 @@ func newFollowCommand() *cobra.Command {
 		// PR merge state is authoritative; dispatch completion alone is not merging.
 		for hn, r := range inv {
 			for i, row := range r.Rows {
-				if !hostlabel.SameAddress(row.Reply, reply) || row.PR == "" {
+				if !followthrough.MatchesReply(row.Reply, reply) || row.PR == "" {
 					continue
 				}
 				b, e := exec.CommandContext(cmd.Context(), "gh", "pr", "view", row.PR, "--json", "state").Output()
@@ -150,7 +149,7 @@ func newFollowCommand() *cobra.Command {
 		}
 		for _, r := range inv {
 			for _, row := range r.Rows {
-				if hostlabel.SameAddress(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
+				if followthrough.MatchesReply(row.Reply, reply) && row.Until == "all followed runs merged or abandoned" && row.State != "stopped" && row.State != "complete" && row.State != "handed-off" && row.Schedule.End.IsZero() {
 					return fmt.Errorf("follow-through orchestrator %s already exists; inspect or stop it first", row.Name)
 				}
 			}
@@ -197,7 +196,7 @@ func newFollowCommand() *cobra.Command {
 					return fmt.Errorf("%s: %s", hn, r.Error)
 				}
 				for _, row := range r.Rows {
-					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && !hostlabel.SameAddress(row.Reply, reply)) {
+					if row.Until != "all followed runs merged or abandoned" || (len(args) > 0 && row.Name != args[0] && row.Name != "o-"+args[0]) || (len(args) == 0 && !followthrough.MatchesReply(row.Reply, reply)) {
 						continue
 					}
 					found = true
@@ -441,6 +440,9 @@ func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	}
 	s := dispatch.OrchestratorSpec{Kind: "orchestrator", Name: o.Name, Goal: "Follow through on this session's open runs", Host: o.Host, Mode: "once", Until: "goal", Every: o.Every, MaxLifetime: o.MaxLifetime, Harness: o.Harness, Model: o.Model, Reply: o.Reply, Agent: "on", Idle: "skip", Authority: []string{"say", "rework", "notify", "validate"}}
 	if p, err := followPlan(text); err == nil {
+		if p.Authority == "merge-on-green" {
+			s.Authority = append(s.Authority, "merge")
+		}
 		for _, r := range p.Runs {
 			s.Manages.Runs.Names = append(s.Manages.Runs.Names, r.Name)
 		}
@@ -449,7 +451,12 @@ func followPreset(o dispatch.Order, text string) dispatch.OrchestratorSpec {
 	return s
 }
 func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch.Host, o dispatch.Order, text, path string) error {
+	if err := cfg.SelectedWorkspace.RequireHost(o.Host); err != nil {
+		return err
+	}
+	cmd.SetContext(dispatch.WorkspaceContext(cmd.Context(), cfg.SelectedWorkspace))
 	s := followPreset(o, text)
+	s.WorkspaceName = scopedOrchestratorName(cfg.SelectedWorkspace)
 	s.Fallbacks = cfg.Orchestrate.Follow.Fallbacks
 	if s.Fallbacks == nil {
 		s.Fallbacks = cfg.OrchestratorFallbacks()
@@ -487,6 +494,10 @@ func startFollowOrchestrator(cmd *cobra.Command, cfg dispatch.Config, h dispatch
 			continue
 		}
 		seen[run.Host] = true
+		if err := cfg.SelectedWorkspace.RequireHost(run.Host); err != nil {
+			rollback()
+			return err
+		}
 		target, ok := cfg.Hosts[run.Host]
 		if !ok {
 			rollback()

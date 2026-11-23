@@ -60,7 +60,7 @@ fi
             while not check():
                 if time.monotonic() >= deadline:
                     evidence = {}
-                    for path in (home / "dispatch").rglob("*"):
+                    for path in (home / ".hev/orders").rglob("*"):
                         if path.name in {"state.json", "result.json", "supervisor.log", "trace"}:
                             evidence[str(path.relative_to(home))] = path.read_text(errors="replace")
                     raise AssertionError(f"acceptance boundary timed out: {evidence}")
@@ -95,7 +95,7 @@ source:
 ---
 Test intake only.
 """)
-        state_dir = home / "dispatch/orch-intake"
+        state_dir = home / ".hev/orders/orch-intake"
         def state():
             try:
                 return json.loads((state_dir / "state.json").read_text())
@@ -112,10 +112,10 @@ Test intake only.
             workers = [r for r in rows if r["kind"] == "run"]
             assert len(workers) == 1 and workers[0]["orchestrator"] == "intake", rows
             assert any(r["kind"] == "orch" and r["name"] == "o-intake" for r in rows), rows
-            wait_for(lambda: (home / "dispatch" / workers[0]["name"] / "result.json").exists())
+            wait_for(lambda: (home / ".hev/orders" / workers[0]["name"] / "result.json").exists())
             run(hev, "dispatch", "say", "o-intake", "Poll again")
             wait_for(lambda: state().get("rounds", 0) >= 2 and state().get("state") == "waiting")
-            assert len(list((home / "dispatch").glob("src-*/order.md"))) == 1, "replay launched a duplicate"
+            assert len(list((home / ".hev/orders").glob("src-*/order.md"))) == 1, "replay launched a duplicate"
             # Render preview uses the live render path and writes no receipt.
             markers = sorted(p.name for p in (state_dir / "source-markers").iterdir())
             event_file = root / "event.json"
@@ -135,7 +135,7 @@ Test intake only.
             run(hev, "peers", "inbox", "on", "owner")
             agent_spec.write_text(spec.read_text().replace("name: intake", "name: observer").replace("agent: off", "agent: on").replace("mode: loop", "mode: once").replace("authority: [dispatch]", "reply: owner\nauthority: [dispatch, notify]"))
             run(hev, "orchestrate", "apply", "-f", str(agent_spec))
-            agent_dir = home / "dispatch/orch-observer"
+            agent_dir = home / ".hev/orders/orch-observer"
             wait_for(lambda: (agent_dir / "checkpoint.md").exists())
             def observer_complete():
                 try:

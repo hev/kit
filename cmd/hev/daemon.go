@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/hev/kit/internal/attention"
 	"html"
 	"io"
 	"log/slog"
@@ -18,11 +17,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/license"
 	"github.com/hev/kit/internal/peers"
 	"github.com/hev/kit/internal/platformops"
+	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/secrets"
 	"github.com/hev/kit/internal/storagemode"
 	"github.com/spf13/cobra"
@@ -57,8 +59,9 @@ var dCmd = &cobra.Command{
 }
 
 var sCmd = &cobra.Command{
-	Use:   "s",
-	Short: "Daemon status",
+	Use:     "s",
+	Aliases: []string{"status"},
+	Short:   "Daemon status and ~/.hev disk usage",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -185,8 +188,13 @@ var daemonStatusCmd = &cobra.Command{
 				fmt.Printf("Last error: %s\n", status.LastError)
 			}
 		}
+		writeCaptureTargets(cmd.OutOrStdout(), status.Targets)
 		writeUpdateStatus(cmd.OutOrStdout())
+		if status, configured := license.Inspect(time.Now()); configured {
+			fmt.Fprintf(cmd.OutOrStdout(), "license     %s\n", licenseLine(status))
+		}
 		printStorage()
+		printDiskUsage(cmd.OutOrStdout())
 		fmt.Println(attention.Default().Describe())
 		printEdition()
 		printInvite(cmd.OutOrStdout())
@@ -230,6 +238,32 @@ var daemonStatusCmd = &cobra.Command{
 // printStorage says where traces go, without reading a secret: what the
 // running capture daemon reports for itself, and separately what this
 // shell would resolve, flagging the two when they differ.
+func writeCaptureTargets(out io.Writer, targets []daemon.TargetStatus) {
+	for _, target := range targets {
+		fmt.Fprintf(out, "Capture target %s (%s, %s)", target.Name, target.Mode, target.Storage)
+		if target.Namespace != "" {
+			fmt.Fprintf(out, " namespace %s", target.Namespace)
+		}
+		if target.Endpoint != "" {
+			fmt.Fprintf(out, " at %s", target.Endpoint)
+		}
+		if target.KeySource != "" {
+			fmt.Fprintf(out, " (key from %s)", target.KeySource)
+		}
+		fmt.Fprintln(out)
+		if target.LastRun.IsZero() {
+			fmt.Fprintln(out, "  Last run: pending")
+			continue
+		}
+		fmt.Fprintf(out, "  Last run: %s\n  Units indexed: %d\n", target.LastRun.Format(time.RFC3339), target.UnitsIndexed)
+		lastError := target.LastError
+		if lastError == "" {
+			lastError = "none"
+		}
+		fmt.Fprintf(out, "  Last error: %s\n", lastError)
+	}
+}
+
 func printStorage() {
 	cfg, err := daemon.LoadConfig()
 	if err != nil {
@@ -250,14 +284,15 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 	var dv *storageView
 	switch {
 	case stErr != nil:
-		fmt.Fprintf(out, "Storage (daemon): unknown: %v\n", stErr)
+		fmt.Fprintln(out, "Storage (daemon): could not read daemon storage status")
 	case !st.Running:
 		fmt.Fprintln(out, "Storage (daemon): no capture daemon is running")
 	case st.Record == nil:
 		fmt.Fprintln(out, "Storage (daemon): not reported (the running daemon predates this build; restart it to see its mode)")
 	case st.Record.Mode == storagemode.Layer:
-		dv = &storageView{storagemode.Layer, st.Record.Namespace, st.Record.Endpoint}
-		fmt.Fprintf(out, "Storage (daemon): hev layer namespace %s at %s (pid %d, key from %s)\n", st.Record.Namespace, st.Record.Endpoint, st.Record.PID, st.Record.KeySource)
+		endpoint := daemon.CaptureEndpoint(st.Record.Endpoint)
+		dv = &storageView{storagemode.Layer, st.Record.Namespace, endpoint}
+		fmt.Fprintf(out, "Storage (daemon): hev layer namespace %s at %s (pid %d, key from %s)\n", st.Record.Namespace, endpoint, st.Record.PID, st.Record.KeySource)
 	default:
 		dv = &storageView{storagemode.Filesystem, st.Record.Namespace, st.Record.Archive}
 		fmt.Fprintf(out, "Storage (daemon): files at %s (pid %d)\n", st.Record.Archive, st.Record.PID)
@@ -270,8 +305,13 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 	var sv *storageView
 	res, err := daemon.ResolveMode(cfg)
 	switch {
+	case storagemode.IsNoKey(err):
+		fmt.Fprintln(out, "Storage (this shell): error: this machine is set up for hev layer and this shell has no usable Layer API key")
+		if dv != nil && dv.mode == storagemode.Layer {
+			fmt.Fprintf(out, "  The capture daemon on this machine (pid %d) uses Layer.\n", st.Record.PID)
+		}
 	case err != nil:
-		fmt.Fprintf(out, "Storage (this shell): error: %s\n", strings.ReplaceAll(err.Error(), "\n", "\n  "))
+		fmt.Fprintln(out, "Storage (this shell): could not determine storage mode")
 	case res.Mode == storagemode.Filesystem:
 		dir := filepath.Join(filearchive.Root(cfg.ArchiveDir), ns)
 		sv = &storageView{storagemode.Filesystem, ns, dir}
@@ -281,6 +321,7 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 		if endpoint == "" {
 			endpoint = layer.DefaultEndpoint
 		}
+		endpoint = daemon.CaptureEndpoint(endpoint)
 		sv = &storageView{storagemode.Layer, ns, endpoint}
 		fmt.Fprintf(out, "Storage (this shell): hev layer namespace %s at %s (key from %s)\n", ns, endpoint, res.Source)
 	}
@@ -312,12 +353,12 @@ func printEdition() {
 	}
 	lic, err := cl.License()
 	if err != nil {
-		fmt.Printf("Edition: unknown (%s did not answer)\n", cl.Endpoint)
+		fmt.Println("Layer edition: unknown (gateway license unavailable)")
 		return
 	}
-	fmt.Printf("Edition: %s\n", lic.Edition())
+	fmt.Printf("Layer edition: %s\n", redact.PublicTokens(lic.Edition()))
 	if w := lic.Warning(); w != "" {
-		fmt.Printf("  ! %s\n", w)
+		fmt.Printf("  ! %s\n", redact.PublicTokens(w))
 	}
 }
 
