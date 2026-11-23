@@ -20,18 +20,19 @@ import (
 )
 
 var fohCmd = &cobra.Command{
-	Use:   "foh",
-	Short: "Optional native front-of-house harness (OpenRouter or Codex subscription, YOLO by default)",
-	Long: `hev foh is kit's optional native front-of-house harness: a lean Go agent
-loop and Bubble Tea TUI routed through OpenRouter or an OpenAI/Codex ChatGPT
-subscription (codex/... models), with an in-harness model
-picker, a composable system prompt and first-class hev tools (dispatch, peers,
-board, traces, status). Tools run without approval prompts; isolation belongs
-to the host, workspace, admission and gates.
+	Use:     "kit",
+	Aliases: []string{"foh"},
+	Short:   "Optional native agent harness (OpenRouter or Codex subscription)",
+	Long: `hev kit's optional native agent harness: a lean Go agent loop and
+Bubble Tea TUI routed through OpenRouter or an OpenAI/Codex ChatGPT
+subscription (codex/... models), with an in-harness model picker, a composable
+system prompt and first-class hev tools (dispatch, peers, board, traces,
+status).
 
-Back-of-house work stays on claude, codex and agy through hev dispatch.
+hev kit runs without permissions. It's your responsibility to secure your
+compute.
 
-Set OPENROUTER_API_KEY (or HEV_FOH_API_KEY, or [foh].api_key_ref in
+Set OPENROUTER_API_KEY (or HEV_API_KEY, or [foh].api_key_ref in
 ~/.hev/config.toml), or sign in to Codex with a ChatGPT plan (codex login).
 Claude subscription logins are never used. See https://hevkit.com/docs/foh-harness.`,
 	Args: cobra.NoArgs,
@@ -112,8 +113,8 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 		if ws == "" {
 			ws = "default"
 		}
-		return fmt.Sprintf("host: %s\ncwd: %s\nworkspace: %s\nmodel: %s\nkit: %s\ntime: %s",
-			host, cwd, ws, m, version.String(), time.Now().UTC().Format(time.RFC3339))
+		return fmt.Sprintf("host: %s\ncwd: %s\nworkspace: %s\nmodel: %s\nkit: %s\ndocs: %s\nllms_txt: %s\ntime: %s",
+			host, cwd, ws, m, version.String(), cfg.ResolvedDocsURL(), cfg.DocsLLMsURL(), time.Now().UTC().Format(time.RFC3339))
 	}}
 	system, err := composer.Compose()
 	if err != nil {
@@ -126,6 +127,7 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	}
 	defer session.Close()
 	tools := foh.NewToolset(cwd, nil, secrets...)
+	tools.DocsURL = cfg.ResolvedDocsURL()
 	agent = foh.NewAgent(router, tools, model, system)
 	agent.Session = session
 	session.Write(foh.Record{Type: "meta", Model: model, Provider: agent.ProviderFor(model), Cwd: cwd,
@@ -136,12 +138,12 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	}
 	tui := foh.NewTUI(foh.TUIOptions{
 		Agent: agent, Favorites: favorites, Composer: composer, Version: version.String(),
-		Cwd: cwd, Workspace: workspace, Color: color,
+		Cwd: cwd, Workspace: workspace, SummaryModel: cfg.SummaryModel, Color: color,
 		Catalog: func(ctx context.Context) ([]foh.Model, foh.CatalogSource, error) {
 			return router.Models(ctx, false)
 		},
 	})
-	_, err = tea.NewProgram(tui, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	_, err = tea.NewProgram(tui, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx)).Run()
 	if errors.Is(err, tea.ErrProgramKilled) || errors.Is(err, context.Canceled) {
 		return nil
 	}

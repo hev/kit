@@ -294,7 +294,7 @@ func TestTUICrossProviderPicker(t *testing.T) {
 	if len(h) != 4 || h[2].Content != "from codex" || h[3].Content != "second" {
 		t.Fatalf("history across providers = %+v", h)
 	}
-	if !strings.Contains(plain(m), "[openrouter]") {
-		t.Fatalf("header lacks provider:\n%s", plain(m))
+	if !strings.Contains(plain(m), "· openrouter") {
+		t.Fatalf("status bar lacks provider:\n%s", plain(m))
 	}
 }

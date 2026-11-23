@@ -12,7 +12,7 @@ import (
 
 func init() {
 	var dir, output string
-	cmd := &cobra.Command{Use: "cost-price", Short: "Price the factory accounting export using dated operator tables", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "cost-price", Short: "Price the cluster accounting export using dated operator tables", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := cost.LoadConfig(filepath.Join(dir, "prices.toml"), filepath.Join(dir, "subscriptions.toml"))
 		if err != nil {
 			return err

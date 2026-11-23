@@ -110,6 +110,23 @@ func (a *Agent) History() []Message {
 	return append([]Message(nil), a.history...)
 }
 
+// LoadHistory replaces the thread history with resumed messages (capped at MaxHistory).
+func (a *Agent) LoadHistory(msgs []Message) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(msgs) > MaxHistory {
+		msgs = msgs[len(msgs)-MaxHistory:]
+	}
+	a.history = append([]Message(nil), msgs...)
+	turns := 0
+	for _, m := range a.history {
+		if m.Role == "user" {
+			turns++
+		}
+	}
+	a.turn = turns
+}
+
 // Reset clears the thread (/clear).
 func (a *Agent) Reset() {
 	a.mu.Lock()

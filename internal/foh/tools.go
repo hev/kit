@@ -68,6 +68,7 @@ type HevRunner func(ctx context.Context, args []string, stdin string) ([]byte, e
 type Toolset struct {
 	Cwd     string
 	Hev     HevRunner
+	DocsURL string
 	Secrets []string
 	secMu   sync.Mutex
 	tools   map[string]Tool
@@ -83,6 +84,7 @@ func NewToolset(cwd string, hev HevRunner, secrets ...string) *Toolset {
 	for _, tool := range append(t.localTools(), t.hevTools()...) {
 		t.Register(tool)
 	}
+	t.Register(t.docsTool())
 	return t
 }
 

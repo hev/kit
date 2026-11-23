@@ -63,6 +63,7 @@ func newClusterCommand() *cobra.Command {
 		&cobra.Command{Use: "leave", Short: "Leave encrypted hevd membership", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			return runClusterCommand(cmd, "leave", "")
 		}},
+		newHygieneCommand(),
 	)
 	return root
 }
