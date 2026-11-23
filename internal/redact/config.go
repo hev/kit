@@ -176,6 +176,11 @@ func LoadFile(path string) (*Scrubber, error) {
 // LockArchive serializes current-version archive writers with upgrade cleanup.
 // Older daemons must be stopped before upgrading; they do not honor this lock.
 func LockArchive() (func(), error) {
+	return LockArchiveScope("")
+}
+
+// LockArchiveScope serializes writers and migration for one destination.
+func LockArchiveScope(scope string) (func(), error) {
 	if err := platformops.RequireTraceWrites(); err != nil {
 		return nil, err
 	}
@@ -186,5 +191,9 @@ func LockArchive() (func(), error) {
 	if err = platformops.MkdirAll(filepath.Dir(config), 0700); err != nil {
 		return nil, err
 	}
-	return platformops.LockPath(config+".archive.lock", false)
+	name := config + ".archive.lock"
+	if scope != "" {
+		name += "." + scope
+	}
+	return platformops.LockPath(name, false)
 }

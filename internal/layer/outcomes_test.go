@@ -109,14 +109,15 @@ func TestOutcomePageContextAndCursor(t *testing.T) {
 	}
 }
 func TestOutcomeWriterLockRetry(t *testing.T) {
-	unlock, e := lockSessionEnrichment(false)
+	cl := New("http://invalid", "", "ns", "")
+	unlock, e := cl.lockSessionEnrichment(false)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if e := New("http://invalid", "", "ns", "").PatchOutcomes(ctx, trace.SessionRow{}); e == nil || !strings.Contains(e.Error(), "writer busy") {
+	if e := cl.PatchOutcomes(ctx, trace.SessionRow{}); e == nil || !strings.Contains(e.Error(), "writer busy") {
 		t.Fatalf("%v", e)
 	}
 }

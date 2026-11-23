@@ -14,7 +14,7 @@ import (
 // RunInstructions uses archive state rather than the local signature cache so
 // restarts, target changes and failed writes cannot silently lose history.
 func RunInstructions(src trace.InstructionSource, cl Archive) (*Report, error) {
-	unlock, err := redact.LockArchive()
+	unlock, err := lockArchive(cl)
 	if err != nil {
 		return nil, err
 	}
