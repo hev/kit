@@ -357,6 +357,7 @@ func newOrchestrateCommand() *cobra.Command {
 	_ = render.MarkFlagRequired("event")
 	c.AddCommand(render)
 	c.AddCommand(newOrchestrateNoticesCommand())
+	c.AddCommand(newSwarmCommand())
 	var scheduled bool
 	supervise := &cobra.Command{Use: "supervise NAME", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		// A scheduled-task launch (Windows) carries its environment in a file.

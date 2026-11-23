@@ -1,9 +1,11 @@
 package trace
 
 import (
+	"path/filepath"
 	"slices"
 
 	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/workspace"
 )
 
 // sourceFactories binds registry identities to native trace adapters. Keeping
@@ -76,3 +78,43 @@ func (s *DotSource) nativeSource() (string, string)      { return s.Root, harnes
 func (s *PiSource) nativeSource() (string, string)       { return s.Root, harness.Pi }
 func (s *OpenCodeSource) nativeSource() (string, string) { return s.Root, harness.OpenCode }
 func (s *AgySource) nativeSource() (string, string)      { return s.Root, harness.Agy }
+
+// WorkspaceSources finds the transcripts held by the workspace's own harness profiles.
+func WorkspaceSources(w workspace.Selection) []Source {
+	var sources []Source
+	if dir := w.Profile(harness.Claude); dir != "" {
+		sources = append(sources, &ClaudeSource{Root: filepath.Join(dir, "projects")})
+	}
+	if dir := w.Profile(harness.Codex); dir != "" {
+		sources = append(sources, &CodexSource{Root: filepath.Join(dir, "sessions")})
+	}
+	if dir := w.AgyTranscriptDir(); dir != "" {
+		sources = append(sources, &AgySource{Root: dir})
+	}
+	return sources
+}
+
+// MergeSources adds profile roots without indexing the same harness root
+// twice when it is also the host's default.
+func MergeSources(defaults, profiles []Source) []Source {
+	if len(profiles) == 0 {
+		return defaults
+	}
+	type identity struct{ root, harness string }
+	seen := make(map[identity]bool, len(defaults)+len(profiles))
+	var out []Source
+	for _, group := range [][]Source{defaults, profiles} {
+		for _, src := range group {
+			root, name := SourceInfo(src)
+			if path, err := filepath.EvalSymlinks(root); err == nil {
+				root = path
+			}
+			key := identity{filepath.Clean(root), name}
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, src)
+			}
+		}
+	}
+	return out
+}

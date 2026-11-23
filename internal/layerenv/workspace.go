@@ -3,6 +3,7 @@ package layerenv
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -13,14 +14,23 @@ import (
 // WorkspaceKey resolves only the workspace's reference. Shared environment
 // keys and the legacy Layer config are never consulted here.
 func WorkspaceKey(w workspace.Selection) (string, error) {
-	if w.Layer.KeyRef == "" {
+	ref := w.TraceSettings().KeyRef
+	if ref == "" {
 		return "", nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	values, err := secrets.ResolveWith(ctx, []secrets.Ref{{Name: "HEVLAYER_API_KEY", URI: w.Layer.KeyRef, TTL: KeyTTL}}, secrets.Options{Caller: secrets.DefaultCaller("kit workspace layer")})
-	key := strings.TrimSpace(values["HEVLAYER_API_KEY"])
-	if err != nil || key == "" || key == PlaceholderKey {
+	var key string
+	if env, ok := strings.CutPrefix(ref, "env://"); ok {
+		key = os.Getenv(env)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		values, err := secrets.ResolveWith(ctx, []secrets.Ref{{Name: "HEVLAYER_API_KEY", URI: ref, TTL: KeyTTL}}, secrets.Options{Caller: secrets.DefaultCaller("kit workspace layer")})
+		if err == nil {
+			key = values["HEVLAYER_API_KEY"]
+		}
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || key == PlaceholderKey {
 		return "", fmt.Errorf("could not resolve Layer key for workspace %q", w.Name)
 	}
 	return key, nil

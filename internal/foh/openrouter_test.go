@@ -27,7 +27,7 @@ func isolateHome(t *testing.T) string {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HEV_CONFIG", "")
 	t.Setenv("HEV_FOH_SESSIONS_DIR", "")
-	for _, k := range []string{"OPENROUTER_API_KEY", "HEV_FOH_API_KEY", "HEV_FOH_MODEL", "HEV_FOH_BASE_URL", "CODEX_HOME", "HEV_WORKSPACE", "CLAUDE_CONFIG_DIR", "HEV_FOH_CODEX_BASE_URL"} {
+	for _, k := range []string{"OPENROUTER_API_KEY", "HEV_API_KEY", "HEV_FOH_MODEL", "HEV_FOH_BASE_URL", "CODEX_HOME", "HEV_WORKSPACE", "CLAUDE_CONFIG_DIR", "HEV_FOH_CODEX_BASE_URL"} {
 		t.Setenv(k, "")
 	}
 	return home
@@ -346,16 +346,16 @@ func TestConfigAndKeyResolution(t *testing.T) {
 	if k, err := cfg.ResolveAPIKey(context.Background()); err != nil || k != "sk-or-v1-fromref0000000000000000" {
 		t.Fatalf("ref key = %q %v", k, err)
 	}
-	t.Setenv("HEV_FOH_API_KEY", "envkey-hev")
+	t.Setenv("HEV_API_KEY", "envkey-hev")
 	if k, _ := cfg.ResolveAPIKey(context.Background()); k != "envkey-hev" {
-		t.Fatal("HEV_FOH_API_KEY must beat the ref")
+		t.Fatal("HEV_API_KEY must beat the ref")
 	}
 	t.Setenv("OPENROUTER_API_KEY", "envkey-or")
 	if k, _ := cfg.ResolveAPIKey(context.Background()); k != "envkey-or" {
 		t.Fatal("OPENROUTER_API_KEY must win")
 	}
 	t.Setenv("OPENROUTER_API_KEY", "")
-	t.Setenv("HEV_FOH_API_KEY", "")
+	t.Setenv("HEV_API_KEY", "")
 	ResolveSecretRef = func(context.Context, string) (string, error) {
 		return "", errors.New("op failed: Authorization: Bearer ops_tokenvalue123456")
 	}

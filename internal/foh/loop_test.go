@@ -356,7 +356,7 @@ func TestPromptCompositionAndReload(t *testing.T) {
 		t.Fatalf("parts = %v", labels)
 	}
 	s, _ := c.Compose()
-	order := []string{"hev foh", "AGENTS RULES", "MISSION TEXT", "USER CUSTOM v1", "CONFIG INLINE", "EXTRA PROMPT", "host: test"}
+	order := []string{"hev kit", "AGENTS RULES", "MISSION TEXT", "USER CUSTOM v1", "CONFIG INLINE", "EXTRA PROMPT", "host: test"}
 	last := -1
 	for _, want := range order {
 		i := strings.Index(s, want)

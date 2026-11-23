@@ -53,7 +53,11 @@ func newHygieneCommand() *cobra.Command {
 	return root
 }
 
-func init() { rootCmd.AddCommand(newHygieneCommand()) }
+func init() {
+	cmd := newHygieneCommand()
+	cmd.Hidden = true
+	rootCmd.AddCommand(cmd)
+}
 
 func runHygienePass(ctx context.Context, out io.Writer, dryRun, asJSON bool) error {
 	cfg, err := hygiene.Load(daemon.DefaultConfigPath())
