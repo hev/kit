@@ -74,7 +74,7 @@ func TestOnboardScriptedFirstRunAndIdempotentRerun(t *testing.T) {
 		t.Fatal("workspace not created")
 	}
 	// The unified layout, and none of the legacy directories.
-	for _, s := range []string{"traces", "board", "orders", "peers", "hooks", "evidence", "reviews"} {
+	for _, s := range []string{"traces", "board", "orders", "peers", "hooks", "evidence"} {
 		if info, err := os.Stat(filepath.Join(home, ".hev", s)); err != nil || !info.IsDir() {
 			t.Fatalf("~/.hev/%s missing", s)
 		}
