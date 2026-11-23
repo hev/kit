@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 )
 
 type apiRequest struct {
+	Box        string          `json:"box"`
 	Action     string          `json:"action"`
 	ID         string          `json:"id"`
 	CallerHost string          `json:"caller_host"`
@@ -114,6 +116,13 @@ func (e *Engine) apiExecute(ctx context.Context, q apiRequest) (int, any) {
 			ms = []Message{}
 		}
 		status := apiInboxStatus(ms, peer.Identity)
+		if q.Box == "sent" {
+			sent, err := e.apiSent(ctx, peer, peers)
+			if err != nil {
+				return 503, nil
+			}
+			return 200, Message{"data": sent, "inbox_status": status}
+		}
 		for _, m := range ms {
 			formatAPIMessage(m, peer)
 		}
@@ -125,6 +134,33 @@ func (e *Engine) apiExecute(ctx context.Context, q apiRequest) (int, any) {
 	default:
 		return 400, nil
 	}
+}
+
+// Read from the same scoped, incarnation-bound store as inbox delivery and
+// receipts. A host-wide legacy send log cannot establish workspace ownership.
+func (e *Engine) apiSent(ctx context.Context, sender Peer, peers []Peer) ([]Message, error) {
+	sent := []Message{}
+	for _, recipient := range peers {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		ms, err := e.view(recipient.Session, recipient.Identity)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range ms {
+			if m["from"] == sender.Address && m["current"] == true {
+				formatAPIMessage(m, recipient)
+				sent = append(sent, m)
+			}
+		}
+	}
+	sort.SliceStable(sent, func(i, j int) bool {
+		a, _ := sent[i]["ts"].(time.Time)
+		b, _ := sent[j]["ts"].(time.Time)
+		return a.After(b)
+	})
+	return sent, nil
 }
 
 func (e *Engine) apiPresence(ctx context.Context, p Peer, id string) Message {

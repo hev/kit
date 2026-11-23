@@ -23,3 +23,16 @@ registered local inbox peers and their consume and acknowledge receipts.
 Relay operations use the execution account's selected workspace. For an
 isolated workspace, pass the API origin and provision its dedicated key
 instead of relying on the default Club Kit sign-in.
+
+The API refuses a stop on an ended run and keeps its terminal result readable.
+An explicit API purge removes the ended run record and its worktree, subject
+to Git's worktree removal checks. The branch stays available. Ordinary
+`hev dispatch clean` keeps the receipt for an admitted run.
+
+The orders API reports the requested validation mode separately from the
+validation result and exposes the verdict label. A native harness outside
+the v1 enum is omitted from the structured summary.
+
+The self-hosted sent box reads outgoing held messages from current local
+recipient inboxes in the selected workspace, most recent first. Its inbox
+counts still describe the queried peer's inbound inbox.
