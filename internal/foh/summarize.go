@@ -28,6 +28,8 @@ func hevToolEmoji(tool string, color bool) string {
 		return "🔍"
 	case "hev_status":
 		return "📡"
+	case "hev_docs":
+		return "📖"
 	default:
 		return "◆"
 	}

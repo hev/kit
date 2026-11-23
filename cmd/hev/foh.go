@@ -127,6 +127,7 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	}
 	defer session.Close()
 	tools := foh.NewToolset(cwd, nil, secrets...)
+	tools.DocsURL = cfg.ResolvedDocsURL()
 	agent = foh.NewAgent(router, tools, model, system)
 	agent.Session = session
 	session.Write(foh.Record{Type: "meta", Model: model, Provider: agent.ProviderFor(model), Cwd: cwd,

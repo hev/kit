@@ -2,6 +2,8 @@ package foh
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -200,5 +202,36 @@ func TestSteerOverlayAndDirectSend(t *testing.T) {
 	}
 	if len(m.entries) != 0 {
 		t.Fatalf("direct /steer should stay in lower bar, not main entries: %+v", m.entries)
+	}
+}
+
+func TestHevDocsToolAndOriginGuard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/llms.txt":
+			w.Write([]byte("# hev kit\n- /docs/dispatch.md\n"))
+		case "/docs/dispatch.md":
+			w.Write([]byte("# Dispatch\nSend orders to worker hosts.\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	ts := NewToolset(t.TempDir(), nil)
+	ts.DocsURL = srv.URL + "/docs"
+
+	res := ts.Run(context.Background(), ToolCall{ID: "1", Function: FunctionCall{Name: "hev_docs", Arguments: `{"action":"index"}`}})
+	if res.IsError || !strings.Contains(res.Content, "/docs/dispatch.md") || res.Card == nil || !res.Card.OK {
+		t.Fatalf("docs index = %+v", res)
+	}
+	res = ts.Run(context.Background(), ToolCall{ID: "2", Function: FunctionCall{Name: "hev_docs", Arguments: `{"action":"read","page":"dispatch.md"}`}})
+	if res.IsError || !strings.Contains(res.Content, "Send orders") {
+		t.Fatalf("docs read = %+v", res)
+	}
+	// Off-origin URLs must be refused.
+	res = ts.Run(context.Background(), ToolCall{ID: "3", Function: FunctionCall{Name: "hev_docs", Arguments: `{"action":"read","page":"https://evil.example.com/secret"}`}})
+	if !res.IsError || !strings.Contains(res.Content, "off-origin") {
+		t.Fatalf("expected off-origin refusal, got %+v", res)
 	}
 }

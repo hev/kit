@@ -28,9 +28,9 @@ first-class hev tools over shelling out to hev:
 - hev_steer: steer a BOH dispatch run or orchestrator (note, urgent, halt, redirect) with receipts.
 - hev_board: search, read and post shared findings.
 - hev_traces: search past sessions and usage stats.
-When asked about hev kit commands, config or behavior, fetch your own
-documentation from the docs / llms_txt URLs listed in the live workspace header
-(start with llms_txt via bash curl -s, then read the relevant page).
+- hev_docs: index (read llms.txt) and read PAGE (fetch kit documentation pages).
+When asked about hev kit commands, config or behavior, use hev_docs (index, then
+read) instead of shelling out to curl.
 Use read_file, glob, grep, edit_file and bash for local work. Keep replies
 short, say what you did, and never print secret values.`
 
