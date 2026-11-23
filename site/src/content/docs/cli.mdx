@@ -15,6 +15,7 @@ are looked up as [exec commands](/docs/exec-commands) on your PATH.
 | Command | What it does |
 | --- | --- |
 | `hev` | Read-only overview of nodes, orders and peers. `--json` for structured output. |
+| [`hev kit`](/docs/kit) | Start the optional built-in terminal agent harness. |
 | `hev onboard` | Interactive first-run setup: pick the harnesses to use (Claude Code, Codex, pi, OpenCode, agy), confirm the workspace and the `~/.hev/<surface>/` folders, then run `hev up`. The first `hev up` on a terminal runs it on an unconfigured machine. Answers are kept in `~/.hev/onboard.toml`. `--no-picker` skips the Picker. See [Quickstart](/docs/quickstart). |
 | `hev up` | Write the config, create the `~/.hev/<surface>/` folders, install the capture daemon and the skills, and run the local dashboard (`hev serve`) as a service on `127.0.0.1:8099`. `--non-interactive` never onboards. With no key, traces go to files and nothing starts in Docker; with a hev layer key, they go to your hev layer ([Pro Kit](/docs/upgrade#pro-kit)). `--store turbopuffer` runs the hev layer gateway in Docker in front of your own turbopuffer account. |
 | `hev down` | Unload the capture daemon, and stop any containers `hev up` started. The archive is kept. |
