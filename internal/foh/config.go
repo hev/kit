@@ -31,6 +31,7 @@ type Config struct {
 	APIKeyRef    string `toml:"api_key_ref"`
 	SystemPrompt string `toml:"system_prompt"`
 	DocsURL      string `toml:"docs_url"`
+	SummaryModel string `toml:"summary_model"`
 	// Codex is the optional [foh.codex] table for the codex-sub provider.
 	Codex CodexConfig `toml:"codex"`
 }

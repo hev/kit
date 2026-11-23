@@ -137,7 +137,7 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	}
 	tui := foh.NewTUI(foh.TUIOptions{
 		Agent: agent, Favorites: favorites, Composer: composer, Version: version.String(),
-		Cwd: cwd, Workspace: workspace, Color: color,
+		Cwd: cwd, Workspace: workspace, SummaryModel: cfg.SummaryModel, Color: color,
 		Catalog: func(ctx context.Context) ([]foh.Model, foh.CatalogSource, error) {
 			return router.Models(ctx, false)
 		},

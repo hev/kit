@@ -20,14 +20,15 @@ type CatalogLoader func(ctx context.Context) ([]Model, CatalogSource, error)
 
 // TUIOptions configures the meta-harness TUI.
 type TUIOptions struct {
-	Agent     *Agent
-	Catalog   CatalogLoader
-	Favorites *Favorites
-	Composer  PromptComposer
-	Version   string
-	Cwd       string
-	Workspace string
-	Color     bool
+	Agent        *Agent
+	Catalog      CatalogLoader
+	Favorites    *Favorites
+	Composer     PromptComposer
+	Version      string
+	Cwd          string
+	Workspace    string
+	SummaryModel string
+	Color        bool
 }
 
 type entryKind int

@@ -342,7 +342,7 @@ func summarize(tool, action, body string) string {
 		}
 	}
 	first, _, _ := strings.Cut(body, "\n")
-	if first == "" {
+	if first == "" || strings.HasPrefix(strings.TrimSpace(first), "{") || strings.HasPrefix(strings.TrimSpace(first), "[") {
 		return label + " · ok"
 	}
 	return label + " · " + truncateLine(first, 100)

@@ -3,6 +3,7 @@ package foh
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -38,7 +39,14 @@ type cardSummaryMsg struct {
 }
 
 // pickSummaryModel chooses a small/fast model available on the active router.
-func pickSummaryModel(p Provider, activeModel string) string {
+// HEV_SUMMARY_MODEL or [foh].summary_model overrides the default.
+func pickSummaryModel(p Provider, activeModel, configured string) string {
+	if v := strings.TrimSpace(os.Getenv("HEV_SUMMARY_MODEL")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(configured); v != "" {
+		return v
+	}
 	if r, ok := p.(*Router); ok {
 		if r.Has(ProviderOpenRouter) {
 			return "google/gemini-2.5-flash-lite"
@@ -62,22 +70,22 @@ func (m *TUI) summarizeCardAsync(callID, tool, action, rawOutput string) tea.Cmd
 		return nil
 	}
 	p := m.opts.Agent.Provider
-	model := pickSummaryModel(p, m.opts.Agent.Model())
+	model := pickSummaryModel(p, m.opts.Agent.Model(), m.opts.SummaryModel)
 	if model == "" {
 		return nil
 	}
 	snippet := truncateLine(trimmed, 3000)
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		req := ChatRequest{
 			Model: model,
 			Messages: []Message{
-				{Role: "system", Content: "Summarize what this hev CLI command did or returned in ONE short, plain-English sentence (max 14 words). No markdown, no quotes, no secrets."},
+				{Role: "system", Content: "Summarize what this hev CLI command did or returned in ONE short, plain-English sentence (max 14 words). No markdown, no quotes, no JSON, no secrets."},
 				{Role: "user", Content: fmt.Sprintf("command: %s %s\noutput:\n%s", strings.ReplaceAll(tool, "_", " "), action, snippet)},
 			},
 		}
-		res, err := p.Stream(ctx, req, nil)
+		res, err := p.Stream(ctx, req, func(Delta) {})
 		if err != nil {
 			return nil
 		}
