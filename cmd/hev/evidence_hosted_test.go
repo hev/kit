@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -78,5 +79,28 @@ func TestHostedEvidenceCLINeverMirrors(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".hev", "evidence")); !os.IsNotExist(err) {
 		t.Fatalf("hosted runs created a local mirror: %v", err)
+	}
+}
+
+func TestHostedEvidenceUsesSavedAPIOrigin(t *testing.T) {
+	evidenceHome(t)
+	key := "hk_" + strings.Repeat("s", 43)
+	configPath := os.Getenv("HEV_CONFIG")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	config := "[kit]\nkey = \"" + key + "\"\napi = \"https://api.example.test\"\nservice = \"https://login.example.test\"\n"
+	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_KIT_SERVICE", "https://login.example.test")
+	// Restore any external override after the test, and read the saved key.
+	t.Setenv("HEV_API_KEY", "")
+	if err := os.Unsetenv("HEV_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	client, err := hostedEvidence(context.Background())
+	if err != nil || client == nil || client.base != "https://api.example.test" {
+		t.Fatalf("saved API origin was not used: %v", err)
 	}
 }

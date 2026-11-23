@@ -55,10 +55,13 @@ func hostedEvidence(ctx context.Context) (*remoteEvidence, error) {
 		return nil, errors.New("could not read evidence storage configuration")
 	}
 	key := config.Kit.Key
+	base := defaultString(config.Kit.API, config.Kit.Service)
 	if env, ok := os.LookupEnv("HEV_API_KEY"); ok {
 		key = &env
+		base = defaultString(os.Getenv("HEV_KIT_SERVICE"), base)
+	} else if base == "" {
+		base = os.Getenv("HEV_KIT_SERVICE")
 	}
-	base := defaultString(os.Getenv("HEV_KIT_SERVICE"), defaultString(config.Kit.API, config.Kit.Service))
 	if key == nil {
 		mode, err := storagemode.Resolve(storagemode.Options{ConfigKey: true, Peek: true})
 		reasons, intentErr := storagemode.Intent("")
