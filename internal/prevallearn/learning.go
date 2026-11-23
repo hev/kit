@@ -34,24 +34,34 @@ var errLearning = errors.New("pull request learning could not finish")
 var paths = regexp.MustCompile(`(?i)(?:https?://|file://|[a-z]:[\\/]|(?:~|\.{1,2})?[/\\])[a-z0-9_./\\~:@%+?&=#-]+`)
 
 type Learner struct {
-	Board   *store.Store
+	Board   learningBoard
 	Root    string
 	Model   string
 	Binary  string
-	Sources func(preval.Evaluation) ([]preval.Excerpt, error)
+	Sources func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)
 	scrub   *redact.Scrubber
+	secrets []string
 	run     func(context.Context, []byte) ([]byte, error)
 }
 
-func New(root, model string, sources func(preval.Evaluation) ([]preval.Excerpt, error)) (*Learner, error) {
+type learningBoard interface {
+	Threads(context.Context, store.ListOpts) ([]store.Thread, error)
+	CreateThread(context.Context, store.NewThread) (*store.Thread, error)
+}
+
+func New(root, model string, sources func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)) (*Learner, error) {
+	board, err := store.NewFiles(root)
+	if err != nil {
+		return nil, errLearning
+	}
+	return newLearner(board, root, model, sources)
+}
+
+func newLearner(board learningBoard, root, model string, sources func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)) (*Learner, error) {
 	if model == "" || sources == nil {
 		return nil, errLearning
 	}
 	binary, err := exec.LookPath("claude")
-	if err != nil {
-		return nil, errLearning
-	}
-	board, err := store.NewFiles(root)
 	if err != nil {
 		return nil, errLearning
 	}
@@ -107,7 +117,7 @@ func (l *Learner) Learn(ctx context.Context, provider preval.Provider, evaluatio
 	if err != nil {
 		return preval.Learning{}, errLearning
 	}
-	local, err := l.Sources(evaluation)
+	local, err := l.Sources(ctx, evaluation)
 	if err != nil {
 		return preval.Learning{}, errLearning
 	}
@@ -117,19 +127,23 @@ func (l *Learner) Learn(ctx context.Context, provider preval.Provider, evaluatio
 	}
 	var known []string
 	for _, thread := range existing {
-		known = append(known, l.clean(thread.Body()))
+		body := thread.Body()
+		if body == "" {
+			body = thread.Excerpt
+		}
+		known = append(known, l.clean(body))
 	}
-	sealed := make([]preval.Excerpt, 0, len(local)+len(review))
-	secrets := []string{provider.Token, provider.HookSecret, os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")}
+	material := make([]preval.Excerpt, 0, len(local)+len(review))
+	secrets := append([]string{provider.Token, provider.HookSecret, os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")}, l.secrets...)
 	for _, item := range append(local, review...) {
 		for _, secret := range secrets {
 			if secret != "" {
 				item.Text = strings.ReplaceAll(item.Text, secret, "[redacted]")
 			}
 		}
-		sealed = append(sealed, item)
+		material = append(material, item)
 	}
-	return l.extract(ctx, evaluation, sealed, known)
+	return l.extract(ctx, evaluation, material, known)
 }
 
 func (l *Learner) extract(ctx context.Context, evaluation preval.Evaluation, material []preval.Excerpt, known []string) (preval.Learning, error) {
@@ -199,11 +213,13 @@ func (l *Learner) publish(ctx context.Context, evaluation preval.Evaluation, rul
 	// The local board and marker share a filesystem. Search then create while
 	// holding a separate nonblocking lock so another evaluator cannot publish
 	// the same rule between the two operations.
-	release, err := platformops.LockPath(filepath.Join(l.Root, ".pr-evaluation-publish.lock"), true)
-	if err != nil {
-		return "", false, errLearning
+	if l.Root != "" {
+		release, err := platformops.LockPath(filepath.Join(l.Root, ".pr-evaluation-publish.lock"), true)
+		if err != nil {
+			return "", false, errLearning
+		}
+		defer release()
 	}
-	defer release()
 	digest := sha256.Sum256([]byte(canonical(rule.Text)))
 	tag := fmt.Sprintf("pr-rule-%x", digest[:8])
 	existing, err := l.Board.Threads(ctx, store.ListOpts{Board: "learnings", Tag: tag, Limit: 1})

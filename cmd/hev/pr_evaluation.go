@@ -60,6 +60,9 @@ func (d localEvaluationDocuments) ReadOrder(_ context.Context, p preval.Provenan
 func (d localEvaluationDocuments) WriteOrder(_ context.Context, e preval.Evaluation) error {
 	return dispatch.SetEvaluation(e)
 }
+func (d localEvaluationDocuments) ClaimLearning(_ context.Context, e preval.Evaluation) (bool, error) {
+	return dispatch.ClaimEvaluationLearning(e)
+}
 func (d localEvaluationDocuments) WriteTrace(_ context.Context, id string, e preval.Evaluation) error {
 	return d.traces.SetEvaluation(id, e)
 }
@@ -125,10 +128,12 @@ func loadPREvaluation(path string) (*preval.Reconciler, error) {
 		return nil, err
 	}
 	if config.LearningModel != "" {
-		if config.Hosted != nil {
-			return nil, errors.New("native learning requires explicitly authorized local source and board storage")
+		var learner *prevallearn.Learner
+		if hosted, ok := documents.(preval.HostedDocuments); ok {
+			learner, err = prevallearn.NewHosted(hosted, config.LearningModel)
+		} else {
+			learner, err = prevallearn.New(hevpaths.Dir(hevpaths.Board), config.LearningModel, local.learningSources)
 		}
-		learner, err := prevallearn.New(hevpaths.Dir(hevpaths.Board), config.LearningModel, local.learningSources)
 		if err != nil {
 			return nil, err
 		}
@@ -202,7 +207,7 @@ func readPREvalExcerpt(path string) (string, error) {
 	return string(body), err
 }
 
-func (d localEvaluationDocuments) learningSources(e preval.Evaluation) ([]preval.Excerpt, error) {
+func (d localEvaluationDocuments) learningSources(_ context.Context, e preval.Evaluation) ([]preval.Excerpt, error) {
 	p := e.Provenance
 	doc, err := readPREvalExcerpt(filepath.Join(dispatch.Root(), p.OrderID, "order.md"))
 	if err != nil {

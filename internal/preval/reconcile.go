@@ -12,6 +12,7 @@ import (
 type Documents interface {
 	ReadOrder(context.Context, Provenance) (*Evaluation, error)
 	WriteOrder(context.Context, Evaluation) error
+	ClaimLearning(context.Context, Evaluation) (bool, error)
 	WriteTrace(context.Context, string, Evaluation) error
 	WriteEvidence(context.Context, string, Evaluation) error
 }
@@ -61,7 +62,9 @@ func NewReconciler(providers []Provider, links []Registration, docs Documents, s
 func (r *Reconciler) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for i, provider := range r.providers {
-		mux.Handle("/hooks/"+strconv.Itoa(i), provider.Hook(r.Reconcile))
+		mux.Handle("/hooks/"+strconv.Itoa(i), provider.Hook(func(ctx context.Context, request PullRequest, eventAt time.Time) error {
+			return r.reconcile(ctx, request, eventAt, false)
+		}))
 	}
 	return mux
 }
@@ -80,7 +83,7 @@ func (r *Reconciler) Sweep(ctx context.Context, cursor int, limit int) (int, err
 		pr := r.links[cursor].PullRequest
 		cursor = (cursor + 1) % len(r.links)
 		call, cancel := context.WithTimeout(ctx, 90*time.Second)
-		err = errors.Join(err, r.reconcile(call, pr, true))
+		err = errors.Join(err, r.reconcile(call, pr, time.Time{}, true))
 		cancel()
 	}
 	return cursor, err
@@ -89,11 +92,7 @@ func (r *Reconciler) Sweep(ctx context.Context, cursor int, limit int) (int, err
 var errBusy = errors.New("pull request reconciliation already running")
 var errPersistence = errors.New("could not reconcile a linked evaluation document")
 
-func (r *Reconciler) Reconcile(ctx context.Context, pr PullRequest) error {
-	return r.reconcile(ctx, pr, false)
-}
-
-func (r *Reconciler) reconcile(ctx context.Context, pr PullRequest, learn bool) error {
+func (r *Reconciler) reconcile(ctx context.Context, pr PullRequest, activity time.Time, learn bool) error {
 	select {
 	case r.slot <- struct{}{}:
 		defer func() { <-r.slot }()
@@ -110,6 +109,9 @@ func (r *Reconciler) reconcile(ctx context.Context, pr PullRequest, learn bool) 
 			snapshot, err := r.providers[link.ProviderIndex].Lookup(ctx, pr)
 			if err != nil {
 				return err
+			}
+			if snapshot.Outcome == Active && activity.After(snapshot.LastActivity) && !activity.After(snapshot.ObservedAt) {
+				snapshot.LastActivity = activity
 			}
 			observation = &snapshot
 		}
@@ -163,7 +165,8 @@ func (r *Reconciler) repair(ctx context.Context, link Attribution, observation O
 	// Persist the attempt before invoking the harness. An interruption leaves
 	// a failed marker and never repeatedly spends model time on this transition.
 	evaluation.Learning = Learning{Status: "failed"}
-	if err := r.documents.WriteOrder(ctx, evaluation); err != nil {
+	claimed, err := r.documents.ClaimLearning(ctx, evaluation)
+	if err != nil || !claimed {
 		return err
 	}
 	out, err := r.learner.Learn(ctx, provider, evaluation)

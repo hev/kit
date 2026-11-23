@@ -29,6 +29,14 @@ func (d *fixtureDocuments) WriteOrder(_ context.Context, e Evaluation) error {
 	return nil
 }
 
+func (d *fixtureDocuments) ClaimLearning(_ context.Context, e Evaluation) (bool, error) {
+	if d.order == nil || d.order.Learning.Status != "pending" {
+		return false, nil
+	}
+	d.order = &e
+	return true, nil
+}
+
 func (d *fixtureDocuments) WriteTrace(context.Context, string, Evaluation) error {
 	return nil
 }
@@ -182,6 +190,7 @@ func TestStaleAndCorrectionRequireEvidence(t *testing.T) {
 	}
 	later.Outcome, later.Source.ID = Reverted, 2
 	link.Correction = &later
+	observation.ObservedAt = later.ObservedAt.Add(time.Second)
 	reverted, err := Project(link, observation, &merged, 0, false)
 	if err != nil || reverted.Outcome != Reverted || reverted.ID != merged.ID || reverted.Source.ID != 2 {
 		t.Fatalf("explicit revert failed: %v", err)

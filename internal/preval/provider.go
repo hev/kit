@@ -49,6 +49,7 @@ type azurePR struct {
 	ID         int64 `json:"pullRequestId"`
 	Status     string
 	Closed     time.Time `json:"closedDate"`
+	Created    time.Time `json:"creationDate"`
 	Repository struct {
 		ID      string
 		Project struct{ ID string }
@@ -91,7 +92,7 @@ func (p Provider) hookAuthorized(r *http.Request, body []byte) bool {
 
 // Hook accepts only configured repository identities. The callback reconciles
 // an existing attribution and never treats the payload itself as an outcome.
-func (p Provider) Hook(reconcile func(context.Context, PullRequest) error) http.Handler {
+func (p Provider) Hook(reconcile func(context.Context, PullRequest, time.Time) error) http.Handler {
 	slots := make(chan struct{}, 8)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -125,14 +126,14 @@ func (p Provider) Hook(reconcile func(context.Context, PullRequest) error) http.
 			}
 			return
 		}
-		id, status := p.hookIdentity(r, body)
+		id, eventAt, status := p.hookIdentity(r, body)
 		if status != 0 {
 			w.WriteHeader(status)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), providerTimeout)
 		defer cancel()
-		if err := reconcile(ctx, PullRequest{p.Repository, id}); err != nil {
+		if err := reconcile(ctx, PullRequest{p.Repository, id}, eventAt); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -140,7 +141,7 @@ func (p Provider) Hook(reconcile func(context.Context, PullRequest) error) http.
 	})
 }
 
-func (p Provider) hookIdentity(r *http.Request, body []byte) (int64, int) {
+func (p Provider) hookIdentity(r *http.Request, body []byte) (int64, time.Time, int) {
 	if p.Repository.Provider == GitHub {
 		var event struct {
 			Action      string
@@ -150,35 +151,39 @@ func (p Provider) hookIdentity(r *http.Request, body []byte) (int64, int) {
 		}
 		if r.Header.Get("X-GitHub-Event") != "pull_request" || json.Unmarshal(body, &event) != nil ||
 			event.Number <= 0 || event.Number != event.PullRequest.Number || !identifier.MatchString(event.Action) {
-			return 0, http.StatusBadRequest
+			return 0, time.Time{}, http.StatusBadRequest
 		}
 		if !p.githubRepoMatches(event.Repository) || !p.githubRepoMatches(event.PullRequest.Base.Repo) {
-			return 0, http.StatusForbidden
+			return 0, time.Time{}, http.StatusForbidden
 		}
-		return event.Number, 0
+		return event.Number, time.Time{}, 0
 	}
 
 	var event struct {
 		EventType   string
 		ID          string
 		PublisherID string
+		CreatedDate time.Time
 		Resource    azurePR
 	}
 	if json.Unmarshal(body, &event) != nil || event.Resource.ID <= 0 || !identifier.MatchString(event.ID) ||
 		event.PublisherID != "tfs" {
-		return 0, http.StatusBadRequest
+		return 0, time.Time{}, http.StatusBadRequest
 	}
 	switch event.EventType {
 	case "git.pullrequest.created", "git.pullrequest.updated", "git.pullrequest.merged":
 	default:
-		return 0, http.StatusBadRequest
+		return 0, time.Time{}, http.StatusBadRequest
 	}
 	// Azure credentials are scoped to one organization and repository
 	// route. The event repository and project IDs must also match.
 	if !p.azureRepoMatches(event.Resource) {
-		return 0, http.StatusForbidden
+		return 0, time.Time{}, http.StatusForbidden
 	}
-	return event.Resource.ID, 0
+	if event.CreatedDate.After(time.Now().UTC()) {
+		return 0, time.Time{}, http.StatusBadRequest
+	}
+	return event.Resource.ID, event.CreatedDate, 0
 }
 
 var errLookup = errors.New("pull request provider lookup failed")
@@ -281,6 +286,7 @@ func (p Provider) Lookup(ctx context.Context, pr PullRequest) (Observation, erro
 			if p.fetch(ctx, path+"/iterations?api-version=7.1", &iterations) == nil &&
 				p.fetch(ctx, path+"/threads?api-version=7.1", &threads) == nil &&
 				iterations.Count == len(iterations.Value) && threads.Count == len(threads.Value) {
+				result.LastActivity = record.Created
 				for _, iteration := range iterations.Value {
 					if iteration.Updated.After(result.LastActivity) {
 						result.LastActivity = iteration.Updated

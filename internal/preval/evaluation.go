@@ -136,7 +136,7 @@ func Project(link Attribution, observation Observation, previous *Evaluation, st
 	id := sha256.Sum256(key)
 
 	if link.Correction != nil {
-		if !slices.Contains([]string{Superseded, Corrected, Reverted}, link.Correction.Outcome) {
+		if !slices.Contains([]string{Superseded, Corrected, Reverted}, link.Correction.Outcome) || link.Correction.ObservedAt.After(observation.ObservedAt) {
 			return Evaluation{}, errInvalid
 		}
 		observation = *link.Correction
@@ -179,17 +179,28 @@ func Project(link Attribution, observation Observation, previous *Evaluation, st
 	if previous == nil {
 		return result, nil
 	}
-	if previous.ID != result.ID {
+	if previous.ID != result.ID ||
+		!containsAll(p.TraceSessionIDs, previous.Provenance.TraceSessionIDs) ||
+		!containsAll(p.EvidenceIDs, previous.Provenance.EvidenceIDs) {
 		return Evaluation{}, errInvalid
 	}
 	if !result.ObservedAt.After(previous.ObservedAt) ||
 		previous.Outcome == Merged && (result.Outcome == Active || result.Outcome == Stale || result.Outcome == Closed) {
 		return *previous, nil
 	}
-	if previous.Outcome == result.Outcome && previous.Source.Revision == result.Source.Revision &&
-		previous.Source.PullRequest == result.Source.PullRequest {
-		result.ObservedAt, result.Source.EventID, result.Learning = previous.ObservedAt, previous.Source.EventID, previous.Learning
+	if previous.Outcome == result.Outcome && previous.Source.PullRequest == result.Source.PullRequest {
+		result.Learning = previous.Learning
+		sameLinks := slices.Equal(previous.Provenance.TraceSessionIDs, result.Provenance.TraceSessionIDs) &&
+			slices.Equal(previous.Provenance.EvidenceIDs, result.Provenance.EvidenceIDs)
+		hasNewActivity := result.Outcome == Active && observation.LastActivity.After(previous.ObservedAt)
+		if sameLinks && !hasNewActivity {
+			return *previous, nil
+		}
+		if !hasNewActivity {
+			result.Source = previous.Source
+		}
 	}
+
 	return result, nil
 }
 
@@ -245,4 +256,13 @@ func (e Evaluation) Valid() bool {
 		return false
 	}
 	return e.Score != nil && *e.Score == expected
+}
+
+func containsAll(list, required []string) bool {
+	for _, id := range required {
+		if !slices.Contains(list, id) {
+			return false
+		}
+	}
+	return true
 }

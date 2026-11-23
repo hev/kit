@@ -49,31 +49,44 @@ func OrderEvaluationRevision(order, attempt string, evaluation *preval.Evaluatio
 }
 
 func SetEvaluationConditional(eval preval.Evaluation, expected string) error {
+	_, err := patchEvaluation(eval, expected)
+	return err
+}
+
+func ClaimEvaluationLearning(eval preval.Evaluation) (bool, error) {
+	if eval.Learning.Status != "failed" {
+		return false, preval.ErrConflict
+	}
+	return patchEvaluation(eval, "")
+}
+
+func patchEvaluation(eval preval.Evaluation, expected string) (bool, error) {
 	release, err := lockRoot()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer release()
 	doc, path, err := orderEvaluationDocument(eval.Provenance.OrderID, eval.Provenance.AttemptID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if expected != "" {
 		var previous *preval.Evaluation
 		if raw := doc["evaluation"]; len(raw) > 0 && json.Unmarshal(raw, &previous) != nil {
-			return preval.ErrConflict
+			return false, preval.ErrConflict
 		}
 		if OrderEvaluationRevision(eval.Provenance.OrderID, eval.Provenance.AttemptID, previous) != expected {
-			return preval.ErrConflict
+			return false, preval.ErrConflict
 		}
 	}
 	changed, err := preval.Patch(doc, eval)
 	if err != nil || !changed {
-		return err
+		return false, err
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return platformops.WriteFileAtomic(path, append(body, '\n'), 0600)
+	err = platformops.WriteFileAtomic(path, append(body, '\n'), 0600)
+	return err == nil, err
 }

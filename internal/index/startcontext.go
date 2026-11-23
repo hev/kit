@@ -32,7 +32,7 @@ func sessionStartContext(row *trace.SessionRow, home string, scrub func(string) 
 	}
 	repo := repoRoot(row.Workdir)
 	if len(c.Instructions) == 0 {
-		for _, p := range instructionCandidates(row.Harness, row.Workdir, repo, home) {
+		for _, p := range existingInstructions(instructionCandidates(row.Harness, row.Workdir, repo, home)) {
 			if b, ok := readBounded(p); ok {
 				c.AddInstruction(p, "", "derived", b)
 			}
@@ -128,6 +128,31 @@ func instructionCandidates(name, workdir, repo, home string) []string {
 		}
 	}
 	return out
+}
+
+// Some harnesses recognize several case spellings. A case-insensitive volume
+// resolves more than one spelling to the same file.
+func existingInstructions(candidates []string) []string {
+	var result []string
+	for _, path := range candidates {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		alias := false
+		for _, previous := range result {
+			if previous != path && strings.EqualFold(previous, path) {
+				if prior, err := os.Stat(previous); err == nil && os.SameFile(prior, info) {
+					alias = true
+					break
+				}
+			}
+		}
+		if !alias {
+			result = append(result, path)
+		}
+	}
+	return result
 }
 
 // skillRoots lists the directories a harness offers skills from.
