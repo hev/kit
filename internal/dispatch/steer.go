@@ -137,7 +137,11 @@ func handleSteer(q Request) (Response, error) {
 		if err != nil {
 			return r, err
 		}
-		how = "note: " + sr.Message + "; injected at the next turn's first prompt (a run's next turn is a rework), and appended to inbox.md as say does"
+		if sr.SteerID == "" {
+			how = "note: " + sr.Message + "; queued for next-turn prompt injection"
+		} else {
+			how = "if unacknowledged, the note can also be injected at the next turn's first prompt"
+		}
 	case steer.Urgent:
 		switch {
 		case !running:
@@ -147,12 +151,12 @@ func handleSteer(q Request) (Response, error) {
 			}
 			how = "the run had ended, so this reworks it (" + sr.Message + "); the message is injected at the new session's first prompt and mutating calls wait for its ack"
 		case wired:
-			how = "tool-boundary: injected at the worker's next tool call; file writes, git commit/push, hev dispatch and gh pr writes are blocked until it runs " + steerAck("ID")
+			how = "tool-boundary: injected at the worker's next tool call; file writes, git commit/push, hev dispatch and gh pr writes are blocked until it runs " + steerAck("STEER_ID")
 		default:
 			if _, err := say(q.Note); err != nil {
 				return r, err
 			}
-			how = "turn-boundary fallback: this run was launched without kit hooks, so the message is in inbox.md for its next step; nothing blocks"
+			how = "turn-boundary fallback for a run launched without kit hooks"
 		}
 	case steer.HaltL, steer.Redirect:
 		if !running {
@@ -201,7 +205,10 @@ func handleSteer(q Request) (Response, error) {
 		return r, err
 	}
 	r.SteerID, r.Delivery = msg.ID, msg.Delivery
-	r.Message = fmt.Sprintf("%s %s queued for %s. Delivery: %s.", msg.ID, level, q.Name, strings.ReplaceAll(how, "ID", msg.ID))
+	r.Message = fmt.Sprintf("%s %s %s for %s. Delivery: %s.", msg.ID, level, msg.State, q.Name, strings.ReplaceAll(how, "STEER_ID", msg.ID))
+	if sayID != "" {
+		r.Message = fmt.Sprintf("%s %s delivered to inbox.md for %s. Delivery: %s. After handling, run %s.", msg.ID, level, q.Name, how, steerAck(msg.ID))
+	}
 	return r, nil
 }
 

@@ -64,6 +64,9 @@ jobs:
           go build -o "$RUNNER_TEMP/hev-skills" ./cmd/hev
           python3 scripts/test-skill-sources.py "$RUNNER_TEMP/hev-skills"
 
+      - name: Steering receipt CLI acceptance
+        run: python3 scripts/test-steering-receipts.py "$RUNNER_TEMP/hev-orchestrators"
+
       - name: Dispatch FIFO CLI acceptance
         run: python3 scripts/test-dispatch-queue.py "$RUNNER_TEMP/hev-orchestrators"
 
