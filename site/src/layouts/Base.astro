@@ -36,19 +36,12 @@ const ogImageAlt = "hev kit: make your machine part of a software factory.";
 	<head>
 		<meta charset="UTF-8" />
 		<script is:inline>
-			// Set theme before first paint to avoid a flash of the wrong mode.
+			// Always use light mode (the dark theme toggle is retired).
 			(function () {
-				var stored = null;
+				document.documentElement.dataset.theme = "light";
 				try {
-					stored = localStorage.getItem("theme");
+					localStorage.removeItem("theme");
 				} catch (e) {}
-				var theme =
-					stored === "light" || stored === "dark"
-						? stored
-						: window.matchMedia("(prefers-color-scheme: light)").matches
-							? "light"
-							: "dark";
-				document.documentElement.dataset.theme = theme;
 				// Docs edition (Pro | OSS), set here so edition text never flashes.
 				var edition = null;
 				try {

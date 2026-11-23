@@ -6,34 +6,8 @@
 	font-display: swap;
 }
 
-/* hev brand - dark mode tokens */
-:root {
-	--paper: #111111;
-	--paper-warm: #1a1a18;
-	--ink: #fafaf5;
-	--ink-soft: #d8d5cc;
-	--muted: #6b6b66;
-	--signal: #e25822;
-	--signal-dark: #ff6b33;
-	--rule: #2a2a28;
-	--rule-strong: #3a3a36;
-	--code-bg: #0b0b0b;
-	--code-ink: #e8e5dc;
-	--header-bg: rgba(17, 17, 17, 0.88);
-	--input-bg: rgba(0, 0, 0, 0.35);
-	--page: min(100% - 2.5rem, 1120px);
-	--measure: 720px;
-	/* The sticky header's height: sticky frames below it start here. */
-	--bar: 4.1rem;
-	/* graph paper: faint ink-on-paper ruling, five minor squares to a major */
-	--grid-step: 22px;
-	--grid-step-major: 110px;
-	--grid-minor: rgba(250, 250, 245, 0.02);
-	--grid-major: rgba(250, 250, 245, 0.038);
-	color-scheme: dark;
-}
-
-/* hev brand - light mode tokens */
+/* hev brand - light mode tokens (site default) */
+:root,
 :root[data-theme="light"] {
 	--paper: #fafaf5;
 	--paper-warm: #f1efe8;
@@ -44,11 +18,17 @@
 	--signal-dark: #c2481a;
 	--rule: #e4e1d8;
 	--rule-strong: #cfccc2;
+	--code-bg: #0b0b0b;
+	--code-ink: #e8e5dc;
 	--header-bg: rgba(250, 250, 245, 0.88);
 	--input-bg: rgba(255, 255, 255, 0.55);
-	/* Exam-book ruling: a slate blue laid faintly over the warm paper. Blue is
-	   lighter than ink, so it carries a higher alpha than the dark-mode grid to
-	   land at the same weight — the hue is what does the work, not the contrast. */
+	--page: min(100% - 2.5rem, 1120px);
+	--measure: 720px;
+	/* The sticky header's height: sticky frames below it start here. */
+	--bar: 4.1rem;
+	/* graph paper: exam-book ruling laid faintly over warm paper, five minor squares to a major */
+	--grid-step: 22px;
+	--grid-step-major: 110px;
 	--grid-minor: rgba(58, 96, 150, 0.055);
 	--grid-major: rgba(58, 96, 150, 0.095);
 	color-scheme: light;
