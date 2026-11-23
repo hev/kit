@@ -3,8 +3,6 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"github.com/hev/kit/internal/layerenv"
-	"github.com/hev/kit/internal/update"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,13 +11,18 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/skillsources"
 	"github.com/hev/kit/internal/trace"
+	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
+	"github.com/hev/kit/internal/workspace"
 )
 
 type Config struct {
+	captureTargets []captureTarget
+
 	ConfigPath string
 
 	// Layer archive target.
@@ -150,15 +153,16 @@ type localFileConfig struct {
 }
 
 type fileConfig struct {
-	Skills       *skillsources.Config `toml:"skills,omitempty"`
-	Invite       *InviteConfig        `toml:"invite,omitempty"`
-	InviteLocal  *layerConfig         `toml:"invite_local,omitempty"`
-	Layer        layerConfig          `toml:"layer"`
-	Archive      *archiveConfig       `toml:"archive,omitempty"`
-	Local        *localFileConfig     `toml:"local,omitempty"`
-	ActiveBucket string               `toml:"active_bucket"`
-	Capture      captureConfig        `toml:"capture"`
-	Buckets      []BucketConfig       `toml:"buckets"`
+	Workspaces   map[string]workspace.Workspace `toml:"workspaces,omitempty"`
+	Skills       *skillsources.Config           `toml:"skills,omitempty"`
+	Invite       *InviteConfig                  `toml:"invite,omitempty"`
+	InviteLocal  *layerConfig                   `toml:"invite_local,omitempty"`
+	Layer        layerConfig                    `toml:"layer"`
+	Archive      *archiveConfig                 `toml:"archive,omitempty"`
+	Local        *localFileConfig               `toml:"local,omitempty"`
+	ActiveBucket string                         `toml:"active_bucket"`
+	Capture      captureConfig                  `toml:"capture"`
+	Buckets      []BucketConfig                 `toml:"buckets"`
 	// Update is read by internal/update; kept here so a rewrite of the file
 	// (hev bucket use) carries it over.
 	Update *update.Config `toml:"update,omitempty"`
@@ -185,20 +189,21 @@ type layerConfig struct {
 }
 
 type captureConfig struct {
-	Instructions       *bool    `toml:"instructions,omitempty"`
-	Redact             *bool    `toml:"redact,omitempty"`
-	RedactSalt         string   `toml:"redact_salt,omitempty"`
-	ScanInterval       string   `toml:"scan_interval"`
-	ScanRoots          []string `toml:"scan_roots"`
-	RawAPIBodies       *bool    `toml:"raw_api_bodies"`
-	ToolContent        *bool    `toml:"tool_content"`
-	Images             *bool    `toml:"images,omitempty"`
-	UnknownProject     string   `toml:"unknown_project"`
-	ClaudeRawBodiesDir string   `toml:"claude_raw_bodies_dir"`
-	CodexSessionsDir   string   `toml:"codex_sessions_dir"`
-	PiSessionsDir      string   `toml:"pi_sessions_dir"`
-	OpenCodeDataDir    string   `toml:"opencode_data_dir"`
-	AgyDataDir         string   `toml:"agy_data_dir"`
+	Targets            []targetConfig `toml:"targets,omitempty"`
+	Instructions       *bool          `toml:"instructions,omitempty"`
+	Redact             *bool          `toml:"redact,omitempty"`
+	RedactSalt         string         `toml:"redact_salt,omitempty"`
+	ScanInterval       string         `toml:"scan_interval"`
+	ScanRoots          []string       `toml:"scan_roots"`
+	RawAPIBodies       *bool          `toml:"raw_api_bodies"`
+	ToolContent        *bool          `toml:"tool_content"`
+	Images             *bool          `toml:"images,omitempty"`
+	UnknownProject     string         `toml:"unknown_project"`
+	ClaudeRawBodiesDir string         `toml:"claude_raw_bodies_dir"`
+	CodexSessionsDir   string         `toml:"codex_sessions_dir"`
+	PiSessionsDir      string         `toml:"pi_sessions_dir"`
+	OpenCodeDataDir    string         `toml:"opencode_data_dir"`
+	AgyDataDir         string         `toml:"agy_data_dir"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -405,6 +410,7 @@ func applyConfigFile(c *Config) error {
 		c.LayerStore = fc.Layer.Store
 	}
 	c.Invite = fc.Invite
+	c.captureTargets = captureTargets(fc.Capture.Targets, fc.Workspaces, c.Host)
 	if fc.Archive != nil && fc.Archive.Namespace != "" && fc.Layer.Namespace == "" {
 		c.LayerNamespace = fc.Archive.Namespace
 	}

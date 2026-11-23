@@ -442,7 +442,13 @@ func (c *Client) storedSessionEnrichmentContext(ctx context.Context, ids []strin
 
 // SummariesServed is nil where PatchSessionSummaries can write: the store
 // takes patch_rows.
-func (c *Client) SummariesServed() error { return c.summariesServedContext(context.Background()) }
+func (c *Client) SummariesServed() error {
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.summariesServedContext(ctx)
+}
 func (c *Client) summariesServedContext(ctx context.Context) error {
 	if !c.Caps.Feature(FeaturePatchRows).usable() {
 		return fmt.Errorf("session summaries are written with patch_rows, which layer store %s does not serve", c.Caps.Store.Kind)

@@ -7,7 +7,7 @@
 -- This file is the canonical column reference; the compaction job reads
 -- these envelopes and produces derived Parquet at parquet/v*/events/.
 --
--- See docs/trace-schema.md for context. Invariants:
+-- See https://hevkit.com/docs/traces for context. Invariants:
 --   - payload_raw contains the post-policy payload that was allowed to leave
 --     the machine. It may be redacted by default capture policy.
 --   - The envelope shape never changes. payload_schema_ref carries the version

@@ -183,8 +183,14 @@ type workspaceView struct {
 func viewWorkspace(s workspace.Selection, current bool) workspaceView {
 	s.Dir = workspace.Expand(s.Dir)
 	traces, board := s.Namespaces()
+	if s.TraceSettings().KeyRef == "" && s.IsolatedStorage() {
+		traces = filepath.Join(s.Root(), "archive")
+		if s.TraceCapture.ArchiveDir != "" {
+			traces = workspace.Expand(s.TraceCapture.ArchiveDir)
+		}
+	}
 	if s.Layer.KeyRef == "" && s.IsolatedStorage() {
-		traces, board = filepath.Join(s.Root(), "archive"), filepath.Join(s.Root(), "board")
+		board = filepath.Join(s.Root(), "board")
 	}
 	if s.Layer.BoardURL != "" {
 		board = s.Layer.BoardURL

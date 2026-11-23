@@ -34,7 +34,7 @@ compute.
 
 Set OPENROUTER_API_KEY (or HEV_API_KEY, or [foh].api_key_ref in
 ~/.hev/config.toml), or sign in to Codex with a ChatGPT plan (codex login).
-Claude subscription logins are never used. See docs/foh-harness.md.`,
+Claude subscription logins are never used. See https://hevkit.com/docs/foh-harness.`,
 	Args: cobra.NoArgs,
 	RunE: runFOH,
 }

@@ -85,7 +85,7 @@ Run kind is derived: worker (a dispatch run), orchestrator-round, loop (a
 scheduled or self-rescheduling task, or a first prompt that recurs) or
 interactive. Rows captured before the stats capture facts get their tool
 facts from their block rows (--scan-blocks, on by default). See
-docs/traces-stats.md for every field.`
+https://hevkit.com/docs/traces-stats for every field.`
 
 func newTracesStatsCmd(rt statsRuntime) *cobra.Command {
 	opt := statsOptions{}

@@ -33,7 +33,7 @@ func layerKeyAfterCooldown(ctx context.Context, logger *slog.Logger) (string, er
 			reset = time.Now().Add(time.Minute)
 		}
 		logger.Warn("Layer key rate limited; secrets endpoint stays up until the reset", "retry_after", reset.UTC().Format(time.RFC3339))
-		fmt.Fprintf(os.Stderr, "hevd: %v; serving secrets and waiting until %s\n", err, reset.UTC().Format(time.RFC3339))
+		fmt.Fprintf(os.Stderr, "hevd: Layer key rate limit; retry after %s (serving secrets during cooldown)\n", reset.UTC().Format(time.RFC3339))
 		t := time.NewTimer(time.Until(reset))
 		select {
 		case <-ctx.Done():
