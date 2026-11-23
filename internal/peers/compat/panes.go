@@ -1,6 +1,8 @@
 package compat
 
 import (
+	"github.com/hev/kit/internal/peers/nativeinbox"
+
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,6 +21,7 @@ import (
 
 // Row is one pane, managed runner or headless run (the reference's row dict).
 type Row struct {
+	Native                    *nativeinbox.Presence
 	ID, Session, Window, Pane string
 	PID                       int
 	Cwd, Title                string
@@ -369,6 +372,9 @@ func pyStrip(s string) string { return strings.TrimFunc(s, pyIsSpace) }
 func pyIsSpace(r rune) bool { return unicode.IsSpace(r) || r >= 0x1c && r <= 0x1f }
 
 func (p *P) state(r *Row) string {
+	if r.Native != nil {
+		return r.Native.State
+	}
 	if r.Managed != nil {
 		if Equal(r.Managed.Obj("checkpoint").Get("phase"), "running") {
 			return "working"
@@ -826,6 +832,9 @@ type who struct {
 
 // whoami refuses rather than send a message nobody can answer or attribute.
 func (p *P) whoami(rows []*Row) (who, error) {
+	if native, ok := p.nativeSender(); ok {
+		return native, nil
+	}
 	mine := p.me(rows)
 	if mine == nil {
 		return who{}, refuse(noSender)

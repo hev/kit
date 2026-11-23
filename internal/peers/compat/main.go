@@ -15,7 +15,7 @@ const Usage = `peers: see and talk to the other coding agents running in tmux.
   peers [ls] [-a] [--everywhere] [--json]
                                    every agent pane: address, harness, state, cwd, task
   peers read TARGET [-n LINES]     the last LINES of a pane (default 60)
-  peers send TARGET MESSAGE|- [--id ID] [--order ID] [--run ID]
+  peers send TARGET MESSAGE|- [--interrupt] [--id ID] [--order ID] [--run ID]
                                    submit a prompt or queue a bound inbox message
   peers wait TARGET [--timeout S]  block until TARGET is no longer working
   peers chat new MEMBER... [--title T] [-m MESSAGE|-]

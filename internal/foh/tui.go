@@ -66,6 +66,7 @@ type TUI struct {
 	catalogSource CatalogSource
 	picker        *picker
 	quitting      bool
+	peers         *nativePeers
 }
 
 // picker is the in-harness model picker overlay.
@@ -99,7 +100,7 @@ func NewTUI(opts TUIOptions) *TUI {
 }
 
 // Init loads the catalog in the background.
-func (m *TUI) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.loadCatalog()) }
+func (m *TUI) Init() tea.Cmd { return tea.Batch(textinput.Blink, m.loadCatalog(), m.pollPeers()) }
 
 func (m *TUI) loadCatalog() tea.Cmd {
 	if m.opts.Catalog == nil {
@@ -127,6 +128,8 @@ func waitEvent(ch <-chan Event) tea.Cmd {
 // Update handles keys, agent events and catalog loads.
 func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case nativePeerTick:
+		return m, m.receivePeers(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.Width = max(10, msg.Width-4)
@@ -141,12 +144,13 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyEvent(msg.ev)
 		return m, waitEvent(m.events)
 	case agentDoneMsg:
-		m.busy, m.events = false, nil
+		m.setBusy(false)
+		m.events = nil
 		if m.cancel != nil {
 			m.cancel()
 			m.cancel = nil
 		}
-		return m, nil
+		return m, m.finishPeerSteer()
 	case tea.KeyMsg:
 		if m.picker != nil {
 			return m.updatePicker(msg)
@@ -190,7 +194,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		return m, m.startTurn(text)
+		return m, m.startTurn(m.withPeerNotes(text))
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -258,7 +262,7 @@ func (m *TUI) command(text string) tea.Cmd {
 
 func (m *TUI) startTurn(text string) tea.Cmd {
 	m.entries = append(m.entries, entry{kind: entryUser, text: text})
-	m.busy = true
+	m.setBusy(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	ch := make(chan Event, 256)
@@ -315,6 +319,9 @@ func (m *TUI) applyEvent(ev Event) {
 			break
 		}
 	case EventSteer:
+		if m.peers != nil && m.peers.steering == ev.Text {
+			m.peers.steering = ""
+		}
 		m.system("↪ steer injected: " + ev.Text)
 	case EventError:
 		m.entries = append(m.entries, entry{kind: entryError, text: ev.Err.Error()})
@@ -690,6 +697,9 @@ func (m *TUI) View() string {
 	footer := m.input.View()
 	if m.busy {
 		footer = dimStyle.Render("working… Enter steers · Ctrl+C cancels") + "\n" + footer
+	}
+	if status := m.peerStatus(width); status != "" {
+		footer = status + "\n" + footer
 	}
 	room := max(3, m.height-lipgloss.Height(header)-lipgloss.Height(footer)-1)
 	var body string

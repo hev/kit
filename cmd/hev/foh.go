@@ -20,8 +20,9 @@ import (
 )
 
 var fohCmd = &cobra.Command{
-	Use:   "foh",
-	Short: "Optional native front-of-house harness (OpenRouter or Codex subscription, YOLO by default)",
+	Use:     "foh",
+	Aliases: []string{"kit"},
+	Short:   "Optional native front-of-house harness (OpenRouter or Codex subscription, YOLO by default)",
 	Long: `hev foh is kit's optional native front-of-house harness: a lean Go agent
 loop and Bubble Tea TUI routed through OpenRouter or an OpenAI/Codex ChatGPT
 subscription (codex/... models), with an in-harness model
@@ -141,6 +142,11 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 			return router.Models(ctx, false)
 		},
 	})
+	closePeers, peerErr := tui.RegisterNativePeer(ctx)
+	if peerErr != nil {
+		fmt.Fprintln(cmd.ErrOrStderr(), "hev foh: native peers unavailable")
+	}
+	defer closePeers()
 	_, err = tea.NewProgram(tui, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 	if errors.Is(err, tea.ErrProgramKilled) || errors.Is(err, context.Canceled) {
 		return nil

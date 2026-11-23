@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -190,9 +191,14 @@ var stableID = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,160}$`)
 
 func (p *P) cmdSend(args []string) {
 	var replyTo string
+	var interrupt bool
 	if len(args) > 2 {
 		options := args[2:]
 		replyTo, _ = p.take(&options, "--reply-to")
+		interrupt = contains(options, "--interrupt")
+		if interrupt {
+			options = slices.DeleteFunc(options, func(option string) bool { return option == "--interrupt" })
+		}
 		args = append(args[:2:2], options...)
 	}
 	metadata := NewObj()
@@ -222,6 +228,9 @@ func (p *P) cmdSend(args []string) {
 	if len(args) < 2 {
 		p.die("send TARGET MESSAGE   (or - to read the message from stdin)")
 	}
+	if p.sendNative(args[0], args[1], interrupt, metadata, replyTo) {
+		return
+	}
 	message := pyStrip(p.readStdinArg(args[1]))
 	if message == "" {
 		p.die("empty message")
@@ -242,6 +251,9 @@ func (p *P) cmdSend(args []string) {
 		if p.snapshot(host) != nil && !contains(p.peerHosts(), host) {
 			p.snapshotSend(host, append([]string{target, "-"}, flags...), message)
 			return
+		}
+		if interrupt {
+			flags = append(flags, "--interrupt")
 		}
 		r := p.remote(host, append([]string{"send", target, "-"}, flags...), message, nil)
 		fmt.Fprint(p.out, r.stdout)
