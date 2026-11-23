@@ -405,6 +405,10 @@ func TestScrubKitAndLayerTokensBothSides(t *testing.T) {
 			fmt.Sprintf(`curl --key=%s -H "Authorization: Bearer %s" https://kit.hevmind.com/v1/inference`, tc.token, tc.token),
 			fmt.Sprintf("https://kit.hevmind.com/v1/inference?token=%s&foo=bar", tc.token),
 			fmt.Sprintf("HTTP 401: invalid credential %s", tc.token),
+			"auth=Bearer%20" + tc.token,
+			"q=a%3D" + tc.token + "%26b=1",
+			"GET /x?a=1%26" + tc.token,
+			"q=" + tc.token + "%26" + tc.token,
 		}
 		for _, in := range samples {
 			out := Scrub(in)
@@ -414,6 +418,33 @@ func TestScrubKitAndLayerTokensBothSides(t *testing.T) {
 			if !strings.Contains(out, redacted) {
 				t.Errorf("Scrub(%q) = %q missing %s", in, out, redacted)
 			}
+			if Scrub(out) != out {
+				t.Errorf("Scrub(%q) not idempotent: %q -> %q", in, out, Scrub(out))
+			}
+		}
+		if got := Scrub("q=a%3D" + tc.token + "%26b=1"); got != "q=a%3D"+redacted+"%26b=1" {
+			t.Errorf("Scrub pct delimiter %s = %q, want %q", tc.name, got, "q=a%3D"+redacted+"%26b=1")
+		}
+	}
+
+	// Underscore-adjacent and back-to-back exact 32-char hev_/hvl_ tokens preserve surrounding delimiters.
+	hevToken := "hev_" + hevPayload
+	hvlToken := "hvl_" + hvlPayload
+	for _, uc := range []struct{ in, want string }{
+		{"X_" + hevToken, "X_" + redacted},
+		{hevToken + "_x", redacted + "_x"},
+		{"X_" + hevToken + "_x", "X_" + redacted + "_x"},
+		{"X_" + hvlToken + "_y", "X_" + redacted + "_y"},
+		{hevToken + "_" + hevToken, redacted + "_" + redacted},
+		{hevToken + "_" + hvlToken, redacted + "_" + redacted},
+		{hevToken + " " + hvlToken, redacted + " " + redacted},
+	} {
+		got := Scrub(uc.in)
+		if got != uc.want {
+			t.Errorf("Scrub(%q) = %q, want %q", uc.in, got, uc.want)
+		}
+		if Scrub(got) != got {
+			t.Errorf("Scrub(%q) not idempotent", uc.in)
 		}
 	}
 
@@ -423,10 +454,15 @@ func TestScrubKitAndLayerTokensBothSides(t *testing.T) {
 		"hev_dispatch_runs_total",
 		"hev_dispatch",
 		"hev_board_post",
+		"my_hev_metric",
 		"HEV_API_KEY",
 		"HEVLAYER_API_KEY",
 		"hev_ kit",
 		"hev_abcdefghijklmnopqrstuvwxyz_suffix",
+		"hev_abcdefghijklmnopqrstuvwxyz_total",
+		"hvl_abcdefghijklmnopqrstuvwxyz_metric",
+		"foo%20hev_abcdefghijklmnopqrstuvwxyz_total",
+		"foo%20hev_dispatch",
 		"metrics: hev_cluster_agents_working and hev_dispatch_runs_total via hev_dispatch / hev_board_post",
 		"set HEV_API_KEY or HEVLAYER_API_KEY in hev_ kit",
 	} {
@@ -567,6 +603,50 @@ author_name = "Adam"
 		}
 	})
 
+	t.Run("hev-kit-service-scoped-to-hev-api-key", func(t *testing.T) {
+		isolateHome(t)
+		cfg := Config{Kit: KitConfig{Key: hevKey, API: "https://prod.kit.example.com/"}}
+		t.Setenv("HEV_KIT_SERVICE", "https://staging.kit.example.com/")
+
+		// Refused side: stray HEV_KIT_SERVICE must NOT redirect a [kit].key from config.toml.
+		ep, err := cfg.ResolveEndpoint(context.Background())
+		if err != nil || ep.Mode != InferenceModeClubKit || ep.BaseURL != "https://prod.kit.example.com/v1/inference" || ep.APIKey != hevKey {
+			t.Fatalf("[kit].key with stray HEV_KIT_SERVICE = %+v %v", ep, err)
+		}
+		if got := cfg.ResolvedKitServiceURL(); got != "https://prod.kit.example.com" {
+			t.Fatalf("ResolvedKitServiceURL without HEV_API_KEY = %q", got)
+		}
+
+		// [foh].api_key_ref without HEV_API_KEY also ignores stray HEV_KIT_SERVICE.
+		orig := ResolveSecretRef
+		defer func() { ResolveSecretRef = orig }()
+		ResolveSecretRef = func(context.Context, string) (string, error) { return hvlKey, nil }
+		cfgRef := cfg
+		cfgRef.APIKeyRef = "op://vault/kit/key"
+		ep, err = cfgRef.ResolveEndpoint(context.Background())
+		if err != nil || ep.Mode != InferenceModeClubKit || ep.BaseURL != "https://prod.kit.example.com/v1/inference" || ep.APIKey != hvlKey {
+			t.Fatalf("api_key_ref with stray HEV_KIT_SERVICE = %+v %v", ep, err)
+		}
+
+		// Explicit HEV_FOH_BASE_URL still overrides for [kit].key.
+		t.Setenv("HEV_FOH_BASE_URL", "https://explicit.foh.example.com/v1/inference/")
+		ep, err = cfg.ResolveEndpoint(context.Background())
+		if err != nil || ep.BaseURL != "https://explicit.foh.example.com/v1/inference" {
+			t.Fatalf("explicit HEV_FOH_BASE_URL = %+v %v", ep, err)
+		}
+		t.Setenv("HEV_FOH_BASE_URL", "")
+
+		// Permitted side: HEV_API_KEY + HEV_KIT_SERVICE routes to HEV_KIT_SERVICE + /v1/inference.
+		t.Setenv("HEV_API_KEY", hvlKey)
+		ep, err = cfg.ResolveEndpoint(context.Background())
+		if err != nil || ep.Mode != InferenceModeClubKit || ep.BaseURL != "https://staging.kit.example.com/v1/inference" || ep.APIKey != hvlKey {
+			t.Fatalf("HEV_API_KEY + HEV_KIT_SERVICE = %+v %v", ep, err)
+		}
+		if got := cfg.ResolvedKitServiceURL(); got != "https://staging.kit.example.com" {
+			t.Fatalf("ResolvedKitServiceURL with HEV_API_KEY = %q", got)
+		}
+	})
+
 	t.Run("scheme-safety-and-openrouter-hard-guard", func(t *testing.T) {
 		isolateHome(t)
 		t.Setenv("HEV_API_KEY", hevKey)
@@ -658,17 +738,49 @@ author_name = "Adam"
 			}
 		}
 
-		// Via HEV_API_KEY.
+		// Via explicit HEV_API_KEY (must NOT be wrapped as ImplicitLegacyKitKeyError).
 		t.Setenv("HEV_API_KEY", hkKey)
 		_, err := (Config{}).ResolveEndpoint(context.Background())
 		checkErr("HEV_API_KEY", err)
+		var implicitErr ImplicitLegacyKitKeyError
+		if errors.As(err, &implicitErr) {
+			t.Fatalf("explicit HEV_API_KEY must not return ImplicitLegacyKitKeyError: %T", err)
+		}
 		_, err = (Config{}).ResolveAPIKey(context.Background())
 		checkErr("ResolveAPIKey", err)
+		if errors.As(err, &implicitErr) {
+			t.Fatalf("explicit ResolveAPIKey must not return ImplicitLegacyKitKeyError: %T", err)
+		}
 
-		// Via [kit].key.
+		// Via explicit OPENROUTER_API_KEY and [foh].api_key_ref (must remain immediately fatal).
 		t.Setenv("HEV_API_KEY", "")
+		t.Setenv("OPENROUTER_API_KEY", hkKey)
+		_, err = (Config{}).ResolveEndpoint(context.Background())
+		checkErr("OPENROUTER_API_KEY", err)
+		if errors.As(err, &implicitErr) {
+			t.Fatalf("explicit OPENROUTER_API_KEY must not return ImplicitLegacyKitKeyError: %T", err)
+		}
+		t.Setenv("OPENROUTER_API_KEY", "")
+		origRef := ResolveSecretRef
+		defer func() { ResolveSecretRef = origRef }()
+		ResolveSecretRef = func(context.Context, string) (string, error) { return hkKey, nil }
+		_, err = (Config{APIKeyRef: "op://vault/kit/legacy"}).ResolveEndpoint(context.Background())
+		checkErr("[foh].api_key_ref", err)
+		if errors.As(err, &implicitErr) {
+			t.Fatalf("explicit api_key_ref must not return ImplicitLegacyKitKeyError: %T", err)
+		}
+
+		// Via implicit [kit].key (wraps ErrLegacyKitKey AND identifies itself as ImplicitLegacyKitKeyError).
 		_, err = (Config{Kit: KitConfig{Key: hkKey, API: srv.URL}}).ResolveEndpoint(context.Background())
 		checkErr("[kit].key", err)
+		if !errors.As(err, &implicitErr) {
+			t.Fatalf("implicit [kit].key ResolveEndpoint should return ImplicitLegacyKitKeyError, got %T", err)
+		}
+		_, err = (Config{Kit: KitConfig{Key: hkKey, API: srv.URL}}).ResolveAPIKey(context.Background())
+		checkErr("[kit].key ResolveAPIKey", err)
+		if !errors.As(err, &implicitErr) {
+			t.Fatalf("implicit [kit].key ResolveAPIKey should return ImplicitLegacyKitKeyError, got %T", err)
+		}
 
 		// Via direct Client.Stream and Catalog.Models (must make zero network requests).
 		c := NewClient(srv.URL+"/v1/inference", hkKey)

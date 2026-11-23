@@ -208,3 +208,100 @@ func TestFOHOnceClubKitHostedAndLegacyKeyFailClosed(t *testing.T) {
 		t.Fatalf("legacy hk_ error missing guidance: %q", errOut)
 	}
 }
+
+func TestFOHStaleLegacyKitKeyWithCodexSub(t *testing.T) {
+	hkKey := "hk_" + strings.Repeat("Ab9_-1", 7) + "A"
+	const access = "eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDI0NDQ4MDB9.c2lnbmF0dXJlLWxr"
+	const refresh = "rt_legacyCodexREFRESH0123456789"
+
+	var kitHits, codexHits int
+	kitSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		kitHits++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer kitSrv.Close()
+
+	codexSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		codexHits++
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"pong\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{}}\n\n")
+	}))
+	defer codexSrv.Close()
+
+	setupCodex := func(home string) {
+		codexDir := filepath.Join(home, ".codex")
+		os.MkdirAll(codexDir, 0o700)
+		os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"tokens":{"access_token":"`+access+`","refresh_token":"`+refresh+`","account_id":"acct-legacy-1234"}}`), 0o600)
+	}
+	setupStaleKit := func(home string) {
+		cfgDir := filepath.Join(home, ".hev")
+		os.MkdirAll(cfgDir, 0o700)
+		os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(fmt.Sprintf("[kit]\napi = %q\nkey = %q\n", kitSrv.URL, hkKey)), 0o600)
+	}
+
+	// Permitted side: stale implicit [kit].key = hk_... + valid Codex login runs cleanly on codex-sub
+	// with a concise secret-free warning on stderr and zero hits to the Club Kit server.
+	home := t.TempDir()
+	setupCodex(home)
+	setupStaleKit(home)
+	out, errOut, code := runHevChild(t, home, []string{"HEV_FOH_CODEX_BASE_URL=" + codexSrv.URL}, "foh", "--once", "ping")
+	if code != 0 || strings.TrimSpace(out) != "pong" {
+		t.Fatalf("stale [kit].key + codex: code=%d out=%q stderr=%q", code, out, errOut)
+	}
+	if kitHits != 0 || codexHits != 1 {
+		t.Fatalf("hits: kit=%d (want 0) codex=%d (want 1)", kitHits, codexHits)
+	}
+	if !strings.Contains(errOut, "hk_") || !strings.Contains(errOut, "hev login") {
+		t.Fatalf("expected warning naming hk_ and hev login on stderr, got %q", errOut)
+	}
+	for _, leak := range []string{hkKey, hkKey[3:], access, refresh, "acct-legacy-1234"} {
+		if strings.Contains(errOut, leak) || strings.Contains(out, leak) {
+			t.Fatalf("output leaked %q: out=%q stderr=%q", leak, out, errOut)
+		}
+	}
+	sessions, _ := filepath.Glob(filepath.Join(home, ".hev", "foh", "sessions", "*.jsonl"))
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %v", sessions)
+	}
+	b, _ := os.ReadFile(sessions[0])
+	if !strings.Contains(string(b), `"provider":"codex-sub"`) {
+		t.Fatalf("session missing codex-sub provider: %s", b)
+	}
+	for _, leak := range []string{hkKey, hkKey[3:], access, refresh, "acct-legacy-1234"} {
+		if strings.Contains(string(b), leak) {
+			t.Fatalf("session leaked %q: %s", leak, b)
+		}
+	}
+
+	// Refused side (a): stale implicit [kit].key = hk_... alone (no Codex login) fails with ErrLegacyKitKey guidance and zero hits.
+	homeAlone := t.TempDir()
+	setupStaleKit(homeAlone)
+	_, errOut, code = runHevChild(t, homeAlone, []string{"HEV_FOH_CODEX_BASE_URL=" + codexSrv.URL}, "foh", "--once", "ping")
+	if code == 0 || kitHits != 0 || codexHits != 1 {
+		t.Fatalf("stale [kit].key alone: code=%d kitHits=%d codexHits=%d stderr=%q", code, kitHits, codexHits, errOut)
+	}
+	for _, want := range []string{"hk_", "hev login", "hev_", "OPENROUTER_API_KEY"} {
+		if !strings.Contains(errOut, want) {
+			t.Fatalf("stale [kit].key alone missing %q in stderr: %q", want, errOut)
+		}
+	}
+	if strings.Contains(errOut, hkKey) || strings.Contains(errOut, hkKey[3:]) {
+		t.Fatalf("stale [kit].key alone leaked secret: %q", errOut)
+	}
+
+	// Refused side (b): explicit HEV_API_KEY=hk_... + valid Codex login MUST still fail closed with zero hits on either server.
+	for _, envName := range []string{"HEV_API_KEY", "OPENROUTER_API_KEY"} {
+		homeExplicit := t.TempDir()
+		setupCodex(homeExplicit)
+		_, errOut, code = runHevChild(t, homeExplicit, []string{envName + "=" + hkKey, "HEV_FOH_CODEX_BASE_URL=" + codexSrv.URL}, "foh", "--once", "ping")
+		if code == 0 || kitHits != 0 || codexHits != 1 {
+			t.Fatalf("explicit %s=hk_ + codex: code=%d kitHits=%d codexHits=%d stderr=%q", envName, code, kitHits, codexHits, errOut)
+		}
+		if !strings.Contains(errOut, "hev login") || !strings.Contains(errOut, "OPENROUTER_API_KEY") {
+			t.Fatalf("explicit %s=hk_ missing guidance: %q", envName, errOut)
+		}
+		if strings.Contains(errOut, hkKey) || strings.Contains(errOut, hkKey[3:]) {
+			t.Fatalf("explicit %s=hk_ leaked secret: %q", envName, errOut)
+		}
+	}
+}

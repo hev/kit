@@ -140,10 +140,13 @@ func (c Config) ResolvedBaseURL() string {
 	return DefaultBaseURL
 }
 
-// ResolvedKitServiceURL resolves HEV_KIT_SERVICE, then [kit].api, then
-// [kit].service, then DefaultKitServiceURL, trimmed of trailing slashes.
-func (c Config) ResolvedKitServiceURL() string {
-	for _, v := range []string{os.Getenv("HEV_KIT_SERVICE"), c.Kit.API, c.Kit.Service} {
+func (c Config) resolvedKitServiceURL(allowEnvService bool) string {
+	var candidates []string
+	if allowEnvService {
+		candidates = append(candidates, os.Getenv("HEV_KIT_SERVICE"))
+	}
+	candidates = append(candidates, c.Kit.API, c.Kit.Service)
+	for _, v := range candidates {
 		if v = strings.TrimSpace(v); v != "" {
 			return strings.TrimRight(v, "/")
 		}
@@ -151,16 +154,27 @@ func (c Config) ResolvedKitServiceURL() string {
 	return DefaultKitServiceURL
 }
 
-// ResolvedHostedBaseURL resolves the Club Kit hosted inference endpoint:
-// explicit HEV_FOH_BASE_URL, then explicit [foh].base_url, then
-// <ResolvedKitServiceURL>/v1/inference.
-func (c Config) ResolvedHostedBaseURL() string {
+// ResolvedKitServiceURL resolves HEV_KIT_SERVICE (when HEV_API_KEY is set,
+// matching internal/attention/identity.go), then [kit].api, then
+// [kit].service, then DefaultKitServiceURL, trimmed of trailing slashes.
+func (c Config) ResolvedKitServiceURL() string {
+	return c.resolvedKitServiceURL(strings.TrimSpace(os.Getenv("HEV_API_KEY")) != "")
+}
+
+func (c Config) resolvedHostedBaseURL(allowEnvService bool) string {
 	for _, v := range []string{os.Getenv("HEV_FOH_BASE_URL"), c.BaseURL} {
 		if v = strings.TrimSpace(v); v != "" {
 			return strings.TrimRight(v, "/")
 		}
 	}
-	return c.ResolvedKitServiceURL() + "/v1/inference"
+	return c.resolvedKitServiceURL(allowEnvService) + "/v1/inference"
+}
+
+// ResolvedHostedBaseURL resolves the Club Kit hosted inference endpoint:
+// explicit HEV_FOH_BASE_URL, then explicit [foh].base_url, then
+// <ResolvedKitServiceURL>/v1/inference.
+func (c Config) ResolvedHostedBaseURL() string {
+	return c.resolvedHostedBaseURL(strings.TrimSpace(os.Getenv("HEV_API_KEY")) != "")
 }
 
 func isHostedInferenceKey(key string) bool {
@@ -253,12 +267,12 @@ var ResolveSecretRef = func(ctx context.Context, ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	refs := []secrets.Ref{{Name: "OPENROUTER_API_KEY", URI: uri, TTL: time.Hour}}
+	refs := []secrets.Ref{{Name: "FOH_API_KEY", URI: uri, TTL: time.Hour}}
 	values, err := secrets.ResolveWith(ctx, refs, secrets.Options{Caller: secrets.DefaultCaller("hev foh"), Notice: io.Discard})
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(values["OPENROUTER_API_KEY"]), nil
+	return strings.TrimSpace(values["FOH_API_KEY"]), nil
 }
 
 // ErrNoAPIKey is returned when no inference API key is configured.
@@ -270,46 +284,69 @@ var ErrNoProviders = errors.New("no model provider: set OPENROUTER_API_KEY (or H
 
 // ErrLegacyKitKey is returned when a legacy hk_ Club Kit key is resolved for
 // inference; legacy hk_ keys do not authorize hosted inference.
-var ErrLegacyKitKey = errors.New("legacy hk_ Club Kit keys do not authorize hosted inference: run `hev login` to obtain a hev_ key, or set OPENROUTER_API_KEY")
+var ErrLegacyKitKey = errors.New("legacy hk_ Club Kit keys do not authorize hosted inference: run `hev login` to obtain a hev_ key, set OPENROUTER_API_KEY, or sign in to Codex (`codex login`)")
+
+// ImplicitLegacyKitKeyError wraps ErrLegacyKitKey when the legacy hk_ key came
+// from the implicit [kit].key sign-in fallback rather than an explicit
+// environment variable or [foh].api_key_ref. Callers that support fallback
+// providers (such as codex-sub) can warn and continue, while surfacing
+// ErrLegacyKitKey if no other provider resolves.
+type ImplicitLegacyKitKeyError struct{}
+
+func (ImplicitLegacyKitKeyError) Error() string { return ErrLegacyKitKey.Error() }
+func (ImplicitLegacyKitKeyError) Unwrap() error { return ErrLegacyKitKey }
 
 // ErrOpenRouterKeyMismatch is returned when a Club Kit or Layer key (hev_,
 // hvl_, or hk_) would be sent to openrouter.ai.
 var ErrOpenRouterKeyMismatch = errors.New("refusing to send Club Kit/Layer key (hev_/hvl_/hk_) to openrouter.ai: use Club Kit hosted /v1/inference or set OPENROUTER_API_KEY")
 
-func (c Config) resolveKeySource(ctx context.Context) (key string, fromOpenRouterEnv bool, err error) {
+type keySource int
+
+const (
+	keySourceNone keySource = iota
+	keySourceOpenRouterEnv
+	keySourceHevEnv
+	keySourceAPIKeyRef
+	keySourceKitConfig
+)
+
+func (c Config) resolveKeySource(ctx context.Context) (string, keySource, error) {
 	if v := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")); v != "" {
-		return v, true, nil
+		return v, keySourceOpenRouterEnv, nil
 	}
 	if v := strings.TrimSpace(os.Getenv("HEV_API_KEY")); v != "" {
-		return v, false, nil
+		return v, keySourceHevEnv, nil
 	}
 	if ref := strings.TrimSpace(c.APIKeyRef); ref != "" {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		v, err := ResolveSecretRef(ctx, ref)
 		if err != nil {
-			return "", false, fmt.Errorf("read [foh].api_key_ref: %s", Scrub(err.Error(), v))
+			return "", keySourceNone, fmt.Errorf("read [foh].api_key_ref: %s", Scrub(err.Error(), v))
 		}
 		if v == "" {
-			return "", false, errors.New("read [foh].api_key_ref: empty")
+			return "", keySourceNone, errors.New("read [foh].api_key_ref: empty")
 		}
-		return v, false, nil
+		return v, keySourceAPIKeyRef, nil
 	}
 	if v := strings.TrimSpace(c.Kit.Key); v != "" && isKitScopedKey(v) {
-		return v, false, nil
+		return v, keySourceKitConfig, nil
 	}
-	return "", false, ErrNoAPIKey
+	return "", keySourceNone, ErrNoAPIKey
 }
 
 // ResolveAPIKey reads OPENROUTER_API_KEY, HEV_API_KEY, [foh].api_key_ref, then
 // [kit].key (when [foh].api_key_ref is unset). Legacy hk_ keys fail closed.
 // The returned error never includes the key.
 func (c Config) ResolveAPIKey(ctx context.Context) (string, error) {
-	key, _, err := c.resolveKeySource(ctx)
+	key, src, err := c.resolveKeySource(ctx)
 	if err != nil {
 		return "", err
 	}
 	if isLegacyKitKey(key) {
+		if src == keySourceKitConfig {
+			return "", ImplicitLegacyKitKeyError{}
+		}
 		return "", ErrLegacyKitKey
 	}
 	return key, nil
@@ -320,17 +357,25 @@ func (c Config) ResolveAPIKey(ctx context.Context) (string, error) {
 // Kit hosted /v1/inference with HTTPS/loopback enforcement and a hard guard
 // refusing openrouter.ai; legacy hk_ keys fail closed before any network call.
 func (c Config) ResolveEndpoint(ctx context.Context) (InferenceEndpoint, error) {
-	key, fromOpenRouterEnv, err := c.resolveKeySource(ctx)
+	key, src, err := c.resolveKeySource(ctx)
 	if err != nil {
 		return InferenceEndpoint{}, err
 	}
 	if isLegacyKitKey(key) {
+		if src == keySourceKitConfig {
+			return InferenceEndpoint{}, ImplicitLegacyKitKeyError{}
+		}
 		return InferenceEndpoint{}, ErrLegacyKitKey
 	}
 	if isHostedInferenceKey(key) {
-		baseURL := c.ResolvedHostedBaseURL()
-		if fromOpenRouterEnv {
+		var baseURL string
+		switch src {
+		case keySourceOpenRouterEnv:
 			baseURL = c.ResolvedBaseURL()
+		case keySourceHevEnv:
+			baseURL = c.resolvedHostedBaseURL(true)
+		default:
+			baseURL = c.resolvedHostedBaseURL(false)
 		}
 		if err := validateHostedBaseURL(baseURL); err != nil {
 			return InferenceEndpoint{}, err

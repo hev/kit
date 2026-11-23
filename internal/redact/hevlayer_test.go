@@ -62,12 +62,16 @@ func TestKitAndLayerTokenRedactionBothSides(t *testing.T) {
 			}
 
 			contexts := map[string]string{
-				"plain-text": fmt.Sprintf("request rejected for credential %s on node mini", tc.token),
-				"json":       fmt.Sprintf(`{"error":{"message":"invalid key %s"},"token":"%s"}`, tc.token, tc.token),
-				"cli-flag":   fmt.Sprintf(`curl -s --api-key=%s -H "Authorization: Bearer %s" https://kit.hevmind.com/v1/inference`, tc.token, tc.token),
-				"url":        fmt.Sprintf("https://kit.hevmind.com/v1/inference?api_key=%s&debug=1", tc.token),
-				"error":      fmt.Sprintf("POST /v1/inference/chat/completions: 401 Unauthorized (token=%s)", tc.token),
-				"env":        fmt.Sprintf("HEV_API_KEY=%s HEVLAYER_API_KEY=%s", tc.token, tc.token),
+				"plain-text":       fmt.Sprintf("request rejected for credential %s on node mini", tc.token),
+				"json":             fmt.Sprintf(`{"error":{"message":"invalid key %s"},"token":"%s"}`, tc.token, tc.token),
+				"cli-flag":         fmt.Sprintf(`curl -s --api-key=%s -H "Authorization: Bearer %s" https://kit.hevmind.com/v1/inference`, tc.token, tc.token),
+				"url":              fmt.Sprintf("https://kit.hevmind.com/v1/inference?api_key=%s&debug=1", tc.token),
+				"error":            fmt.Sprintf("POST /v1/inference/chat/completions: 401 Unauthorized (token=%s)", tc.token),
+				"env":              fmt.Sprintf("HEV_API_KEY=%s HEVLAYER_API_KEY=%s", tc.token, tc.token),
+				"pct-bearer":       "auth=Bearer%20" + tc.token,
+				"pct-eq-amp":       "q=a%3D" + tc.token + "%26b=1",
+				"pct-amp-only":     "GET /x?a=1%26" + tc.token,
+				"pct-back-to-back": "q=" + tc.token + "%26" + tc.token,
 			}
 			for ctxName, input := range contexts {
 				out, c := s.Text(input)
@@ -82,6 +86,46 @@ func TestKitAndLayerTokenRedactionBothSides(t *testing.T) {
 					t.Errorf("%s not idempotent: %q %v", ctxName, re, c3)
 				}
 			}
+			// Percent-encoded prefix/suffix delimiters must stay intact and not pollute the HMAC fingerprint.
+			pctOut, pctCounts := s.Text("q=a%3D" + tc.token + "%26b=1")
+			if pctOut != "q=a%3D"+clean+"%26b=1" || pctCounts[tc.ruleID] != 1 {
+				t.Errorf("pct delimiter/fingerprint mismatch: got %q (%v), want %q", pctOut, pctCounts, "q=a%3D"+clean+"%26b=1")
+			}
+		})
+	}
+
+	// Underscore-adjacent and back-to-back exact 32-char hev_/hvl_ tokens must scrub cleanly and idempotently.
+	hevToken := "hev_" + hevPayload
+	hvlToken := "hvl_" + hvlPayload
+	hevClean, _ := s.Text(hevToken)
+	hvlClean, _ := s.Text(hvlToken)
+	underscoreCases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"prefix-underscore-hev", "X_" + hevToken, "X_" + hevClean},
+		{"suffix-underscore-hev", hevToken + "_x", hevClean + "_x"},
+		{"both-underscore-hev", "X_" + hevToken + "_x", "X_" + hevClean + "_x"},
+		{"prefix-underscore-hvl", "X_" + hvlToken, "X_" + hvlClean},
+		{"suffix-underscore-hvl", hvlToken + "_x", hvlClean + "_x"},
+		{"back-to-back-hev", hevToken + "_" + hevToken, hevClean + "_" + hevClean},
+		{"back-to-back-mixed", hevToken + "_" + hvlToken, hevClean + "_" + hvlClean},
+		{"back-to-back-space", hevToken + " " + hvlToken, hevClean + " " + hvlClean},
+	}
+	for _, uc := range underscoreCases {
+		t.Run("underscore/"+uc.name, func(t *testing.T) {
+			out, c := s.Text(uc.in)
+			if out != uc.want {
+				t.Fatalf("Text(%q) = %q (counts=%v), want %q", uc.in, out, c, uc.want)
+			}
+			if strings.Contains(out, hevPayload) || strings.Contains(out, hvlPayload) {
+				t.Fatalf("leaked payload in %q", out)
+			}
+			again, c2 := s.Text(out)
+			if again != out || len(c2) != 0 {
+				t.Fatalf("not idempotent: %q %v", again, c2)
+			}
 		})
 	}
 
@@ -91,6 +135,7 @@ func TestKitAndLayerTokenRedactionBothSides(t *testing.T) {
 		"hev_dispatch_runs_total",
 		"hev_dispatch",
 		"hev_board_post",
+		"my_hev_metric",
 		"HEV_API_KEY",
 		"HEVLAYER_API_KEY",
 		"hev_ kit",
@@ -98,6 +143,9 @@ func TestKitAndLayerTokenRedactionBothSides(t *testing.T) {
 		"hev_cluster_agents_working{host=\"mini\"} 3",
 		"hev_abcdefghijklmnopqrstuvwxyz_total",
 		"hvl_abcdefghijklmnopqrstuvwxyz_metric",
+		"hev_abcdefghijklmnopqrstuvwxyz_suffix",
+		"foo%20hev_abcdefghijklmnopqrstuvwxyz_total",
+		"foo%20hev_dispatch",
 		"set HEV_API_KEY or HEVLAYER_API_KEY before calling hev_dispatch and hev_board_post",
 		"hk_short_id",
 	}

@@ -69,6 +69,7 @@ func terminalWidth(out io.Writer) int {
 }
 
 func runFOH(cmd *cobra.Command, _ []string) error {
+	cmd.SilenceUsage = true
 	out := cmd.OutOrStdout()
 	color := fohColor(cmd)
 	if show, _ := cmd.Flags().GetBool("show-mascot"); show {
@@ -89,7 +90,7 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
-	router, secrets, err := fohProviders(ctx, cfg)
+	router, secrets, err := fohProviders(ctx, cfg, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
@@ -155,19 +156,35 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	return err
 }
 
-// fohProviders builds the provider router: OpenRouter when a key resolves,
-// and codex-sub when a Codex ChatGPT login is found (or [foh.codex].enabled
-// forces it). It never reads Anthropic/Claude subscription credentials. The
-// returned secrets seed the session and tool scrubbers.
-func fohProviders(ctx context.Context, cfg foh.Config) (*foh.Router, []string, error) {
+// fohProviders builds the provider router: OpenRouter/Club Kit when a key
+// resolves, and codex-sub when a Codex ChatGPT login is found (or
+// [foh.codex].enabled forces it). It never reads Anthropic/Claude subscription
+// credentials. A stale legacy hk_ key in implicit [kit].key is skipped with a
+// warning when another provider resolves, and surfaced as ErrLegacyKitKey when
+// no provider resolves. The returned secrets seed the session and tool
+// scrubbers.
+func fohProviders(ctx context.Context, cfg foh.Config, errOut io.Writer) (*foh.Router, []string, error) {
 	var providers []foh.Provider
 	var secrets []string
+	var implicitLegacyErr error
 	ep, epErr := cfg.ResolveEndpoint(ctx)
 	if epErr == nil {
 		providers = append(providers, foh.NewClient(ep.BaseURL, ep.APIKey))
 		secrets = append(secrets, ep.APIKey)
-	} else if !errors.Is(epErr, foh.ErrNoAPIKey) {
-		return nil, nil, epErr
+	} else {
+		var implicitLegacy foh.ImplicitLegacyKitKeyError
+		switch {
+		case errors.Is(epErr, foh.ErrNoAPIKey):
+			// No OpenRouter / Club Kit key configured; continue to other providers.
+		case errors.As(epErr, &implicitLegacy):
+			// Do not block fallback providers (such as codex-sub) on a stale [kit].key.
+			implicitLegacyErr = epErr
+			if k := strings.TrimSpace(cfg.Kit.Key); k != "" {
+				secrets = append(secrets, k)
+			}
+		default:
+			return nil, nil, epErr
+		}
 	}
 	if codex, err := foh.NewCodexSub(cfg.Codex); err == nil && codex.Active() {
 		providers = append(providers, codex)
@@ -176,7 +193,13 @@ func fohProviders(ctx context.Context, cfg foh.Config) (*foh.Router, []string, e
 		return nil, nil, err
 	}
 	if len(providers) == 0 {
+		if implicitLegacyErr != nil {
+			return nil, nil, implicitLegacyErr
+		}
 		return nil, nil, foh.ErrNoProviders
+	}
+	if implicitLegacyErr != nil && errOut != nil {
+		fmt.Fprintln(errOut, "hev foh: skipping legacy hk_ key in [kit].key (run `hev login` to obtain a hev_ key)")
 	}
 	return foh.NewRouter(providers...), secrets, nil
 }

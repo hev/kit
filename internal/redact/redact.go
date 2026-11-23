@@ -31,11 +31,12 @@ func (c Counts) Add(other Counts) {
 }
 
 type rule struct {
-	id       string
-	re       *regexp.Regexp
-	group    int
-	entropy  float64
-	keywords []string
+	id           string
+	re           *regexp.Regexp
+	group        int
+	advanceGroup bool
+	entropy      float64
+	keywords     []string
 }
 type Scrubber struct {
 	salt  []byte
@@ -78,7 +79,7 @@ func New(salt []byte) (*Scrubber, error) {
 			if group == 0 && re.NumSubexp() > 0 {
 				group = -1
 			}
-			knownRules = append(knownRules, rule{r.ID, re, group, r.Entropy, r.Keywords})
+			knownRules = append(knownRules, rule{id: r.ID, re: re, group: group, entropy: r.Entropy, keywords: r.Keywords})
 		}
 	})
 	if rulesErr != nil {
@@ -90,9 +91,10 @@ func New(salt []byte) (*Scrubber, error) {
 		{id: "authorization", re: regexp.MustCompile(`(?i)\bauthorization["']?\s*:\s*["']?(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+)?([^\r\n"'\x60]+)`), group: 1},
 		{id: "url-credentials", re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://([^\s/@]+:[^\s/@]+)@`), group: 1},
 		{id: "slack-token", re: regexp.MustCompile(`\bxox[a-z]-[A-Za-z0-9-]{10,}`)},
-		{id: "sk-token", re: regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}`)},
-		{id: "layer-key", re: regexp.MustCompile(`\b(?:hev|hvl)_[A-Za-z0-9]{24,}\b`)},
-		{id: "kit-key", re: regexp.MustCompile(`\bhk_[A-Za-z0-9_-]{24,}\b`)},
+		{id: "sk-token", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(sk-[A-Za-z0-9_-]{16,})`), group: 1},
+		{id: "layer-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{24,})(?:$|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})`), group: 1, advanceGroup: true},
+		{id: "layer-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{32})(?:$|[^A-Za-z0-9])`), group: 1, advanceGroup: true},
+		{id: "kit-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(hk_[A-Za-z0-9_-]{24,})`), group: 1},
 		{id: "turbopuffer", re: regexp.MustCompile(`\btpuf_[A-Za-z0-9_-]{16,}`)},
 		{id: "jwt", re: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)},
 		{id: "high-entropy-assignment", re: regexp.MustCompile(`\b[A-Za-z_][A-Za-z0-9_]*\s*=\s*["']?([A-Za-z0-9_+/=.-]{20,})`), group: 1, entropy: 3.5},
@@ -110,6 +112,38 @@ type hit struct {
 }
 
 var marker = regexp.MustCompile(`\[REDACTED:[a-zA-Z0-9_-]+#[0-9a-f]{16}\]`)
+
+func findRuleMatches(r rule, text string) [][]int {
+	if !r.advanceGroup || r.group <= 0 {
+		return r.re.FindAllStringSubmatchIndex(text, -1)
+	}
+	var out [][]int
+	pos := 0
+	for pos < len(text) {
+		m := r.re.FindStringSubmatchIndex(text[pos:])
+		if m == nil {
+			break
+		}
+		abs := make([]int, len(m))
+		for i, v := range m {
+			if v >= 0 {
+				abs[i] = v + pos
+			} else {
+				abs[i] = -1
+			}
+		}
+		out = append(out, abs)
+		g := r.group * 2
+		if g+1 < len(m) && m[g+1] > 0 {
+			pos += m[g+1]
+		} else if m[1] > 0 {
+			pos += m[1]
+		} else {
+			pos++
+		}
+	}
+	return out
+}
 
 // Text returns scrubbed text and counts of replacements (not overlapping detections).
 // Fingerprints are HMAC-SHA256 truncated to 64 bits, independent of rule name.
@@ -134,7 +168,7 @@ func (s *Scrubber) Text(text string) (string, Counts) {
 				continue
 			}
 		}
-		for _, m := range r.re.FindAllStringSubmatchIndex(text, -1) {
+		for _, m := range findRuleMatches(r, text) {
 			group := r.group * 2
 			if r.group == -1 {
 				group = 0
