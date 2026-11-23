@@ -31,7 +31,7 @@ const pricing = {
 		baseMonthly: 25, // $ / month
 		includedGB: 5, // GB stored, measured monthly
 		includedSearches: 1_000_000, // searches / month
-		includedInference: 10, // $ / month of included frontier inference credit for hev foh
+		includedInference: 10, // $ / month of included frontier inference credit for hev kit
 		perGBMonth: 5, // $ per GB-month stored beyond the included amount
 		perExtraSearchBlock: 10, // $ per block of searches beyond the included amount
 		searchBlock: 1_000_000, // searches in one block
@@ -78,10 +78,11 @@ const crossoverSearchesM = Math.round(
 	(cloud.includedSearches + (headroom / cloud.perExtraSearchBlock) * cloud.searchBlock) / 1_000_000,
 );
 
-// Nodes: machines running kit's daemon. Starter is three nodes (not enforced in
-// code today; the page states the plan, not the enforcement).
-const nodes: Record<string, number | null> = { starter: 3, advanced: null, pro: null };
-const nodesLabel = (n: number | null) => (n === null ? "Unlimited nodes" : `${n} ${n === 1 ? "node" : "nodes"}`);
+// Nodes: machines running kit's daemon. Starter is a single machine with no
+// SWIM cluster; Club Kit and Pro Kit connect unlimited nodes into a cluster.
+const nodes: Record<string, number | null> = { starter: 1, advanced: null, pro: null };
+const nodesLabel = (n: number | null) =>
+	n === null ? "Unlimited nodes (SWIM cluster)" : `${n} ${n === 1 ? "node" : "nodes"} (no SWIM cluster)`;
 
 const tiers = [
 	{
@@ -94,10 +95,10 @@ const tiers = [
 			"Full hev kit binary on local disk (macOS, Linux, Windows)",
 			"Dispatch, validation, orchestrators, traces, board, peers and dashboard",
 			"Works with Claude Code, Codex, Antigravity, Pi and OpenCode",
-			"Native hev foh harness with free OpenRouter inference (daily limit, no key needed)",
+			"Built-in hev kit harness with free OpenRouter inference (daily limit, no key needed)",
 		],
 		nodes: nodesLabel(nodes.starter),
-		people: "Unlimited agents on those nodes",
+		people: "Unlimited agents on that node",
 		cta: { label: "Install", href: "/docs/install" },
 	},
 	{
@@ -107,15 +108,15 @@ const tiers = [
 		price: usd(cloud.baseMonthly),
 		unit: "base / month",
 		included: [
-			`Everything in ${STARTER}, shared across your team`,
+			`Everything in ${STARTER}, clustered across your team`,
 			`${gb(cloud.includedGB)} stored and ${count(cloud.includedSearches)} searches / month`,
-			`${usd(cloud.includedInference)} / month of frontier inference credit for hev foh (zero API keys)`,
+			`${usd(cloud.includedInference)} / month of frontier inference credit for hev kit (zero API keys)`,
 			"Your own mobile app, voice-first",
 		],
 		beyond: [
 			`${usd(cloud.perGBMonth)} per GB-month stored`,
 			`${usd(cloud.perExtraSearchBlock)} per additional ${count(cloud.searchBlock)} searches`,
-			"Additional hev foh inference billed in dollars (or fall back to free routes)",
+			"Additional hev kit inference billed in dollars (or fall back to free routes)",
 			"No ceiling",
 		],
 		nodes: nodesLabel(nodes.advanced),
@@ -142,7 +143,7 @@ const tiers = [
 		included: [
 			"Everything in hev kit, backed by your own hev layer",
 			`${gb(enterprise.includedGB)} of index — your store, your data`,
-			"BYOKey for hev foh (OpenRouter, Bedrock, Azure OpenAI, Vertex)",
+			"BYOKey for hev kit (OpenRouter, Bedrock, Azure OpenAI, Vertex)",
 			"Your own mobile app, voice-first",
 			"SLA and migration help",
 		],
@@ -162,24 +163,24 @@ const kitPillars = [
 		body: "Wraps Claude Code, Codex, Antigravity, Pi and OpenCode on macOS, Linux and Windows. Bring your existing subscriptions and machines; kit ties them together.",
 	},
 	{
-		label: "hev foh",
-		title: "Built-in front-of-house harness",
-		body: "A lean terminal agent for coordinating dispatches, peers, traces and the board. Free OpenRouter routes on Starter, included frontier credits on Club, and BYOKey on Pro.",
+		label: "hev kit harness",
+		title: "Built-in terminal harness",
+		body: "A lean Go harness for steering dispatches, peers, traces and the board directly from the terminal. Free OpenRouter routes on Starter, included frontier credits on Club, and BYOKey on Pro.",
 	},
 	{
 		label: "dispatch & validate",
 		title: "Orders as plain Markdown",
-		body: "Send work to any host with acceptance criteria, an isolated Git worktree, status and logs. A second host and model can validate the diff before you review.",
+		body: "Send work with acceptance criteria, an isolated Git worktree, status and logs. A second model or host can validate the diff before you review.",
 	},
 	{
 		label: "traces & board",
 		title: "Memory that outlives a session",
-		body: "Every run is captured and searchable. Local files and grep on Starter; one shared semantic archive across every machine and teammate on Club and Pro.",
+		body: "Every run is captured and searchable. Local files and grep on a single machine with Starter; one shared semantic archive across every node and teammate on Club and Pro.",
 	},
 	{
 		label: "peers & hooks",
 		title: "Agent-to-agent coordination",
-		body: "Agents across machines read what peers are doing, message before colliding on a branch, and emit hooks for Slack or custom notifications.",
+		body: "Agents read what peers are doing, message before colliding on a branch, and emit hooks for Slack or custom notifications.",
 	},
 	{
 		label: "orchestrators",
@@ -191,11 +192,11 @@ const kitPillars = [
 const faq = [
 	{
 		q: "What is included in hev kit?",
-		a: "One Apache-2.0 Go binary for macOS, Linux and Windows. It gives Claude Code, Codex, Antigravity, Pi and OpenCode shared tools for dispatch, validation, orchestrators, traces, the board, peers, hooks, skills and secrets—plus hev foh, a built-in front-of-house harness for steering work from the terminal.",
+		a: "One Apache-2.0 Go binary for macOS, Linux and Windows. It gives Claude Code, Codex, Antigravity, Pi and OpenCode shared tools for dispatch, validation, orchestrators, traces, the board, peers, hooks, skills and secrets—plus the built-in hev kit terminal harness for steering work directly.",
 	},
 	{
-		q: "How does hev foh inference work across plans?",
-		a: `${STARTER} runs hev foh on free OpenRouter routes with zero API key setup (rate-limited daily; public free routes, so keep secrets out of it). ${ADVANCED} includes ${usd(cloud.includedInference)} a month of managed frontier inference credit—shown in dollars rather than raw token math—with top-ups or fallback to free routes. ${PRO} unlocks bring-your-own-key (BYOK) for hev foh so requests go straight to your own OpenRouter, AWS Bedrock, Azure OpenAI or Vertex endpoints.`,
+		q: "How does hev kit inference work across plans?",
+		a: `${STARTER} runs the hev kit harness on free OpenRouter routes with zero API key setup (rate-limited daily; public free routes, so keep secrets out of it). ${ADVANCED} includes ${usd(cloud.includedInference)} a month of managed frontier inference credit—shown in dollars rather than raw token math—with top-ups or fallback to free routes. ${PRO} unlocks bring-your-own-key (BYOK) for hev kit so requests go straight to your own OpenRouter, AWS Bedrock, Azure OpenAI or Vertex endpoints.`,
 	},
 	{
 		q: "Do people or agents cost anything?",
@@ -203,7 +204,7 @@ const faq = [
 	},
 	{
 		q: "What is a node?",
-		a: `A machine running kit: your laptop, a build box, a cloud VM your agents work on. ${STARTER} runs on up to ${nodes.starter} nodes, so you can send work from your laptop to a machine in the back and let agents run there. Each ${STARTER} node keeps its own traces and board in local files. ${ADVANCED} and ${PRO} connect as many nodes as you have and give them one shared set of traces, one board and one set of peers.`,
+		a: `A machine running kit: your laptop, a build box, or a cloud VM your agents work on. ${STARTER} runs on a single node with local files and no SWIM cluster. ${ADVANCED} and ${PRO} connect unlimited nodes into a SWIM cluster with one shared set of traces, one board and one set of peers.`,
 	},
 	{
 		q: "What is the mobile app?",
@@ -239,7 +240,7 @@ const faq = [
 		: []),
 	{
 		q: `What stays local in ${STARTER}?`,
-		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on each machine kit runs on. There is no account, no key and no Docker. It is not a trial: it is complete for one person and a few machines.",
+		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on your single machine, with no SWIM cluster, no account and no Docker. It is not a trial: it is complete for one developer on one machine.",
 	},
 	{
 		q: `What happens to my local history when I move to ${ADVANCED}?`,
@@ -254,7 +255,7 @@ const faq = [
 
 <Base
 	title="hev kit pricing: free seats, pay for what you store and search"
-	description="Starter Kit is free and open source on up to three machines. Club Kit, hosted by us, charges for data stored and searches run, with unlimited people and agents. Pro Kit runs in your own cloud."
+	description="Starter Kit is free and open source on a single machine with no cluster. Club Kit, hosted by us, connects unlimited nodes and charges for data stored and searches run. Pro Kit runs in your own cloud."
 	current="pricing"
 >
 	<main>
@@ -264,10 +265,9 @@ const faq = [
 				<h1>{pricing.headline}</h1>
 				<p class="subhead">{pricing.subhead}</p>
 				<p class="lede">
-					{STARTER} is free on your own machines, with everything in local files.
-					{ADVANCED} shares your traces, the board and peers across your team, so every
-					person and every machine works from the same record. Bring everyone:
-					seats cost nothing.
+					{STARTER} is free on a single machine, with everything in local files and no cluster.
+					{ADVANCED} connects your machines into a SWIM cluster and shares traces, the board and peers
+					across your team. Bring everyone: seats cost nothing.
 				</p>
 				<p class="per-person"># Seats and agents are free on every plan. You pay for storage and searches.</p>
 			</div>
@@ -374,9 +374,9 @@ const faq = [
 				<h2>One meta-harness across every plan.</h2>
 				<p>
 					Every tier runs the same Apache-2.0 <code>hev</code> binary on your machines.
-					You don't pay per seat or per coding agent—you upgrade when you want hosted
-					frontier inference for <code>hev foh</code>, shared team memory across machines,
-					or your own cloud deployment with <code>hev layer</code>.
+					You don't pay per seat or per coding agent—you upgrade when you want multi-node
+					SWIM clustering, hosted frontier inference for <code>hev kit</code>, shared team
+					memory, or your own cloud deployment with <code>hev layer</code>.
 				</p>
 			</div>
 			<div class="kit-grid">
@@ -409,8 +409,8 @@ const faq = [
 								Sign up with Google or an email address, then create your team or
 								pick the one you were invited to. After that, <code>hev login</code>
 								on each machine signs it in to the team, and its traces, the board
-								and peers are shared from there. {STARTER} stays free and complete
-								on up to three machines.
+								and peers are shared across the cluster. {STARTER} stays free and
+								complete on a single machine.
 							</p>
 							<p>
 								<a href={SIGNUP_HREF} class="btn primary" data-app-signup="pricing-start">Sign up for {ADVANCED}</a>
@@ -431,7 +431,7 @@ const faq = [
 							</p>
 							<p>
 								Hosted sign-up isn't live yet. Until it is, {STARTER} is free and
-								complete on up to three machines.
+								complete on a single machine.
 							</p>
 							<p><a href="/docs/install" class="text-link">Install kit</a></p>
 						</>
