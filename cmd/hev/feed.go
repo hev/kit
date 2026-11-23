@@ -27,7 +27,7 @@ func newFeedCommand() *cobra.Command {
 		Short: "The Slack activity feed: summarized agent turns, notices, board feedback and evidence",
 		Long: `The feed posts what agents on this host are doing to one Slack channel, one
 thread per session, dispatch run or orchestrator, with each turn summarized by
-a small model. Configure it with [feed] in ~/.hev/config.toml (docs/feed.md).
+a small model. Configure it with [feed] in ~/.hev/config.toml (https://hevkit.com/docs/feed).
 
 Hooks only spool events; hev feed send posts them and is started for you.`,
 	}

@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 """Render, and with --apply upsert, the draft GitHub release for kit's next version.
 
-The draft is the release train's ledger (docs/runbooks/release-train.md). Each
+The draft is the release train's ledger (the release-train runbook on hev board). Each
 train has a branch vX.Y; features merge into it, and main does not move until
 the release ships. The draft for vX.Y.Z is rendered from the train branch's
 tip and targets that commit. Its body is a pure function of the git tree at
 one commit:
 
-  1. docs/releases/vX.Y.Z.md at that commit, or a "notes not written yet"
+  1. releases/vX.Y.Z.md at that commit, or a "notes not written yet"
      line when the file does not exist;
   2. one line per pull request merged since the last release tag, grouped by
      kind;
-  3. the docs pages changed since that tag, linked into the docs preview when
-     --preview-url (or $KIT_DOCS_PREVIEW_URL) names it, and, while the train
-     has a train docs branch, the pages on that branch for features not merged
-     yet (the preview follows that branch until the cut);
+  3. the hosted documentation URL;
   4. a marker naming the version, the base tag and the source commit.
 
 Nothing in the body depends on the clock or on GitHub, so rendering twice from
-the same commit (and the same train docs branch tip) gives the same bytes and --apply on an unchanged draft is a
+the same commit gives the same bytes, and --apply on an unchanged draft is a
 no-op. Without --apply the script only prints; it never calls gh.
 
   scripts/release-draft.py --ref origin/v0.7 --branch v0.7           # print the body
@@ -39,16 +36,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_REPO = "hev/kit"
-NOTES_DIR = "docs/releases"
-SITE_DOCS = "site/src/content/docs/"
-SITE_MARKER = "site/package.json"
+NOTES_DIR = "releases"
 PUBLIC_SITE = "https://hevkit.com"
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 TAG_GLOB = "v[0-9]*.[0-9]*.[0-9]*"
-# A notes file names its train docs branch with this line (an HTML comment, so
-# it does not show in the release body). Without one the convention applies:
-# train/vX.Y-docs.
-TRAIN_DOCS_DECL = re.compile(r"^<!--\s*train-docs:\s*(\S+)\s*-->\s*$", re.M)
 # A train branch: vX.Y. It carries X.Y.0 and, after it ships, the X.Y.Z patches.
 TRAIN_BRANCH = re.compile(r"^v(\d+)\.(\d+)$")
 
@@ -116,10 +107,6 @@ class Git:
         p = subprocess.run(["git", "-C", str(self.cwd), "show", f"{ref}:{path}"], capture_output=True)
         return p.stdout.decode("utf-8") if p.returncode == 0 else None
 
-    def exists(self, ref: str, path: str) -> bool:
-        return subprocess.run(["git", "-C", str(self.cwd), "cat-file", "-e", f"{ref}:{path}"],
-                              capture_output=True).returncode == 0
-
     def ls(self, ref: str, path: str) -> list[str]:
         return self.run("ls-tree", "--name-only", ref, path.rstrip("/") + "/", check=False).split()
 
@@ -132,7 +119,7 @@ def resolve_version(git: Git, ref: str, base: str | None, explicit: str | None,
     """The version this draft is for.
 
     On a train branch vX.Y (line) the version is always X.Y.Z: explicit must
-    agree; otherwise the lowest untagged docs/releases/vX.Y.Z.md above the
+    agree; otherwise the lowest untagged releases/vX.Y.Z.md above the
     base tag (a notes file is how a release is declared), else X.Y.0 for a new
     train, else the next patch after the base tag when the base is on the
     line already (X.Y.0 has shipped). Off a train branch (a local run), the
@@ -220,57 +207,6 @@ def merge_log(git: Git, base: str | None, ref: str) -> list[Entry]:
     return entries
 
 
-def changed_doc_pages(git: Git, base: str | None, ref: str) -> list[str]:
-    if not git.exists(ref, SITE_MARKER):
-        return []
-    if base:
-        names = git.run("diff", "--name-only", "--diff-filter=AMR", base, ref, "--", SITE_DOCS).split()
-    else:
-        names = git.run("ls-tree", "-r", "--name-only", ref, SITE_DOCS).split()
-    slugs = set()
-    for name in names:
-        m = re.match(re.escape(SITE_DOCS) + r"(.+)\.mdx?$", name)
-        if m and git.exists(ref, name):
-            slugs.add(m.group(1))
-    return sorted(slugs)
-
-
-def train_docs_branch(notes: str | None, version: str) -> str:
-    """The train docs branch for a version: declared in its notes file, else train/vX.Y-docs."""
-    m = TRAIN_DOCS_DECL.search(notes or "")
-    if m:
-        return m.group(1)
-    major, minor, _ = parse_version(version)
-    return f"train/v{major}.{minor}-docs"
-
-
-def resolve_docs_ref(git: Git, branch: str) -> str | None:
-    """origin/BRANCH, else BRANCH; None when neither exists (no train docs branch, or it closed at the cut)."""
-    for ref in (f"origin/{branch}", branch):
-        out = git.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False).strip()
-        if out:
-            return ref
-    return None
-
-
-def planned_doc_pages(git: Git, source: str, docs_ref: str) -> list[str]:
-    """Pages the train docs branch adds or changes relative to its merge base with the source."""
-    names = git.run("diff", "--name-only", "--diff-filter=AMR", f"{source}...{docs_ref}", "--", SITE_DOCS).split()
-    slugs = set()
-    for name in names:
-        m = re.match(re.escape(SITE_DOCS) + r"(.+)\.mdx?$", name)
-        if m:
-            slugs.add(m.group(1))
-    return sorted(slugs)
-
-
-def doc_path(slug: str) -> str:
-    return "/docs" if slug == "index" else f"/docs/{slug}"
-
-
-# --- render ---------------------------------------------------------------
-
-
 @dataclass
 class Draft:
     version: str
@@ -279,7 +215,7 @@ class Draft:
     title: str
     body: str
     entries: int = 0      # merged since base
-    declared: bool = False  # docs/releases/vX.Y.Z.md exists at source
+    declared: bool = False  # releases/vX.Y.Z.md exists at source
 
     @property
     def tag(self) -> str:
@@ -287,8 +223,7 @@ class Draft:
 
 
 def render(git: Git, ref: str = "HEAD", version: str | None = None, base: str | None = None,
-           branch: str | None = None, repo: str = DEFAULT_REPO, preview: str | None = None,
-           published: bool = False, docs_branch: str | None = None) -> Draft:
+           branch: str | None = None, repo: str = DEFAULT_REPO) -> Draft:
     """Render the body for the release on train branch `branch` (vX.Y) from commit `ref`."""
     source = git.sha(ref)
     if base is None:
@@ -299,7 +234,6 @@ def render(git: Git, ref: str = "HEAD", version: str | None = None, base: str | 
     version = resolve_version(git, source, base, version, train_line(branch))
     if base and parse_version(base) >= parse_version(version):
         raise DraftError(f"version {version} is not after base {base}")
-    preview = (preview or "").rstrip("/")
     tag = f"v{version}"
     since = base or "the first commit"
     out: list[str] = []
@@ -334,63 +268,11 @@ def render(git: Git, ref: str = "HEAD", version: str | None = None, base: str | 
         out.pop()
 
     out.append("")
-    if published:
-        # The public body: the docs are on hevkit.com now, which the site
-        # workflow pins to this release; the private preview is not named.
-        out.append("## Docs")
-        out.append("")
-        out.append(f"<{PUBLIC_SITE}/docs>")
-        pages = changed_doc_pages(git, base, source) if git.exists(source, SITE_MARKER) else []
-        if pages:
-            out.append("")
-            out.append(f"Pages changed since {since}:")
-            out.append("")
-            for slug in pages:
-                out.append(f"- [{slug}]({PUBLIC_SITE}{doc_path(slug)})")
-    else:
-        out.extend(preview_section(git, base, source, since, preview, version,
-                                   docs_branch or train_docs_branch(notes, version), branch))
-
-    out.append("")
+    out.extend(["## Documentation", "", f"<{PUBLIC_SITE}/docs>", ""])
     out.append(f"<!-- Generated by scripts/release-draft.py. Edit {NOTES_DIR}/{tag}.md, not this body. -->")
     out.append(f"<!-- kit-release-draft version={version} base={base or '-'} source={source} -->")
     return Draft(version, base, source, f"kit {tag}", "\n".join(out) + "\n",
                  entries=len(entries), declared=bool(notes and notes.strip()))
-
-
-def preview_section(git: Git, base: str | None, source: str, since: str, preview: str,
-                    version: str, docs_branch: str, branch: str | None) -> list[str]:
-    out = ["## Docs preview", ""]
-    if not git.exists(source, SITE_MARKER):
-        out.append("No preview yet: the docs site is not on this branch.")
-        return out
-    # The preview is served on the private network, so its address comes from
-    # the caller and this section is dropped when the release is published
-    # (release.yml); the public notes link hevkit.com instead. While the train
-    # has a train docs branch the preview follows it: it is the train branch
-    # plus the docs for planned features, so every page below resolves there,
-    # shipped or not.
-    on = f"`{branch}`" if branch else "the train branch"
-    docs_ref = resolve_docs_ref(git, docs_branch)
-    planned = planned_doc_pages(git, source, docs_ref) if docs_ref else []
-    follows = (f"the train docs branch `{docs_branch}` ({on} plus the docs for features not merged yet)"
-               ) if docs_ref else on
-    if preview:
-        out.append(f"This release's docs: <{preview}/docs>. The preview follows {follows}.")
-    else:
-        out.append(f"This release's docs are in the docs preview on the mini, which follows {follows}.")
-
-    def link(slug: str) -> str:
-        return f"- [{slug}]({preview}{doc_path(slug)})" if preview else f"- `{doc_path(slug)}`"
-
-    pages = changed_doc_pages(git, base, source)
-    if pages:
-        out += ["", f"Pages changed on {on} since {since}:", ""]
-        out += [link(s) for s in pages]
-    if planned:
-        out += ["", f"Docs written for planned features, on `{docs_branch}` and not on {on} yet:", ""]
-        out += [link(s) for s in planned]
-    return out
 
 
 MARKER = re.compile(r"<!-- kit-release-draft version=(\S+) base=(\S+) source=([0-9a-f]{40}) -->")
@@ -468,16 +350,11 @@ def main(argv: list[str] | None = None, gh=gh_cli) -> int:
                     help="train branch vX.Y the draft is for (default $KIT_TRAIN_BRANCH); the version is then "
                          "always X.Y.Z. --apply requires it")
     ap.add_argument("--repo", default=DEFAULT_REPO)
-    ap.add_argument("--preview-url", default=os.environ.get("KIT_DOCS_PREVIEW_URL"),
-                    help="docs preview origin, private (default $KIT_DOCS_PREVIEW_URL; none: pages listed unlinked)")
-    ap.add_argument("--docs-branch", default=os.environ.get("KIT_TRAIN_DOCS_BRANCH"),
-                    help="train docs branch (default $KIT_TRAIN_DOCS_BRANCH, else the notes file's "
-                         "'<!-- train-docs: BRANCH -->' line, else train/vX.Y-docs); read as origin/BRANCH")
     ap.add_argument("--repo-dir", default=".", help="git checkout to read (default .)")
     ap.add_argument("--print-version", action="store_true", help="print only the resolved version")
     ap.add_argument("--json", action="store_true", help="print version, tag, base, source, title and body as JSON")
     ap.add_argument("--published", action="store_true",
-                    help="render the public body (hevkit.com docs links, no preview); release.yml uses it after publish")
+                    help="render notes for a published release without updating a draft")
     ap.add_argument("--apply", action="store_true", help="create or update the draft on GitHub through gh")
     args = ap.parse_args(argv)
     try:
@@ -486,8 +363,7 @@ def main(argv: list[str] | None = None, gh=gh_cli) -> int:
             raise DraftError("--published renders a body for a published release; it never upserts a draft")
         if args.apply and not train_line(args.branch):
             raise DraftError("--apply needs --branch vX.Y: a draft is always for a train branch")
-        draft = render(git, args.ref, args.version, args.base, args.branch, args.repo,
-                       None if args.published else args.preview_url, args.published, args.docs_branch)
+        draft = render(git, args.ref, args.version, args.base, args.branch, args.repo)
         if args.print_version:
             print(draft.version)
             return 0

@@ -1,6 +1,0 @@
-node_modules/
-dist/
-.astro/
-.hev-ask/shards/
-.hev-ask/tmp-*/
-.wrangler/

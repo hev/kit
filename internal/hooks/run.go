@@ -180,7 +180,7 @@ func firstLines(s string, n int) string {
 }
 
 // UserHandlers discovers hev-hook-NAME executables on PATH, first match per
-// name, like plugins (docs/plugins.md).
+// name, like plugins (https://hevkit.com/docs/plugins).
 func UserHandlers(path string) []Handler {
 	var hs []Handler
 	for _, u := range userExecutables(path) {

@@ -1,4 +1,4 @@
-// Package feed is kit's Slack activity feed (docs/feed.md): what agents on
+// Package feed is kit's Slack activity feed (https://hevkit.com/docs/feed): what agents on
 // this host are doing, posted to one channel as one thread per session, run
 // or orchestrator, with turns summarized by a small model.
 //
@@ -37,7 +37,7 @@ const (
 	KindEvidence     = "evidence"
 )
 
-// AllKinds lists every kind, in the order docs/feed.md describes them.
+// AllKinds lists every kind, in the order https://hevkit.com/docs/feed describes them.
 var AllKinds = []string{KindSessionStart, KindPromptSubmit, KindPreTool, KindPostTool, KindStop, KindPreCompact,
 	KindNeedsYou, KindReady, KindDone, KindPeerMessage, KindBoardPost, KindEvidence}
 

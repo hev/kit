@@ -15,7 +15,7 @@ import (
 )
 
 // LifecycleEvents are the run-lifecycle events kit raises itself, outside
-// any harness session: attention notices (docs/notify.md,
+// any harness session: attention notices (https://hevkit.com/docs/notify,
 // schemas/attention_event.schema.json). Handlers observe them; their output
 // is ignored.
 var LifecycleEvents = []string{"needs-you", "ready", "done"}
