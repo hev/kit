@@ -79,10 +79,10 @@ const crossoverSearchesM = Math.round(
 );
 
 // Nodes: machines running kit's daemon. Starter is a single machine with no
-// SWIM cluster; Club Kit and Pro Kit connect unlimited nodes into a cluster.
+// cluster; Club Kit and Pro Kit connect unlimited nodes.
 const nodes: Record<string, number | null> = { starter: 1, advanced: null, pro: null };
 const nodesLabel = (n: number | null) =>
-	n === null ? "Unlimited nodes (SWIM cluster)" : `${n} ${n === 1 ? "node" : "nodes"} (no SWIM cluster)`;
+	n === null ? "Unlimited nodes" : `${n} ${n === 1 ? "node" : "nodes"} (single machine)`;
 
 const tiers = [
 	{
@@ -92,10 +92,10 @@ const tiers = [
 		price: "Free",
 		unit: "Apache-2.0",
 		included: [
-			"Full hev kit binary on local disk (macOS, Linux, Windows)",
+			"hev kit is tested across macOS, Windows and Linux",
 			"Dispatch, validation, orchestrators, traces, board, peers and dashboard",
-			"Works with Claude Code, Codex, Antigravity, Pi and OpenCode",
-			"Built-in hev kit harness with free OpenRouter inference (daily limit, no key needed)",
+			"Compatible with Claude Code, Codex, Antigravity, Pi and OpenCode subscriptions",
+			"Custom hev kit harness experience (optional)",
 		],
 		nodes: nodesLabel(nodes.starter),
 		people: "Unlimited agents on that node",
@@ -121,7 +121,8 @@ const tiers = [
 		],
 		nodes: nodesLabel(nodes.advanced),
 		people: "Unlimited people and agents",
-		how: "Open sign-up: a card to start, or an invite code for free credit.",
+		how: "Got an invite code?",
+		howLink: { label: "Click here.", href: "#start" },
 		cta: { label: "Start", href: START_HREF, signup: APP_LIVE ? "pricing" : undefined },
 		featured: true,
 	},
@@ -204,7 +205,7 @@ const faq = [
 	},
 	{
 		q: "What is a node?",
-		a: `A machine running kit: your laptop, a build box, or a cloud VM your agents work on. ${STARTER} runs on a single node with local files and no SWIM cluster. ${ADVANCED} and ${PRO} connect unlimited nodes into a SWIM cluster with one shared set of traces, one board and one set of peers.`,
+		a: `A machine running kit: your laptop, a build box, or a cloud VM your agents work on. ${STARTER} runs on a single node with local files and no cluster. ${ADVANCED} and ${PRO} connect unlimited nodes with one shared set of traces, one board and one set of peers.`,
 	},
 	{
 		q: "What is the mobile app?",
@@ -240,7 +241,7 @@ const faq = [
 		: []),
 	{
 		q: `What stays local in ${STARTER}?`,
-		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on your single machine, with no SWIM cluster, no account and no Docker. It is not a trial: it is complete for one developer on one machine.",
+		a: "Everything. Traces and their search index, the board, the dashboard, run records and peers are plain files on your single machine, with no cluster, no account and no Docker. It is not a trial: it is complete for one developer on one machine.",
 	},
 	{
 		q: `What happens to my local history when I move to ${ADVANCED}?`,
@@ -266,7 +267,7 @@ const faq = [
 				<p class="subhead">{pricing.subhead}</p>
 				<p class="lede">
 					{STARTER} is free on a single machine, with everything in local files and no cluster.
-					{ADVANCED} connects your machines into a SWIM cluster and shares traces, the board and peers
+					{ADVANCED} connects your machines and shares traces, the board and peers
 					across your team. Bring everyone: seats cost nothing.
 				</p>
 				<p class="per-person"># Seats and agents are free on every plan. You pay for storage and searches.</p>
@@ -348,7 +349,17 @@ const faq = [
 									<li>{t.people}</li>
 								</ul>
 							</div>
-							{t.how && <p class="tier-how">{t.how}</p>}
+							{t.how && (
+								<p class="tier-how">
+									{t.how}
+									{t.howLink && (
+										<>
+											{" "}
+											<a href={t.howLink.href}>{t.howLink.label}</a>
+										</>
+									)}
+								</p>
+							)}
 							<a href={t.cta.href} class:list={["btn", { primary: t.featured }]} data-app-signup={t.cta.signup}>
 								{t.cta.label}
 							</a>
@@ -375,7 +386,7 @@ const faq = [
 				<p>
 					Every tier runs the same Apache-2.0 <code>hev</code> binary on your machines.
 					You don't pay per seat or per coding agent—you upgrade when you want multi-node
-					SWIM clustering, hosted frontier inference for <code>hev kit</code>, shared team
+					clustering, hosted frontier inference for <code>hev kit</code>, shared team
 					memory, or your own cloud deployment with <code>hev layer</code>.
 				</p>
 			</div>
