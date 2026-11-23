@@ -22,7 +22,8 @@ func TestDispatchWatchAndAutoRespond(t *testing.T) {
 		if len(args) >= 2 && args[0] == "dispatch" && args[1] == "show" {
 			return []byte(`{"name":"smoke-1","host":"mini","state":"` + state + `","pr":"https://github.com/hev/kit/pull/999","report":"All good."}`), nil
 		}
-		return []byte(`{"name":"smoke-1","host":"mini","state":"running"}`), nil
+		// Keep the send result short enough to use the deterministic card summary.
+		return []byte(`{"name":"smoke-1","host":"mini"}`), nil
 	})
 
 	// 1. /dispatch sends the order and automatically registers a watch.

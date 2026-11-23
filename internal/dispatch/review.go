@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/hev/kit/internal/reviewnotes"
 )
@@ -70,7 +71,7 @@ func reviewFetch(dir string, m Meta, q Request) (*ReviewFetch, error) {
 		if !commitID.MatchString(q.Since) {
 			return nil, fmt.Errorf("invalid since commit")
 		}
-		if reviewnotes.SameHead(q.Since, f.Head) {
+		if strings.HasPrefix(f.Head, strings.ToLower(q.Since)) {
 			return f, nil
 		}
 		exclude = []string{"^" + q.Since}
