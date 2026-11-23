@@ -19,7 +19,7 @@ func hevToolEmoji(tool string, color bool) string {
 	case "hev_dispatch", "hev dispatch":
 		return "🚀"
 	case "hev_steer", "hev steer":
-		return "🧭"
+		return "⎈"
 	case "hev_peers", "hev peers":
 		return "💬"
 	case "hev_board", "hev board":
@@ -35,16 +35,16 @@ func hevToolEmoji(tool string, color bool) string {
 	case "hev orchestrate":
 		return "🎯"
 	case "hev workspace":
-		return "🗂️"
+		return "📁"
 	case "hev secrets":
 		return "🔐"
 	case "hev cron":
 		return "⏰"
 	case "hev service":
-		return "⚙️"
+		return "⚡"
 	default:
 		if strings.HasPrefix(tool, "hev") {
-			return "🛠️"
+			return "🔧"
 		}
 		return "◆"
 	}
