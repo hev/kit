@@ -12,9 +12,10 @@ import (
 )
 
 var licenseCmd = &cobra.Command{
-	Use:   "license",
-	Short: "Inspect Kit's offline Pro license",
-	Args:  cobra.NoArgs,
+	Use:    "license",
+	Short:  "Inspect Kit's offline Pro license",
+	Hidden: true,
+	Args:   cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		s := license.Resolve(cmd.Context())
 		machine, _ := cmd.Flags().GetBool("json")

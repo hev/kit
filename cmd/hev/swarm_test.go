@@ -139,16 +139,18 @@ func TestSwarmSurfaceAndHelp(t *testing.T) {
 		t.Fatal("ps lacks --json")
 	}
 	root := &cobra.Command{Use: "hev", Long: rootCmd.Long}
-	root.AddCommand(c)
+	orch := newOrchestrateCommand()
+	root.AddCommand(orch)
 	groupClusterCommands(root)
 	var out bytes.Buffer
-	root.SetOut(&out)
-	if err := root.Help(); err != nil || strings.Contains(out.String(), "swarm") {
-		t.Fatalf("root help exposed swarm: %v\n%s", err, out.String())
+	orch.SetOut(&out)
+	if err := orch.Help(); err != nil || !strings.Contains(out.String(), "swarm") {
+		t.Fatalf("orchestrate help missing swarm: %v\n%s", err, out.String())
 	}
 	out.Reset()
-	root.SetArgs([]string{"swarm", "up", "--help"})
-	if err := root.Execute(); err != nil || !strings.Contains(out.String(), "hev swarm up") {
-		t.Fatalf("direct swarm help failed: %v\n%s", err, out.String())
+	root.SetOut(&out)
+	root.SetArgs([]string{"orchestrate", "swarm", "up", "--help"})
+	if err := root.Execute(); err != nil || !strings.Contains(out.String(), "hev orchestrate swarm up") {
+		t.Fatalf("direct orchestrate swarm help failed: %v\n%s", err, out.String())
 	}
 }

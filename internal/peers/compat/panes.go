@@ -471,6 +471,13 @@ func screenState(agent string, raw, plain []string) string {
 	for i := len(plain) - 1; !agy && i >= 0; i-- {
 		s := strings.TrimLeftFunc(plain[i], unicode.IsSpace)
 		if strings.HasPrefix(s, "❯") || strings.HasPrefix(s, "›") {
+			if agent == harness.FOH {
+				rest := pyStrip(strings.TrimPrefix(s, "›"))
+				if rest == "" || strings.HasPrefix(rest, "Ask hev kit") {
+					break
+				}
+				return "draft"
+			}
 			typed := strings.TrimLeftFunc(strings.ReplaceAll(undimmed(raw[i]), " ", " "), unicode.IsSpace)
 			if typed != "" {
 				typed = string([]rune(typed)[1:])
@@ -488,8 +495,11 @@ func screenState(agent string, raw, plain []string) string {
 		if agyRunning && (i < inputStart || i >= inputEnd) && agyCancelRE.MatchString(plain[i]) {
 			return "working"
 		}
+		if agent == harness.FOH && (strings.Contains(plain[i], "Enter steers") || strings.Contains(plain[i], "working…") || strings.Contains(plain[i], "thinking…")) {
+			return "working"
+		}
 	}
-	if agy && agySpinning(plain) {
+	if (agy || agent == harness.FOH) && agySpinning(plain) {
 		return "working"
 	}
 	if agy && inputStart < 0 {

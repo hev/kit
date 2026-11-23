@@ -11,7 +11,7 @@ func TestLookup(t *testing.T) {
 	want := map[string]string{
 		"claude": Claude, "claude_code": Claude, "codex": Codex, "codex_cli": Codex,
 		"pi": Pi, "opencode": OpenCode, "agy": Agy, "dot": Dot,
-		"hev": FOH, "hev_foh": FOH, "foh": FOH,
+		"hev": FOH, "hev_foh": FOH, "foh": FOH, "kit": FOH,
 	}
 	for _, d := range All() {
 		for _, name := range append([]string{d.Name}, d.Aliases...) {
@@ -64,7 +64,7 @@ func TestCapabilities(t *testing.T) {
 		{"agy", ".gemini/antigravity-cli", "HEV_AGY_DATA_DIR", "", ".agents/skills", nil, nil,
 			[]string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--model", "sample", "--effort", "high", "--print=prompt"}, true, false},
 		{"dot", ".dot/traces", "", "", "", nil, nil, nil, false, false},
-		{"hev", ".hev/foh/sessions", "HEV_FOH_SESSIONS_DIR", "", "", nil, nil, nil, false, false},
+		{"hev", ".hev/foh/sessions", "HEV_FOH_SESSIONS_DIR", "", "", nil, nil, nil, true, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			d, ok := Lookup(tt.name)

@@ -49,20 +49,25 @@ func submit(m *TUI, s string) tea.Cmd {
 func TestTUISplash(t *testing.T) {
 	m, _ := newTestTUI(t, &scripted{})
 	v := plain(m)
-	for _, want := range []string{"hev foh", "v0.7.0-test", "/work/kit", "workspace  hev", "anthropic/claude-sonnet-5.5", "Ctrl+M model picker", "/prompt", "/help"} {
+	for _, want := range []string{"hev kit", "v0.7.0-test", "/work/kit", "workspace  hev", "anthropic/claude-sonnet-5.5", "Ctrl+M model picker", "/prompt", "/help", "hev kit runs without permissions.", "compute."} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("splash missing %q:\n%s", want, v)
 		}
 	}
 	// The mascot sits left of the metadata (ASCII here: no color option).
 	first := strings.Split(v, "\n")[0]
-	if !strings.Contains(first, "@") || !strings.Contains(first, "hev foh") || strings.Index(first, "@") > strings.Index(first, "hev foh") {
+	if !strings.Contains(first, "@") || !strings.Contains(first, "hev kit") || strings.Index(first, "@") > strings.Index(first, "hev kit") {
 		t.Fatalf("mascot not left of header: %q", first)
 	}
 	// Color mode renders the truecolor mascot at this width.
 	m.opts.Color = true
 	if !strings.Contains(m.View(), "\x1b[38;2;") {
 		t.Fatal("color splash has no truecolor mascot")
+	}
+	// Mascot stays in the scroll pane after a message is added.
+	m.system("hello")
+	if !strings.Contains(plain(m), "hev kit runs without permissions.") {
+		t.Fatalf("splash disappeared from scroll pane after entry:\n%s", plain(m))
 	}
 }
 
@@ -153,11 +158,34 @@ func TestTUIModelPicker(t *testing.T) {
 // drain runs cmds until the turn finishes, feeding messages back to Update.
 func drain(t *testing.T, m *TUI, cmd tea.Cmd) {
 	t.Helper()
-	for i := 0; cmd != nil && i < 200; i++ {
-		msg := cmd()
-		_, cmd = m.Update(msg)
+	queue := []tea.Cmd{}
+	if cmd != nil {
+		queue = append(queue, cmd)
+	}
+	for i := 0; len(queue) > 0 && i < 200; i++ {
+		c := queue[0]
+		queue = queue[1:]
+		msg := c()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, sub := range batch {
+				if sub != nil {
+					queue = append(queue, sub)
+				}
+			}
+			continue
+		}
+		if _, tick := msg.(shimmerTickMsg); tick {
+			continue
+		}
+		if _, tick := msg.(watchTickMsg); tick {
+			continue
+		}
+		_, next := m.Update(msg)
 		if _, done := msg.(agentDoneMsg); done {
 			return
+		}
+		if next != nil {
+			queue = append(queue, next)
 		}
 	}
 	if m.busy {
@@ -175,7 +203,7 @@ func TestTUITurnAndHevCards(t *testing.T) {
 	a.Tools = NewToolset(t.TempDir(), fakeHev(&calls, `{"runs":[{"name":"a"},{"name":"b"}]}`, nil))
 	drain(t, m, submit(m, "what is running?"))
 	v := plain(m)
-	for _, want := range []string{"you › what is running?", "◆ hev_dispatch ls", "dispatch ls · 2 runs", "╭", "· glob *.none", "Two runs are active."} {
+	for _, want := range []string{"you › what is running?", "◆ hev dispatch ls", "dispatch ls · 2 runs", "╭", "· glob *.none", "Two runs are active."} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("transcript missing %q:\n%s", want, v)
 		}
@@ -190,11 +218,11 @@ func TestTUITurnAndHevCards(t *testing.T) {
 	body := strings.Repeat("line\n", 30)
 	m.applyEvent(Event{Kind: EventToolStart, Call: call("c9", "hev_board", `{"action":"search"}`)})
 	m.applyEvent(Event{Kind: EventToolResult, Call: call("c9", "hev_board", `{}`), Result: ToolResult{Card: &Card{Tool: "hev_board", Action: "search", Summary: "board search · 30", Body: body, OK: true}}})
-	if !strings.Contains(plain(m), "… 24 more line(s) · Ctrl+O") {
+	if !strings.Contains(plain(m), "… 30 line(s) · Ctrl+O to expand") {
 		t.Fatalf("card body not bounded:\n%s", plain(m))
 	}
 	m.Update(key(tea.KeyCtrlO))
-	if strings.Contains(plain(m), "more line(s) · Ctrl+O") {
+	if strings.Contains(plain(m), "Ctrl+O to expand") {
 		t.Fatal("Ctrl+O did not expand")
 	}
 }
@@ -223,7 +251,7 @@ func TestTUISlashCommands(t *testing.T) {
 		t.Fatalf("/prompt:\n%s", v)
 	}
 	submit(m, "/reload")
-	if !strings.Contains(a.System(), "hev foh") || !strings.Contains(a.System(), "host: test") {
+	if !strings.Contains(a.System(), "hev kit") || !strings.Contains(a.System(), "host: test") {
 		t.Fatalf("/reload system = %q", a.System())
 	}
 	a.append(Message{Role: "user", Content: "x"})

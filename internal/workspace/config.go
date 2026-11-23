@@ -42,7 +42,19 @@ type Cluster struct {
 	Network string   `toml:"network,omitempty" json:"network,omitempty"`
 }
 
+// TraceCapture holds the flat trace target settings on a workspace.
+type TraceCapture struct {
+	Endpoint        string `toml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	TracesNamespace string `toml:"traces_namespace,omitempty" json:"traces_namespace,omitempty"`
+	ArchiveDir      string `toml:"archive_dir,omitempty" json:"archive_dir,omitempty"`
+	Mode            string `toml:"mode,omitempty" json:"mode,omitempty"`
+	KeyRef          string `toml:"api_key_ref,omitempty" json:"-"`
+	OpKeyRef        string `toml:"api_key_op_ref,omitempty" json:"-"`
+}
+
 type Workspace struct {
+	TraceCapture
+
 	Subscriptions Subscriptions `toml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
 	Layer         Layer         `toml:"layer,omitempty" json:"layer,omitempty"`
 	Cluster       Cluster       `toml:"cluster,omitempty" json:"cluster,omitempty"`
@@ -239,8 +251,27 @@ func Import(themesPath, listsPath string) (map[string]Workspace, error) {
 	return out, nil
 }
 
+// TraceSettings uses the existing nested [workspaces.<name>.layer] settings
+// when the corresponding flat capture settings are absent.
+func (w Workspace) TraceSettings() TraceCapture {
+	t := w.TraceCapture
+	if t.Endpoint == "" {
+		t.Endpoint = w.Layer.Endpoint
+	}
+	if t.TracesNamespace == "" {
+		t.TracesNamespace = w.Layer.TracesNamespace
+	}
+	if t.KeyRef == "" {
+		t.KeyRef = t.OpKeyRef
+	}
+	if t.KeyRef == "" {
+		t.KeyRef = w.Layer.KeyRef
+	}
+	return t
+}
+
 func (s Selection) Namespaces() (traces, board string) {
-	traces, board = s.Layer.TracesNamespace, s.Layer.BoardNamespace
+	traces, board = s.TraceSettings().TracesNamespace, s.Layer.BoardNamespace
 	if traces == "" {
 		traces = s.Name + "-traces"
 	}

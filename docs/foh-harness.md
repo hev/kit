@@ -5,9 +5,8 @@ registers with [peers](peers.md) and checks its local inbox about once a second.
 The lower status bar shows the latest sender and message preview for each
 delivery mode.
 
-- **Background** is the default. The harness keeps the latest eight background
-  messages as context for the next prompt you submit. Receipt leaves the
-  current turn and input alone.
+- **Background** is the default. The harness handles messages in a
+  separate agent turn. Receipt leaves the current conversation and input alone.
 - **Interrupt** starts a turn when the harness is idle. During a turn it uses
   the same steering boundaries as typing a follow-up. If that turn ends before
   a steer can land, the message starts the next turn.

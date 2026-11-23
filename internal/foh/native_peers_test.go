@@ -6,11 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hev/kit/internal/peers/nativeinbox"
 )
 
 func TestTUINativeInboxModesAndPresence(t *testing.T) {
-	m, agent := newTestTUI(t, &scripted{replies: []ChatResult{{Content: "hello"}, {Content: "ok"}}})
+	provider := &scripted{replies: []ChatResult{{Content: "sidecar"}, {Content: "main"}}}
+	m, agent := newTestTUI(t, provider)
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("HEV_NATIVE_PEER", "")
 	closePeer, err := m.RegisterNativePeer(context.Background())
@@ -18,16 +20,31 @@ func TestTUINativeInboxModesAndPresence(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(closePeer)
-	p := m.peers
-	for _, msg := range []nativeinbox.Message{
-		{ID: "bg", From: "observer", Body: "background context", Mode: nativeinbox.Background},
-		{ID: "int", From: "dispatcher", Body: "interrupt prompt", Mode: nativeinbox.Interrupt},
-	} {
+	p := m.nativePeer
+	deliver := func(msg nativeinbox.Message) tea.Cmd {
+		t.Helper()
 		if err := p.store.Send(p.owner, msg); err != nil {
 			t.Fatal(err)
 		}
+		_, cmd := m.Update(m.pollPeers()())
+		return cmd
 	}
-	m.Update(m.pollPeers()())
+	background := deliver(nativeinbox.Message{
+		ID: "bg", From: "observer", Body: "background context", Mode: nativeinbox.Background,
+	})
+	// Run the sidecar deterministically without executing the recurring poll.
+	for _, cmd := range background().(tea.BatchMsg)[1]().(tea.BatchMsg) {
+		if done, ok := cmd().(peerBgDoneMsg); ok {
+			m.Update(done)
+		}
+	}
+	if len(agent.History()) != 0 || len(provider.requests) != 1 ||
+		!strings.Contains(provider.requests[0].Messages[1].Content, "background context") {
+		t.Fatalf("background did not stay in the sidecar: %+v", provider.requests)
+	}
+	deliver(nativeinbox.Message{
+		ID: "int", From: "dispatcher", Body: "interrupt prompt", Mode: nativeinbox.Interrupt,
+	})
 	if got, err := p.store.Lookup(p.owner.Name); err != nil || got.State != "working" {
 		t.Fatalf("working presence: %+v, %v", got, err)
 	}
@@ -35,18 +52,11 @@ func TestTUINativeInboxModesAndPresence(t *testing.T) {
 	if !strings.Contains(view, "background context") || !strings.Contains(view, "interrupt prompt") {
 		t.Fatalf("both modes must appear in the footer: %q", m.peerStatus(120))
 	}
-	// Await the real loop events, leaving the background note pending.
 	drain(t, m, waitEvent(m.events))
 	history := agent.History()
-	if len(history) == 0 || !strings.Contains(history[0].Content, "interrupt prompt") ||
+	if len(history) != 2 || !strings.Contains(history[0].Content, "interrupt prompt") ||
 		strings.Contains(history[0].Content, "background context") {
-		t.Fatalf("interrupt prompt/sidecar routing: %+v", history)
-	}
-	drain(t, m, submit(m, "operator prompt"))
-	history = agent.History()
-	if len(history) < 3 || !strings.Contains(history[2].Content, "operator prompt") ||
-		!strings.Contains(history[2].Content, "background context") {
-		t.Fatalf("background context was not attached to the operator prompt: %+v", history)
+		t.Fatalf("interrupt did not reach the main turn: %+v", history)
 	}
 	if got, err := p.store.Lookup(p.owner.Name); err != nil || got.State != "idle" {
 		t.Fatalf("idle presence: %+v, %v", got, err)
@@ -59,14 +69,14 @@ func TestTUINativeInboxModesAndPresence(t *testing.T) {
 
 func TestTUINativeInterruptSteersOrStartsNextTurn(t *testing.T) {
 	m, agent := newTestTUI(t, &scripted{replies: []ChatResult{{Content: "continued"}}})
-	m.peers = &nativePeers{}
+	m.nativePeer = &nativePeers{}
 	incoming := nativePeerTick{messages: []nativeinbox.Message{
 		{ID: "mid-turn", From: "sender", Body: "use staging", Mode: nativeinbox.Interrupt},
 	}}
 	m.busy = true
 	m.receivePeers(incoming)
 	steers := agent.takeSteers()
-	if len(steers) != 1 || !strings.Contains(steers[0], "use staging") || m.peers.steering != steers[0] {
+	if len(steers) != 1 || !strings.Contains(steers[0], "use staging") || m.nativePeer.steering != steers[0] {
 		t.Fatal("busy peer did not queue the interrupt as a steer")
 	}
 	m.applyEvent(Event{Kind: EventSteer, Text: steers[0]})

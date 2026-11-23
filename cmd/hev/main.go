@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/hev/kit/internal/foh"
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -15,21 +16,22 @@ var rootCmd = &cobra.Command{
 agy. It works across harnesses, sessions, and machines and ships as one
 distributed hev binary for macOS, Linux, and Windows.
 
-  hev up        Start an archive and capture
-  hev d / s     Start capture or check daemon status
-  hev dispatch  Send an order and follow its run
-  hev cluster   Manage cluster membership and SSH dispatch access
-  hev watch     Watch sources with deterministic instructions
-  hev peers     Coordinate agent sessions
-  hev board     Keep shared findings and decisions
-  hev traces    List, inspect and search captured sessions
-
 https://hevkit.com/docs`,
 	Args: cobra.NoArgs,
-	RunE: runOverview,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if asJSON, _ := cmd.Flags().GetBool("json"); asJSON {
+			return runOverview(cmd, args)
+		}
+		return cmd.Help()
+	},
 }
 
 func init() {
+	rootCmd.Long = fmt.Sprintf(`hev kit is a meta-harness for coding agents such as Claude Code, Codex, and
+agy. It works across harnesses, sessions, and machines and ships as one
+distributed hev binary for macOS, Linux, and Windows.
+
+%s`, foh.DefaultDocsURL)
 	rootCmd.Version = version.String()
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	rootCmd.AddCommand(&cobra.Command{Use: "version", Args: cobra.NoArgs, Run: func(cmd *cobra.Command, _ []string) { fmt.Fprintln(cmd.OutOrStdout(), version.String()) }})
@@ -40,7 +42,6 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(boardCmd)
-	rootCmd.AddCommand(bucketCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(mindCmd)
 	rootCmd.AddCommand(tuiCmd)
@@ -101,7 +102,7 @@ func groupClusterCommands(root *cobra.Command) {
 	root.SetCompletionCommandGroupID("other")
 	for _, cmd := range root.Commands() {
 		switch cmd.Name() {
-		case "up", "d", "s", "dispatch", "cluster", "peers", "board", "traces", "watch":
+		case "up", "d", "s", "dispatch", "orchestrate", "steer", "secrets", "cluster", "peers", "board", "traces", "watch":
 			cmd.GroupID = "cluster"
 		default:
 			cmd.GroupID = "other"

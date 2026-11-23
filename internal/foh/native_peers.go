@@ -21,11 +21,16 @@ const (
 type nativePeers struct {
 	store          nativeinbox.Store
 	owner          nativeinbox.Presence
-	notes          []string
+	background     []peerSidecarMessage
 	interrupts     []string
 	steering       string
 	lastBackground string
 	lastInterrupt  string
+}
+
+type peerSidecarMessage struct {
+	sender string
+	text   string
 }
 
 type nativePeerTick struct {
@@ -55,7 +60,7 @@ func (m *TUI) RegisterNativePeer(ctx context.Context) (func(), error) {
 		_ = store.Close(owner)
 		return noop, fmt.Errorf("native peer address unavailable")
 	}
-	m.peers = &nativePeers{store: store, owner: owner}
+	m.nativePeer = &nativePeers{store: store, owner: owner}
 	return func() {
 		_ = store.Close(owner)
 		if hadPrior {
@@ -68,17 +73,17 @@ func (m *TUI) RegisterNativePeer(ctx context.Context) (func(), error) {
 
 func (m *TUI) setBusy(busy bool) {
 	m.busy = busy
-	if p := m.peers; p != nil {
+	if p := m.nativePeer; p != nil {
 		_ = p.store.Update(p.owner, busy)
 	}
 }
 
 func (m *TUI) pollPeers() tea.Cmd {
-	p := m.peers
+	p := m.nativePeer
 	if p == nil {
 		return nil
 	}
-	limit := peerQueueSize - len(p.interrupts)
+	limit := peerQueueSize - max(len(p.interrupts), len(p.background))
 	return tea.Tick(peerPollInterval, func(time.Time) tea.Msg {
 		messages, _ := p.store.Drain(p.owner, limit)
 		return nativePeerTick{messages: messages}
@@ -86,7 +91,7 @@ func (m *TUI) pollPeers() tea.Cmd {
 }
 
 func (m *TUI) receivePeers(tick nativePeerTick) tea.Cmd {
-	p := m.peers
+	p := m.nativePeer
 	if p == nil {
 		return nil
 	}
@@ -107,18 +112,15 @@ func (m *TUI) receivePeers(tick nativePeerTick) tea.Cmd {
 			p.interrupts = append(p.interrupts, text)
 		} else {
 			p.lastBackground = fmt.Sprintf("Peer background from %q · %s", from, preview)
-			if len(p.notes) == peerQueueSize {
-				p.notes = p.notes[1:]
-			}
-			p.notes = append(p.notes, text)
+			p.background = append(p.background, peerSidecarMessage{sender: from, text: text})
 		}
 	}
 	turn := m.deliverPeerInterrupt()
-	return tea.Batch(m.pollPeers(), turn)
+	return tea.Batch(m.pollPeers(), m.deliverPeerBackground(), turn)
 }
 
 func (m *TUI) deliverPeerInterrupt() tea.Cmd {
-	p := m.peers
+	p := m.nativePeer
 	if p.steering != "" || len(p.interrupts) == 0 {
 		return nil
 	}
@@ -135,7 +137,7 @@ func (m *TUI) deliverPeerInterrupt() tea.Cmd {
 }
 
 func (m *TUI) finishPeerSteer() tea.Cmd {
-	p := m.peers
+	p := m.nativePeer
 	if p == nil {
 		return nil
 	}
@@ -154,21 +156,22 @@ func (m *TUI) finishPeerSteer() tea.Cmd {
 	return m.deliverPeerInterrupt()
 }
 
-func (m *TUI) withPeerNotes(text string) string {
-	if m.peers == nil || len(m.peers.notes) == 0 {
-		return text
+func (m *TUI) deliverPeerBackground() tea.Cmd {
+	p := m.nativePeer
+	if p == nil || m.peerBusy || len(p.background) == 0 {
+		return nil
 	}
-	notes := strings.Join(m.peers.notes, "\n")
-	m.peers.notes = nil
-	return text + "\n\n[Background peer messages for context]\n" + notes
+	next := p.background[0]
+	p.background = p.background[1:]
+	return m.startBackgroundPeerTurn(next.sender, next.text)
 }
 
 func (m *TUI) peerStatus(width int) string {
-	if m.peers == nil {
+	if m.nativePeer == nil {
 		return ""
 	}
 	var lines []string
-	for _, status := range []string{m.peers.lastBackground, m.peers.lastInterrupt} {
+	for _, status := range []string{m.nativePeer.lastBackground, m.nativePeer.lastInterrupt} {
 		if status != "" {
 			lines = append(lines, dimStyle.Render(ansi.Truncate(status, width, "…")))
 		}
