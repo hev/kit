@@ -32,9 +32,21 @@ func sessionStartContext(row *trace.SessionRow, home string, scrub func(string) 
 	}
 	repo := repoRoot(row.Workdir)
 	if len(c.Instructions) == 0 {
+		loaded := map[string]string{}
 		for _, p := range instructionCandidates(row.Harness, row.Workdir, repo, home) {
+			key := strings.ToLower(p)
+			if prior, ok := loaded[key]; ok {
+				// Grok accepts alternate spellings. A case-insensitive
+				// filesystem may resolve two spellings to the same file.
+				first, firstErr := os.Stat(prior)
+				next, nextErr := os.Stat(p)
+				if firstErr == nil && nextErr == nil && os.SameFile(first, next) {
+					continue
+				}
+			}
 			if b, ok := readBounded(p); ok {
 				c.AddInstruction(p, "", "derived", b)
+				loaded[key] = p
 			}
 		}
 	}
