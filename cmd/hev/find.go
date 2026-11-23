@@ -22,7 +22,6 @@ import (
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/trace"
-	"github.com/hev/kit/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
