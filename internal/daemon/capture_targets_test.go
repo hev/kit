@@ -22,9 +22,9 @@ import (
 	"github.com/hev/kit/internal/trace"
 )
 
-func captureTranscript(t *testing.T, home, id, dir string) {
+func captureTranscript(t *testing.T, profile, id, dir string) {
 	t.Helper()
-	root := filepath.Join(home, ".claude", "projects", "fixture")
+	root := filepath.Join(profile, "projects", "fixture")
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ api_key_ref = %q
 	t.Setenv("MIRROR_CAPTURE_KEY", mirrorKey)
 	t.Setenv("SLOW_CAPTURE_KEY", slowKey)
 	home, _ := os.UserHomeDir()
-	captureTranscript(t, home, "fixture", home)
+	captureTranscript(t, filepath.Join(home, ".claude"), "fixture", home)
 	var log bytes.Buffer
 	resolve := func(_ context.Context, _ string, refs []secrets.Ref) (map[string]string, error) {
 		if len(refs) != 1 || refs[0].URI != brokenRef {
@@ -263,6 +263,9 @@ dir = "~/clients"
 archive_dir = "~/bcc-archive"
 traces_namespace = "bcc-scoped"
 
+[workspaces.bcc.subscriptions]
+claude_config_dir = "~/bcc-claude"
+
 [workspaces.cloud]
 dir = "~/clients/cloud"
 archive_dir = "~/cloud-archive"
@@ -271,10 +274,10 @@ traces_namespace = "cloud-scoped"
 	home, _ := os.UserHomeDir()
 	owned := filepath.Join(home, "clients", "repo")
 	nested := filepath.Join(home, "clients", "cloud", "repo")
-	captureTranscript(t, home, "bcc-session", owned)
-	captureTranscript(t, home, "cloud-session", nested)
-	captureTranscript(t, home, "prefix-session", filepath.Join(home, "clients-other"))
-	captureTranscript(t, home, "unknown-session", "")
+	captureTranscript(t, filepath.Join(home, "bcc-claude"), "bcc-session", owned)
+	captureTranscript(t, filepath.Join(home, ".claude"), "cloud-session", nested)
+	captureTranscript(t, filepath.Join(home, ".claude"), "prefix-session", filepath.Join(home, "clients-other"))
+	captureTranscript(t, filepath.Join(home, ".claude"), "unknown-session", "")
 	for _, target := range cfg.captureTargets {
 		if target.Name != "bcc" {
 			continue

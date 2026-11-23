@@ -370,7 +370,7 @@ it is opt-in.
 			if indexRoot != "" {
 				return fmt.Errorf("workspace boundary: configure the workspace's Claude profile instead of passing --root")
 			}
-			sources = workspaceTraceSources(w)
+			sources = trace.WorkspaceSources(w)
 			st = index.LoadStateAt(filepath.Join(w.Root(), "index-state.json"))
 		}
 		rep := &index.Report{}
@@ -778,18 +778,4 @@ func contextChunkFilter(filter any, rows []trace.SessionRow) any {
 		return clause
 	}
 	return layer.And(filter, clause)
-}
-
-func workspaceTraceSources(w workspace.Selection) []trace.Source {
-	var sources []trace.Source
-	if dir := w.Profile(harness.Claude); dir != "" {
-		sources = append(sources, &trace.ClaudeSource{Root: filepath.Join(dir, "projects")})
-	}
-	if dir := w.Profile(harness.Codex); dir != "" {
-		sources = append(sources, &trace.CodexSource{Root: filepath.Join(dir, "sessions")})
-	}
-	if dir := w.AgyTranscriptDir(); dir != "" {
-		sources = append(sources, &trace.AgySource{Root: dir})
-	}
-	return sources
 }

@@ -46,6 +46,10 @@ dirs = ["~/workspace/project"]
 - For targets configured directly on a workspace, see
   [Workspace capture](workspaces.md).
 
+Additional targets discover ordinary host transcripts and transcripts in
+configured Claude, Codex, and Antigravity workspace profiles on this host.
+The primary keeps its existing source discovery.
+
 Restart `hevd` after editing target definitions. Each target scans on the
 configured `[capture].scan_interval` and keeps its own cursor. The primary
 continues using `~/.hev/index-state.json`. Additional targets use

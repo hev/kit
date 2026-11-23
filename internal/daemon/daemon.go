@@ -298,10 +298,10 @@ func runIndexCycle(client index.Archive, state *index.State, logger *slog.Logger
 // runIndexCycleImages is one scan with this host's image store; nil stores
 // no image bytes.
 func runIndexCycleImages(client index.Archive, state *index.State, logger *slog.Logger, images *trace.ImageCapture) Status {
-	return indexCapture(client, state, logger, index.Options{Images: images}, instructionWorkdirs)
+	return indexCapture(client, state, logger, index.Options{Images: images}, instructionWorkdirs, nil)
 }
 
-func indexCapture(client index.Archive, state *index.State, logger *slog.Logger, opts index.Options, workdirs *trace.WorkdirCache) Status {
+func indexCapture(client index.Archive, state *index.State, logger *slog.Logger, opts index.Options, workdirs *trace.WorkdirCache, additionalSources []trace.Source) Status {
 	s := Status{LastRun: time.Now().UTC(), Redactions: redact.Counts{}}
 	// The same sources `hev index` walks.
 	piRoot, openCodeRoot, agyRoot := trace.DefaultPiRoot(), trace.DefaultOpenCodeRoot(), trace.DefaultAgyRoot()
@@ -310,6 +310,7 @@ func indexCapture(client index.Archive, state *index.State, logger *slog.Logger,
 		piRoot, openCodeRoot, agyRoot = cfg.PiSessionsDir, cfg.OpenCodeDataDir, cfg.AgyDataDir
 	}
 	sources := trace.Sources(map[string]string{harness.Pi: piRoot, harness.OpenCode: openCodeRoot, harness.Agy: agyRoot})
+	sources = trace.MergeSources(sources, additionalSources)
 	failures := 0
 	add := func(rep *index.Report) {
 		if rep == nil {
@@ -380,7 +381,7 @@ func startOptionalPeers(ctx context.Context, path string, logger *slog.Logger) f
 			return close
 		}
 	}
-	logger.Warn("peers endpoint disabled; capture continues", "listen", cfg.Listen, "error", captureError("start peers endpoint", err))
+	logger.Warn("peers endpoint disabled; capture continues", "listen", cfg.Listen, "err", err)
 	return func() {}
 }
 

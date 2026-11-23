@@ -263,6 +263,23 @@ func (t captureTarget) open(ctx context.Context, cfg *Config, resolve captureKey
 	return Target{Mode: storagemode.Layer, Layer: client, Images: images, KeySource: keySource(t.KeyRef)}, nil
 }
 
+func (t captureTarget) profileSources(host string) []trace.Source {
+	names := make([]string, 0, len(t.owners.Workspaces))
+	for name := range t.owners.Workspaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var sources []trace.Source
+	for _, name := range names {
+		w := t.owners.Workspaces[name]
+		selection := workspace.Selection{Name: name, Workspace: w}
+		if !w.Archived && selection.AllowsHost(host) {
+			sources = append(sources, trace.WorkspaceSources(selection)...)
+		}
+	}
+	return sources
+}
+
 func (t captureTarget) matches(dir string) bool {
 	if !filepath.IsAbs(dir) {
 		return false

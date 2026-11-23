@@ -124,6 +124,7 @@ type captureCycle struct {
 	workdirs      trace.WorkdirCache
 	outcomeCursor string
 	options       index.Options
+	profiles      []trace.Source
 }
 
 func (c *captureCycle) run(ctx context.Context, target Target, logger *slog.Logger) Status {
@@ -136,7 +137,7 @@ func (c *captureCycle) run(ctx context.Context, target Target, logger *slog.Logg
 	archive := target.Archive()
 	opts := c.options
 	opts.Images, opts.Context = target.Images, ctx
-	result := indexCapture(archive, c.state, logger, opts, &c.workdirs)
+	result := indexCapture(archive, c.state, logger, opts, &c.workdirs, c.profiles)
 	if opts.FilterTurns == nil && ctx.Err() == nil {
 		sweepCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		next, updated, err := index.SweepOutcomes(sweepCtx, archive, index.NewOutcomeEnricher(), c.outcomeCursor, time.Now().Add(-60*24*time.Hour).UnixMilli(), 10)
@@ -246,7 +247,10 @@ func (t captureTarget) run(ctx context.Context, cfg *Config, home string, resolv
 		publish(status, Status{LastRun: time.Now().UTC(), LastError: t.err.Error()})
 		return
 	}
-	cycle := captureCycle{state: index.LoadStateAt(filepath.Join(home, ".hev", "targets", strings.ToLower(t.Name), "state.json"))}
+	cycle := captureCycle{
+		state:    index.LoadStateAt(filepath.Join(home, ".hev", "targets", strings.ToLower(t.Name), "state.json")),
+		profiles: t.profileSources(cfg.Host),
+	}
 	if t.Mode == "workspace" {
 		cycle.options.FilterTurns = t.filterTurns
 	}
