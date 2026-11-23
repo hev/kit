@@ -39,6 +39,7 @@ type OrchestratorSpec struct {
 	Manages     struct {
 		Runs  RunScope `yaml:"runs" json:"runs"`
 		Repos []string `yaml:"repos,omitempty" json:"repos,omitempty"`
+		Hosts []string `yaml:"hosts,omitempty" json:"hosts,omitempty"`
 	} `yaml:"manages" json:"manages"`
 	Authority []string `yaml:"authority,omitempty" json:"authority"`
 	Budget    struct {
@@ -236,10 +237,16 @@ func (s OrchestratorSpec) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, n := range r.Names {
-		if !ValidName(n) || seen[n] {
+		host, name := splitScopedRun(n)
+		if !ValidName(name) || (strings.Contains(n, "/") && !ValidLabel(host)) || seen[n] {
 			return fmt.Errorf("invalid or duplicate run name")
 		}
 		seen[n] = true
+	}
+	for _, host := range s.Manages.Hosts {
+		if !ValidLabel(host) {
+			return fmt.Errorf("invalid manages host %q", host)
+		}
 	}
 	for _, v := range s.Authority {
 		switch v {
@@ -306,11 +313,24 @@ func (s OrchestratorSpec) Includes(o Order) bool {
 		return match
 	}
 	for _, n := range s.Manages.Runs.Names {
-		if n == o.Name {
+		host, name := splitScopedRun(n)
+		if name == o.Name && (host == "" || hostlabel.Same(host, o.Host)) {
 			return true
 		}
 	}
 	return false
+}
+
+func (s OrchestratorSpec) includesOnHost(o Order, host string) bool {
+	o.Host = host
+	return s.Includes(o)
+}
+
+func splitScopedRun(ref string) (host, name string) {
+	if host, name, ok := strings.Cut(ref, "/"); ok {
+		return host, name
+	}
+	return "", ref
 }
 
 // ValidateOrchestratorNesting checks the whole proposed graph, including parents
