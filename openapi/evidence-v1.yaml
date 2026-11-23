@@ -18,7 +18,7 @@ info:
     read, patch and evaluation, direct blob upload, limits and blob reads.
     Its direct upload cap is 10 MiB (text 5 MiB, video 60 seconds). S3-enabled deployments
     support staged video over 10 MiB through 100 MiB.
-    Staged upload, deletion, multimodal search and federated search are planned.
+    Deletion, multimodal search and federated search are planned.
     The persistence slice uses machine bearer keys.
 
     Reuses `openapi/kit-v1.yaml` conventions: `Authorization: Bearer <HEV_API_KEY>`,
@@ -326,6 +326,7 @@ paths:
         Returns a short-lived presigned upload URL so clips up to 100 MiB stream
         straight to private object storage. Send only the returned headers on the S3
         PUT. The URL expires within 15 minutes and must be kept private.
+        A deployment with staging disabled returns 404.
         Call `POST /v1/evidence/blobs/uploads/{upload_id}/complete` once bytes
         are uploaded.
       requestBody:
@@ -341,7 +342,11 @@ paths:
               schema: {$ref: '#/components/schemas/EvidenceBlobUpload'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '415': {$ref: '#/components/responses/UnsupportedMediaType'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
 
   /v1/evidence/blobs/uploads/{upload_id}/complete:
     parameters:
@@ -366,7 +371,9 @@ paths:
               schema: {$ref: '#/components/schemas/EvidenceBlob'}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
         '415': {$ref: '#/components/responses/UnsupportedMediaType'}
         '422': {$ref: '#/components/responses/Unprocessable'}
