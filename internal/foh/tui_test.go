@@ -203,26 +203,26 @@ func TestTUITurnAndHevCards(t *testing.T) {
 	a.Tools = NewToolset(t.TempDir(), fakeHev(&calls, `{"runs":[{"name":"a"},{"name":"b"}]}`, nil))
 	drain(t, m, submit(m, "what is running?"))
 	v := plain(m)
-	for _, want := range []string{"you › what is running?", "◆ hev dispatch ls", "dispatch ls · 2 runs", "╭", "· glob *.none", "Two runs are active."} {
+	for _, want := range []string{"you › what is running?", "◆ hev dispatch ls", "dispatch ls · 2 runs", "· glob *.none", "Two runs are active."} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("transcript missing %q:\n%s", want, v)
 		}
 	}
-	// A generic tool is not drawn as a card.
+	// A generic tool is not drawn with a hev card badge.
 	for _, line := range strings.Split(v, "\n") {
-		if strings.Contains(line, "glob") && strings.Contains(line, "│") {
-			t.Fatalf("generic tool rendered as a card: %q", line)
+		if strings.Contains(line, "glob") && strings.Contains(line, "◆") {
+			t.Fatalf("generic tool rendered as a hev card: %q", line)
 		}
 	}
-	// Long card bodies are bounded and expand with Ctrl+O.
+	// Long card bodies are collapsed to one line and expand with Ctrl+O.
 	body := strings.Repeat("line\n", 30)
 	m.applyEvent(Event{Kind: EventToolStart, Call: call("c9", "hev_board", `{"action":"search"}`)})
 	m.applyEvent(Event{Kind: EventToolResult, Call: call("c9", "hev_board", `{}`), Result: ToolResult{Card: &Card{Tool: "hev_board", Action: "search", Summary: "board search · 30", Body: body, OK: true}}})
-	if !strings.Contains(plain(m), "… 30 line(s) · Ctrl+O to expand") {
-		t.Fatalf("card body not bounded:\n%s", plain(m))
+	if !strings.Contains(plain(m), "(30 lines · Ctrl+O)") {
+		t.Fatalf("card body not collapsed:\n%s", plain(m))
 	}
 	m.Update(key(tea.KeyCtrlO))
-	if strings.Contains(plain(m), "Ctrl+O to expand") {
+	if strings.Contains(plain(m), "(30 lines · Ctrl+O)") {
 		t.Fatal("Ctrl+O did not expand")
 	}
 }
@@ -289,5 +289,22 @@ func TestFuzzyScore(t *testing.T) {
 	}
 	if fuzzyScore("xyz", "openai/gpt-5") != -1 || fuzzyScore("", "anything") != 0 {
 		t.Fatal("non-match / empty")
+	}
+}
+
+func TestTUIBackgroundGrid(t *testing.T) {
+	lines := []string{"", "", " hello", "", "", "", ""}
+	out := applyBackgroundGrid(lines, 40)
+	// Row 2 has text " hello" (len 6) + margin 3 -> first dot at col 12.
+	if !strings.HasPrefix(out[2], " hello") || !strings.Contains(out[2], "·") {
+		t.Fatalf("expected grid dots to the right of text on row 2, got %q", out[2])
+	}
+	// Row 6 is blank and matches rowStep=4, rowOff=2 -> full dot row.
+	if !strings.Contains(out[6], "·") {
+		t.Fatalf("expected grid dots on blank row 6, got %q", out[6])
+	}
+	// Non-grid rows stay untouched.
+	if out[0] != "" || out[3] != "" {
+		t.Fatalf("non-grid rows modified: row0=%q row3=%q", out[0], out[3])
 	}
 }

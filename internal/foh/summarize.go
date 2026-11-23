@@ -19,7 +19,7 @@ func hevToolEmoji(tool string, color bool) string {
 	case "hev_dispatch", "hev dispatch":
 		return "🚀"
 	case "hev_steer", "hev steer":
-		return "⎈"
+		return "🕹"
 	case "hev_peers", "hev peers":
 		return "💬"
 	case "hev_board", "hev board":
@@ -89,14 +89,18 @@ func pickSummaryModel(p Provider, activeModel, configured string) string {
 		if r.Has(ProviderCodexSub) {
 			return "codex/gpt-5.3-codex"
 		}
+		return activeModel
 	}
-	return activeModel
+	return ""
 }
 
 // summarizeCardAsync asks a small/fast model in the background for a 1-line
 // human summary of a completed hev tool call. Never blocks the agent loop or UI.
 func (m *TUI) summarizeCardAsync(callID, tool, action, rawOutput string) tea.Cmd {
 	if m.opts.Agent == nil || m.opts.Agent.Provider == nil {
+		return nil
+	}
+	if tool == "hev_dispatch" && action == "send" {
 		return nil
 	}
 	// Skip tiny or empty outputs where the deterministic summary is already ideal.
