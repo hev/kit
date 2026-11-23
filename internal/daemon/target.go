@@ -7,13 +7,13 @@ import (
 
 	"github.com/hev/kit/internal/archive"
 	"github.com/hev/kit/internal/blob"
-	"github.com/hev/kit/internal/trace"
-
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/storagemode"
+	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/internal/workspace"
 )
 
@@ -37,6 +37,9 @@ type Target struct {
 	// carried: <archive root>/<namespace>/blobs in both modes, because Layer
 	// has no object store. Off when [capture] images is false.
 	Images *trace.ImageCapture
+	// Kit is set on a machine signed in to a kit service: Files is then the
+	// local copy, and every write is also queued for the kit API.
+	Kit *kitcapture.Archive
 }
 
 // ImageCapture is the blob store for a namespace's images on this host.
@@ -60,6 +63,9 @@ func imageCaptureAt(root, namespace string, off bool) *trace.ImageCapture {
 // Store is the whole archive the target names, for commands that read and
 // search it.
 func (t Target) Store() archive.Store {
+	if t.Kit != nil {
+		return t.Kit
+	}
 	if t.Files != nil {
 		return t.Files
 	}
@@ -68,6 +74,9 @@ func (t Target) Store() archive.Store {
 
 // Archive is the indexer's view of the target.
 func (t Target) Archive() index.Archive {
+	if t.Kit != nil {
+		return t.Kit
+	}
 	if t.Files != nil {
 		return t.Files
 	}
@@ -134,6 +143,22 @@ func openTarget(cfg *Config, namespace string, open func(root, namespace string)
 	images, err := ImageCapture(cfg, namespace)
 	if err != nil {
 		return Target{}, err
+	}
+	if cfg.Kit.SignedIn() {
+		// Signed in to kit: the kit API is the archive, whatever Layer key
+		// the environment holds. Rows land in files here first and are
+		// queued for the API, so capture works offline.
+		files, err := open(filearchive.Root(cfg.ArchiveDir), namespace)
+		if err != nil {
+			return Target{}, err
+		}
+		outbox, err := kitcapture.OpenOutbox(KitOutboxDir(), cfg.Kit.TeamID)
+		if err != nil {
+			return Target{}, err
+		}
+		kit := kitcapture.New(files, outbox)
+		kit.AuthorID, kit.AuthorName = cfg.Kit.AuthorID, cfg.Kit.AuthorName
+		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images, Kit: kit, KeySource: "kit"}, nil
 	}
 	res, err := ResolveMode(cfg)
 	if err != nil {

@@ -20,7 +20,7 @@ func TestChatBothDirections(t *testing.T) {
 	original := e.Command
 	e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 		if name == "tmux" && args[0] == "list-panes" {
-			return "desk\t%7\t700\tclaude\t/work\tdesk\ton\nother\t%8\t701\tclaude\t/else\tother\ton\n", nil
+			return "desk\x1f%7\x1f700\x1fclaude\x1f/work\x1fdesk\x1fon\nother\x1f%8\x1f701\x1fclaude\x1f/else\x1fother\x1fon\n", nil
 		}
 		return original(ctx, name, in, args...)
 	}

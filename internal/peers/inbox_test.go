@@ -31,7 +31,7 @@ func fixture(t *testing.T) (*Engine, func(string, ...string) (string, error)) {
 		if name == "tmux" {
 			switch args[0] {
 			case "list-panes":
-				return "desk\t%7\t700\tclaude\t/work\tdesk\ton\n", nil
+				return "desk\x1f%7\x1f700\x1fclaude\x1f/work\x1fdesk\x1fon\n", nil
 			case "display-message":
 				return "100:$2:1234", nil
 			case "capture-pane":

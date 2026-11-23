@@ -187,6 +187,9 @@ var daemonStatusCmd = &cobra.Command{
 			} else {
 				fmt.Printf("Last error: %s\n", status.LastError)
 			}
+			if status.Notice != "" {
+				fmt.Printf("Notice: %s\n", status.Notice)
+			}
 		}
 		writeCaptureTargets(cmd.OutOrStdout(), status.Targets)
 		writeUpdateStatus(cmd.OutOrStdout())

@@ -278,3 +278,10 @@ hev skills shelf diff pstack --patch                # upstream changes since the
 hev skills shelf bump pstack --to SHA               # move the pin to a reviewed commit
 hev skills search "write the failing test first"    # the skills collection
 ```
+
+### Club Kit sign-in
+
+Run `hev login` to connect this machine to Club Kit. Use `hev login status`
+to check the team, `hev login --import` to copy local history, and
+`hev logout` to revoke the machine’s key. See [Club Kit sign-in](docs/club-kit.md)
+for configuration, capture and import behavior.
