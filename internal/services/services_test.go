@@ -736,9 +736,13 @@ func TestServiceSWIMActiveStandbyFailover(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stopLow()
+	// The supervisor records Running at spawn. Wait for the child to install
+	// its signal handler before the membership change can send SIGTERM.
 	await(t, 5*time.Second, func() bool {
 		d, err := lowSup.Inspect(ctx, lowSvc, 0)
-		return err == nil && d.Status == StatusRunning && d.PID > 0
+		pid, markerErr := os.ReadFile(lowMarker)
+		return err == nil && d.Status == StatusRunning && d.PID > 0 &&
+			markerErr == nil && string(pid) == strconv.Itoa(d.PID)
 	})
 
 	stopHigh, err := highSup.Start(ctx, []Service{highSvc})
