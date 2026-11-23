@@ -155,7 +155,7 @@ func Named(name string) (Selection, error) {
 }
 
 func (s Selection) IsolatedStorage() bool {
-	return s.Name != "" && (s.Name != Default || s.Layer != (Layer{}))
+	return s.Name != "" && (s.Name != Default || s.Layer != (Layer{}) || s.TraceCapture != (TraceCapture{}))
 }
 
 func (s Selection) Profile(harness string) string {

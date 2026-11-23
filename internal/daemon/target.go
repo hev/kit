@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"fmt"
-	"github.com/hev/kit/internal/workspace"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/storagemode"
+	"github.com/hev/kit/internal/workspace"
 )
 
 // RetiredStore is the store kind the retired local Docker lane (Layer CE on
@@ -46,12 +46,15 @@ type Target struct {
 // saying why, so commands that store no image behave as they did before
 // images were captured.
 func ImageCapture(cfg *Config, namespace string) (*trace.ImageCapture, error) {
-	off := !cfg.CaptureImages
-	dir, err := filearchive.BlobsDir(filearchive.Root(cfg.ArchiveDir), namespace)
+	return imageCaptureAt(filearchive.Root(cfg.ArchiveDir), namespace, !cfg.CaptureImages), nil
+}
+
+func imageCaptureAt(root, namespace string, off bool) *trace.ImageCapture {
+	dir, err := filearchive.BlobsDir(root, namespace)
 	if err != nil {
-		return &trace.ImageCapture{Off: off, Unavailable: fmt.Sprintf("namespace %q cannot hold image files on this host", namespace)}, nil
+		return &trace.ImageCapture{Off: off, Unavailable: fmt.Sprintf("namespace %q cannot hold image files on this host", namespace)}
 	}
-	return &trace.ImageCapture{Store: blob.New(dir, 0), Off: off}, nil
+	return &trace.ImageCapture{Store: blob.New(dir, 0), Off: off}
 }
 
 // Store is the whole archive the target names, for commands that read and
@@ -204,20 +207,27 @@ func OpenWorkspaceTarget(w workspace.Selection, namespace string) (Target, error
 	if namespace != "" && namespace != traces {
 		return Target{}, fmt.Errorf("workspace boundary: namespace %q is outside workspace %q", namespace, w.Name)
 	}
-	cfg := &Config{ArchiveDir: filepath.Join(w.Root(), "archive"), CaptureImages: true}
-	images, err := ImageCapture(cfg, traces)
-	if err != nil {
-		return Target{}, err
+	settings := w.TraceSettings()
+	dir := expandPath(settings.ArchiveDir)
+	if dir == "" {
+		dir = filepath.Join(w.Root(), "archive")
 	}
+	if settings.ArchiveDir != "" && (settings.Endpoint != "" || settings.KeyRef != "") {
+		return Target{}, fmt.Errorf("workspace archive_dir cannot be combined with a Layer endpoint or key reference")
+	}
+	if settings.KeyRef == "" && w.TraceCapture.Endpoint != "" {
+		return Target{}, fmt.Errorf("workspace Layer target requires an API key reference")
+	}
+	images := imageCaptureAt(dir, traces, false)
 	key, err := layerenv.WorkspaceKey(w)
 	if err != nil {
 		return Target{}, err
 	}
 	if key == "" {
-		files, err := filearchive.OpenLazy(cfg.ArchiveDir, traces)
+		files, err := filearchive.OpenLazy(dir, traces)
 		return Target{Mode: storagemode.Filesystem, Files: files, Images: images}, err
 	}
-	endpoint := w.Layer.Endpoint
+	endpoint := settings.Endpoint
 	if endpoint == "" {
 		endpoint = layer.DefaultEndpoint
 	}

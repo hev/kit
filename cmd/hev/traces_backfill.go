@@ -118,7 +118,7 @@ func newTracesBackfillCmd() *cobra.Command {
 			home, _ := os.UserHomeDir()
 			journalPath := filepath.Join(home, ".hev", "traces-backfill.json")
 			if w.IsolatedStorage() {
-				sources = workspaceTraceSources(w)
+				sources = trace.WorkspaceSources(w)
 				journalPath = filepath.Join(w.Root(), "traces-backfill.json")
 			}
 
