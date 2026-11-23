@@ -266,3 +266,14 @@ worktrees), `~/.hev/archive/` (traces) and `~/.local/state/peers-v2/` (peers)
 where they are: each surface uses its `~/.hev/<surface>/` folder when that
 exists, else the legacy folder when that exists. See
 [where kit keeps its files](/docs/concepts#where-kit-keeps-its-files).
+
+## `[foh]`
+
+The [`hev kit` harness](/docs/kit) reads these optional strings from
+`~/.hev/config.toml`.
+
+| Field | Meaning |
+| --- | --- |
+| `model` | Default model ID. `--model` and `HEV_FOH_MODEL` take precedence. |
+| `summary_model` | Model for inline tool summaries. `HEV_SUMMARY_MODEL` takes precedence. If unset, the harness picks one based on the available providers. |
+| `docs_url` | Documentation base URL for the harness. Defaults to `https://hevkit.com/docs`. `HEV_DOCS_URL` takes precedence. |

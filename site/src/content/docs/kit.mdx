@@ -1,0 +1,45 @@
+---
+title: "hev kit"
+description: "Start kit’s built-in terminal agent harness and work with your repo and cluster."
+group: "Use"
+command: "hev kit"
+---
+
+`hev kit` is kit's optional built-in terminal agent harness. It works directly
+with your local repo and cluster and shows `hev` tool calls inline. It runs
+without permission prompts. It's your responsibility to secure your compute.
+
+## Start
+
+```sh
+hev kit                      # interactive
+hev kit --model <id>         # choose a model
+hev kit --once "Summarize this repo"  # run one turn and exit
+```
+
+- **OpenRouter.** Set `OPENROUTER_API_KEY` or `HEV_API_KEY` to an OpenRouter key and use an OpenRouter model ID.
+- **Codex subscription (`codex-sub`).** Run `codex login` and sign in with ChatGPT OAuth, then select a `codex/NAME` model.
+
+## Keys and commands
+
+`Ctrl+M` opens the model picker at an empty prompt. `Ctrl+O` toggles tool
+output, `Shift+Enter` inserts a newline, `PgUp`/`PgDn` scroll, and `Ctrl+C`
+cancels the active turn.
+
+- `/dispatch` plans and sends an order, then watches it automatically. `/steer` sends steering messages to back-of-house runs or orchestrators with ACK receipts.
+- `/peers` lists live peers and sends messages in the background. `/resume` resumes local `hev`, `claude`, `codex`, `agy`, or `pi` sessions.
+- `/model` picks or switches models. `/prompt` shows the composed prompt, and `/reload` recomposes it. `/clear` starts a new thread, `/help` shows commands, and `/quit` (or `:q`) exits.
+
+On builds with CLI pass-through, commands such as `/cluster`, `/board`,
+`/traces`, `/orchestrate`, and `/s` run the corresponding `hev` commands directly.
+
+## Configure
+
+Set defaults in `~/.hev/config.toml`. See the [config reference](/docs/config-reference).
+
+```toml
+[foh]
+model = "codex/gpt-5.3-codex"
+summary_model = "codex/gpt-5.3-codex"
+docs_url = "https://hevkit.com/docs"
+```
