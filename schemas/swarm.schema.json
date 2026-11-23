@@ -52,7 +52,8 @@
       "enum": [
         "codex",
         "claude",
-        "agy"
+        "agy",
+        "grok"
       ],
       "default": "codex"
     },
@@ -197,7 +198,8 @@
           "enum": [
             "codex",
             "claude",
-            "agy"
+            "agy",
+            "grok"
           ],
           "default": "codex"
         },

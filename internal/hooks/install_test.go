@@ -175,3 +175,35 @@ func TestInvocationWiring(t *testing.T) {
 		t.Fatal(h.Keys())
 	}
 }
+
+func TestGrokHookInstallKeepsNativeConfig(t *testing.T) {
+	home, grok := t.TempDir(), t.TempDir()
+	t.Setenv("GROK_HOME", grok)
+	config := filepath.Join(grok, "config.toml")
+	toml := []byte("[[hooks.PreToolUse]]\nhooks = [{ type = \"command\", command = \"example\" }]\n")
+	if err := os.WriteFile(config, toml, 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(grok, "hooks", "hev-kit.json")
+	if got := SettingsPath(home, "grok"); got != path {
+		t.Fatalf("settings path: %q", got)
+	}
+	if status, err := Inspect(home, "grok", "hev"); err != nil || !status.Present || len(status.Missing) != len(Events) {
+		t.Fatalf("initial check: %+v %v", status, err)
+	}
+	if changed, err := Install(home, "grok", "hev"); err != nil || !changed {
+		t.Fatalf("install: %v %v", changed, err)
+	}
+	if changed, err := Install(home, "grok", "hev"); err != nil || changed {
+		t.Fatalf("repeat install: %v %v", changed, err)
+	}
+	if status, err := Inspect(home, "grok", "hev"); err != nil || len(status.Kit) != len(Events) {
+		t.Fatalf("installed check: %+v %v", status, err)
+	}
+	if count, err := Uninstall(home, "grok"); err != nil || count != len(Events) {
+		t.Fatalf("uninstall: %d %v", count, err)
+	}
+	if got, err := os.ReadFile(config); err != nil || string(got) != string(toml) {
+		t.Fatalf("existing TOML changed: %v", err)
+	}
+}
