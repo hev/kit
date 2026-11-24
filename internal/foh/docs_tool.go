@@ -11,35 +11,65 @@ import (
 	"time"
 )
 
+const (
+	// DefaultLayerDocsURL is the documentation root for hev layer.
+	DefaultLayerDocsURL = "https://hevlayer.com/docs"
+	// DefaultMindDocsURL is the site root for hev mind (creator, company, brand, writing).
+	DefaultMindDocsURL = "https://hevmind.com"
+)
+
 type docsArgs struct {
+	Site   string `json:"site"`   // kit (default) | layer | mind
 	Action string `json:"action"` // index | read
 	Page   string `json:"page"`   // slug or path, e.g. "dispatch" or "/docs/dispatch.md"
+}
+
+func (t *Toolset) docsBaseURL(site string) (string, string, error) {
+	switch strings.ToLower(strings.TrimSpace(site)) {
+	case "", "kit", "hevkit":
+		base := strings.TrimRight(t.DocsURL, "/")
+		if base == "" {
+			base = strings.TrimRight(DefaultDocsURL, "/")
+		}
+		return "kit", base, nil
+	case "layer", "hevlayer":
+		return "layer", strings.TrimRight(DefaultLayerDocsURL, "/"), nil
+	case "mind", "hevmind":
+		return "mind", strings.TrimRight(DefaultMindDocsURL, "/"), nil
+	default:
+		return "", "", fmt.Errorf("unknown docs site %q (use kit, layer, or mind)", site)
+	}
 }
 
 func (t *Toolset) docsTool() Tool {
 	return Tool{
 		Spec: FunctionSpec{
 			Name:        "hev_docs",
-			Description: "Fetch hev kit documentation: action=index reads llms.txt (list of all doc pages); action=read with page (e.g. 'dispatch', 'workspaces', or a path from llms.txt) reads that page.",
-			Parameters:  schema(`{"type":"object","properties":{"action":{"type":"string","enum":["index","read"]},"page":{"type":"string"}},"required":["action"]}`),
+			Description: "Fetch documentation from hevkit.com/docs (site=kit, default), hevlayer.com/docs (site=layer), or hevmind.com (site=mind, for questions about the creator, company, brand, or writing). action=index reads llms.txt; action=read with page reads a specific slug or path from llms.txt.",
+			Parameters:  schema(`{"type":"object","properties":{"site":{"type":"string","enum":["kit","layer","mind"]},"action":{"type":"string","enum":["index","read"]},"page":{"type":"string"}},"required":["action"]}`),
 		},
 		Timeout: 20 * time.Second,
 		Run: func(ctx context.Context, raw json.RawMessage) ToolResult {
 			var a docsArgs
 			_ = json.Unmarshal(raw, &a)
 			card := &Card{Tool: "hev_docs", Action: a.Action}
-			base := strings.TrimRight(t.DocsURL, "/")
-			if base == "" {
-				base = strings.TrimRight(DefaultDocsURL, "/")
+			siteName, base, err := t.docsBaseURL(a.Site)
+			if err != nil {
+				card.Summary = err.Error()
+				return ToolResult{Content: "hev_docs: " + err.Error(), IsError: true, Card: card}
 			}
 			llms := base + "/llms.txt"
 			if strings.HasSuffix(base, "/docs") {
 				llms = strings.TrimSuffix(base, "/docs") + "/llms.txt"
 			}
+			prefix := ""
+			if siteName != "kit" {
+				prefix = siteName + " "
+			}
 			var target string
 			switch a.Action {
 			case "index", "":
-				card.Action = "index"
+				card.Action = prefix + "index"
 				target = llms
 			case "read":
 				page := strings.TrimSpace(a.Page)
@@ -47,7 +77,7 @@ func (t *Toolset) docsTool() Tool {
 					card.Summary = "page is required"
 					return ToolResult{Content: "hev_docs: page is required for read", IsError: true, Card: card}
 				}
-				card.Action = "read " + truncateLine(page, 32)
+				card.Action = prefix + "read " + truncateLine(page, 32)
 				resolved, err := resolveDocsTarget(base, page)
 				if err != nil {
 					card.Summary = err.Error()
@@ -84,10 +114,10 @@ func (t *Toolset) docsTool() Tool {
 			}
 			card.OK = true
 			card.Body = body
-			if card.Action == "index" {
-				card.Summary = fmt.Sprintf("loaded docs index (%d lines)", strings.Count(body, "\n")+1)
+			if strings.HasSuffix(card.Action, "index") {
+				card.Summary = fmt.Sprintf("loaded %s docs index (%d lines)", siteName, strings.Count(body, "\n")+1)
 			} else {
-				card.Summary = fmt.Sprintf("loaded %s (%d bytes)", a.Page, len(body))
+				card.Summary = fmt.Sprintf("loaded %s %s (%d bytes)", siteName, a.Page, len(body))
 			}
 			return ToolResult{Content: body, Card: card}
 		},

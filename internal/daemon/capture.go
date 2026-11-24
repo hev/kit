@@ -12,6 +12,7 @@ import (
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/storagemode"
@@ -152,6 +153,17 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, p
 		}
 	}
 
+	var drainer *kitcapture.Drainer
+	if primary.Kit != nil {
+		logger.Info("signed in to Club Kit: capturing to the Club Kit API through a local outbox", "team", cfg.Kit.TeamSlug, "archive", primary.Files.Dir(), "outbox", primary.Kit.Outbox.Dir())
+		drainer = &kitcapture.Drainer{Outbox: primary.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
+		primary.Kit.Outbox.Logger = logger
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			drainer.Run(ctx)
+		}()
+	}
 	cycle := captureCycle{state: index.LoadState()}
 	run := func() {
 		if err := dispatch.SweepQueueBackstop(); err != nil {
@@ -168,7 +180,12 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, p
 		}
 		scanCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
-		status.publish(0, primaryStatus, cycle.run(scanCtx, primary, logger.With("target", primaryTarget)))
+		result := cycle.run(scanCtx, primary, logger.With("target", primaryTarget))
+		if drainer != nil {
+			drainer.Kick()
+			result.Notice = kitNotice(drainer, primary.Kit.Outbox)
+		}
+		status.publish(0, primaryStatus, result)
 	}
 	var gate func(context.Context) error
 	if primary.Layer != nil {

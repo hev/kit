@@ -39,7 +39,7 @@ func primaryCredential(cfg *Config) (string, string, error) {
 		}
 		key, source = strings.TrimSpace(string(raw)), "config [layer].api_key_file"
 	} else if env := layerenv.Get("HEVLAYER_API_KEY"); usableLegacyKey(env) {
-		source = "HEVLAYER_API_KEY"
+		key, source = strings.TrimSpace(env), "HEVLAYER_API_KEY"
 	} else if !usableLegacyKey(key) {
 		if _, ref := layerenv.KeyRef(); ref != "" {
 			return "", "", errors.New("hevd: migrate the primary Layer key reference to [layer].api_key_file")
@@ -56,6 +56,20 @@ func primaryCredential(cfg *Config) (string, string, error) {
 }
 
 func openPrimary(cfg *Config, logger *slog.Logger) (Target, error) {
+	// Club Kit uses its own outbox and never needs a primary Layer identity.
+	// Still validate an explicitly configured bootstrap file before starting.
+	if cfg.Kit.SignedIn() {
+		if cfg.bootstrapFile != nil {
+			if _, _, err := primaryCredential(cfg); err != nil {
+				return Target{}, err
+			}
+		}
+		target, err := openResolvedTarget(cfg, "", filearchive.Open, storagemode.Resolution{}, "")
+		if err != nil {
+			return Target{}, errors.New("hevd: could not open primary archive")
+		}
+		return target, nil
+	}
 	key, source, err := primaryCredential(cfg)
 	if err != nil {
 		return Target{}, err

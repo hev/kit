@@ -201,3 +201,18 @@ func TestHEVLayerBootstrapInlineMigrationDiagnostic(t *testing.T) {
 		t.Fatal("legacy inline credential was refused after migration")
 	}
 }
+
+func TestHEVLayerBootstrapLegacyEnvironmentKey(t *testing.T) {
+	isolate(t, "[layer]\napi_key = 'local'\n")
+	const key = "fixture-legacy-env-key"
+	t.Setenv("HEVLAYER_API_KEY", key)
+	t.Setenv("HEVLAYER_API_KEY_REF", "op://fixture/must-not-read/key")
+	cfg, err := loadConfig(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := openPrimary(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil || target.Layer == nil || target.Layer.APIKey != key || target.KeySource != "HEVLAYER_API_KEY" {
+		t.Fatal("daemon did not retain direct environment authentication")
+	}
+}

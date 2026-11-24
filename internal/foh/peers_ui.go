@@ -238,7 +238,11 @@ func (m *TUI) peersOverlayView(width, height int) string {
 		status = "  loading peers…"
 	}
 	b.WriteString(badge.Render("peers") + dimStyle.Render(status) + "\n")
-	b.WriteString("filter › " + p.query + "▏\n")
+	caret := "▏"
+	if m.opts.Color {
+		caret = lipgloss.NewStyle().Foreground(accent).Render(caret)
+	}
+	b.WriteString("filter › " + p.query + caret + "\n")
 	logBudget := 0
 	if len(m.peerLog) > 0 {
 		logBudget = min(len(m.peerLog), 5) + 2
