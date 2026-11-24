@@ -2,35 +2,68 @@ package nodes
 
 import (
 	"os"
-	"os/exec"
-	"os/user"
 	"path/filepath"
-	"strings"
 	"testing"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestWindowsProtectedACL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "keys with spaces")
-	if e := os.WriteFile(path, []byte("owner key\n"), 0600); e != nil {
-		t.Fatal(e)
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if e := secure(path, false); e != nil {
-		t.Fatal(e)
+	for _, tc := range []struct {
+		name      string
+		admin     bool
+		principal string
+	}{
+		{"user", false, user.User.Sid.String()},
+		{"administrators", true, "S-1-5-32-544"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "keys with spaces")
+			if err := os.WriteFile(path, []byte("owner key\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := secure(path, tc.admin); err != nil {
+				t.Fatal(err)
+			}
+			assertWindowsACL(t, path, tc.principal)
+
+			if err := secure(filepath.Join(path, "missing"), tc.admin); err == nil {
+				t.Fatal("expected ACL failure")
+			}
+			assertWindowsACL(t, path, tc.principal)
+		})
 	}
-	u, e := user.Current()
-	if e != nil {
-		t.Fatal(e)
+}
+
+func assertWindowsACL(t *testing.T, path, principal string) {
+	t.Helper()
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatal(err)
 	}
-	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-	script := "$ErrorActionPreference='Stop'; $acl=Get-Acl -LiteralPath " + quote(path) + "; if (!$acl.AreAccessRulesProtected) {throw 'inheritance enabled'}; $ids=@($acl.Access | ForEach-Object {$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value}); if ($ids.Count -ne 2 -or $ids -notcontains 'S-1-5-18' -or $ids -notcontains " + quote(u.Uid) + ") {throw ('unexpected ACL: '+$ids)}"
-	if out, e := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput(); e != nil {
-		t.Fatalf("%s: %v", out, e)
+	flags, _, err := sd.Control()
+	if err != nil || flags&windows.SE_DACL_PROTECTED == 0 {
+		t.Fatalf("protected DACL required, flags=%#x, err=%v", flags, err)
 	}
-	// A failed ACL operation must leave the previously secured live file alone.
-	if e := secure(filepath.Join(path, "missing"), false); e == nil {
-		t.Fatal("expected ACL failure")
+	acl, _, err := sd.DACL()
+	if err != nil || acl == nil || acl.AceCount != 2 {
+		t.Fatalf("expected exactly two access rules, err=%v", err)
 	}
-	if out, e := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput(); e != nil {
-		t.Fatalf("after failure: %s: %v", out, e)
+	want := [2]string{"S-1-5-18", principal}
+	for i := uint32(0); i < uint32(acl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 ||
+			ace.Mask != windows.FILE_ALL_ACCESS || sid.String() != want[i] {
+			t.Fatalf("unexpected access rule %d", i)
+		}
 	}
 }

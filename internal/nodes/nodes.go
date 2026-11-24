@@ -10,8 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -250,27 +248,6 @@ func RemoveLine(b []byte, line string) []byte {
 		}
 	}
 	return []byte(out)
-}
-func secure(path string, admin bool) error {
-	if runtime.GOOS == "windows" {
-		u, e := user.Current()
-		if e != nil {
-			return e
-		}
-		// Set a complete protected DACL in one operation. Never reset the live
-		// file to inherited permissions, even when applying a later ACL fails.
-		quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
-		script := "$p=" + quote(path) + "; $sid=" + quote(u.Uid) + "; $admin=" + quote(fmt.Sprint(admin)) + "; " + windowsACLScript()
-		out, e := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
-		if e != nil {
-			return fmt.Errorf("secure authorized keys: %w: %s", e, out)
-		}
-		return nil
-	}
-	if e := os.Chmod(filepath.Dir(path), 0700); e != nil {
-		return e
-	}
-	return os.Chmod(path, 0600)
 }
 func (s Store) Accesses() ([]Access, error) {
 	entries, e := os.ReadDir(s.Dir)
@@ -634,7 +611,4 @@ func syncDir(dir string) error {
 	}
 	defer d.Close()
 	return platformops.SyncDir(d)
-}
-func windowsACLScript() string {
-	return `$ErrorActionPreference = 'Stop'; $acl=[System.Security.AccessControl.FileSecurity]::new(); $acl.SetAccessRuleProtection($true,$false); $ids=@('S-1-5-18'); if ($admin -eq 'true') { $ids+='S-1-5-32-544' } else { $ids+=$sid }; foreach ($id in $ids) { $identity=[System.Security.Principal.SecurityIdentifier]::new($id); $rule=[System.Security.AccessControl.FileSystemAccessRule]::new($identity,'FullControl','Allow'); $acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $p -AclObject $acl`
 }

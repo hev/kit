@@ -251,8 +251,4 @@ func TestAtomicKeysFailurePreservesOriginal(t *testing.T) {
 	if e != nil || string(b) != original {
 		t.Fatalf("%q %v", b, e)
 	}
-	script := windowsACLScript()
-	if strings.Contains(script, "/reset") || !strings.Contains(script, "SetAccessRuleProtection($true,$false)") || strings.Count(script, "Set-Acl") != 1 || !strings.Contains(script, "SecurityIdentifier") {
-		t.Fatal(script)
-	}
 }

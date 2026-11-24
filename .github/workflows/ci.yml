@@ -246,4 +246,5 @@ jobs:
       - name: Host invitation and sender security tests
         run: |
           go test -count=1 ./internal/nodes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 ./internal/dispatch -run '^TestSender'
