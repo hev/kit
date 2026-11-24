@@ -99,6 +99,9 @@ func (m *TUI) summarizeCardAsync(callID, tool, action, rawOutput string) tea.Cmd
 	if m.opts.Agent == nil || m.opts.Agent.Provider == nil {
 		return nil
 	}
+	if r, ok := m.opts.Agent.Provider.(*Router); ok && r.Has(ProviderScopedInference) {
+		return nil
+	}
 	// Dispatch receipts have an exact run address in their summary.
 	if tool == "hev_dispatch" && action == "send" {
 		return nil

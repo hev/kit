@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -303,5 +305,111 @@ func TestFOHStaleLegacyKitKeyWithCodexSub(t *testing.T) {
 		if strings.Contains(errOut, hkKey) || strings.Contains(errOut, hkKey[3:]) {
 			t.Fatalf("explicit %s=hk_ leaked secret: %q", envName, errOut)
 		}
+	}
+}
+
+func TestFOHScopedCredentialRefCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake credential resolver uses a shell script")
+	}
+	home := t.TempDir()
+	bin := filepath.Join(home, "bin")
+	if err := os.MkdirAll(filepath.Join(home, ".hev"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Generate the sentinel only while resolving the reference over stdin.
+	const provider = `#!/bin/sh
+printf '%s\n' "$*" >> "$OP_ARGV"
+[ "$#" = 1 ] && [ "$1" = inject ] || exit 2
+awk '{
+  if (sub(/^\{\{ op:\/\/vault\/alpha\/credential \}\}/, "")) c="A"
+  else if (sub(/^\{\{ op:\/\/vault\/beta\/credential \}\}/, "")) c="B"
+  else exit 2
+  printf "hev_"; for(i=0;i<32;i++) printf "%s",c; printf "%s",$0
+}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "op"), []byte(provider), 0700); err != nil {
+		t.Fatal(err)
+	}
+	keyA := "hev_" + strings.Repeat("A", 32)
+	keyB := "hev_" + strings.Repeat("B", 32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		workspace := ""
+		switch key {
+		case keyA:
+			workspace = "team-a"
+		case keyB:
+			workspace = "team-b"
+		default:
+			t.Error("hosted request did not use a configured credential")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/whoami":
+			fmt.Fprintf(w, `{"author":{"id":"user"},"team":{"id":%q}}`, workspace)
+		case "/v1/inference/chat/completions":
+			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\ndata: [DONE]\n\n", workspace+" "+key)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	cfg := `[kit]
+api = %q
+[[foh.key_scopes]]
+name = "alpha"
+account = "user"
+workspace = "team-a"
+api_key_ref = "op://vault/alpha/credential"
+[[foh.key_scopes]]
+name = "beta"
+account = "user"
+workspace = "team-b"
+api_key_ref = "op://vault/beta/credential"
+`
+	if err := os.WriteFile(filepath.Join(home, ".hev", "config.toml"), []byte(fmt.Sprintf(cfg, server.URL)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	argv := filepath.Join(home, "hev-argv")
+	opArgv := filepath.Join(home, "op-argv")
+	env := []string{
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HEV_SECRETS_CACHE=off",
+		"OP_SERVICE_ACCOUNT_TOKEN=synthetic-op-service-token",
+		"HEV_TEST_ARGV_LOG=" + argv,
+		"OP_ARGV=" + opArgv,
+		"HEV_API_KEY=unused-process-credential",
+	}
+	_, stderr, code := runHevChild(t, home, env, "foh", "--once", "ping")
+	if code == 0 || !strings.Contains(stderr, "select a configured account") {
+		t.Fatal("CLI did not reject the missing selection")
+	}
+	for _, scope := range []struct{ name, workspace string }{{"alpha", "team-a"}, {"beta", "team-b"}} {
+		out, _, code := runHevChild(t, home, env, "foh", "--once", "ping", "--model", "scope/"+scope.name+"/test/model")
+		if code != 0 || strings.TrimSpace(out) != scope.workspace+" [REDACTED]" {
+			t.Fatal("CLI did not route to the requested workspace or leaked output")
+		}
+	}
+	calls, err := os.ReadFile(opArgv)
+	if err != nil || string(calls) != "inject\ninject\n" {
+		t.Fatal("credential resolver did not use exactly one argument-free reference injection per scope")
+	}
+	err = filepath.WalkDir(home, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.Type().IsRegular() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if strings.Contains(string(data), keyA) || strings.Contains(string(data), keyB) {
+			t.Error("CLI trace, process arguments, or another file contained a credential")
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

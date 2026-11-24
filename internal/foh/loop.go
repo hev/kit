@@ -215,10 +215,17 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 	a.mu.Lock()
 	a.turn++
 	turn := a.turn
+	cur := a.model
 	a.mu.Unlock()
+	router, routed := a.Provider.(*Router)
+	scoped := routed && router.Has(ProviderScopedInference)
+	if scoped {
+		if _, err := router.Resolve(cur); err != nil {
+			return a.fail(turn, err, emit)
+		}
+	}
 	a.syncSecrets()
 	a.append(Message{Role: "user", Content: user})
-	cur := a.Model()
 	a.Session.Write(Record{Type: "user", Turn: turn, Role: "user", Content: user, Model: cur, Provider: a.ProviderFor(cur)})
 	steps := a.MaxSteps
 	if steps <= 0 {
@@ -229,6 +236,9 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 			return a.fail(turn, err, emit)
 		}
 		req := a.request()
+		if scoped {
+			req.Model = cur
+		}
 		res, err := a.Provider.Stream(ctx, req, func(d Delta) {
 			if d.Text != "" {
 				emit(Event{Kind: EventText, Text: d.Text})
