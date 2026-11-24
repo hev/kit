@@ -393,6 +393,7 @@ func TestScrubKitAndLayerTokensBothSides(t *testing.T) {
 		{"hev", "hev_" + hevPayload, hevPayload},
 		{"hvl", "hvl_" + hvlPayload, hvlPayload},
 		{"hk", "hk_" + hkPayload, hkPayload},
+		{"hk-21", "hk_abCD0123_sample-value", "abCD0123_sample-value"},
 		{"sk-or-v1", "sk-or-v1-" + skOrPayload, skOrPayload},
 	}
 
@@ -463,6 +464,8 @@ func TestScrubKitAndLayerTokensBothSides(t *testing.T) {
 		"hvl_abcdefghijklmnopqrstuvwxyz_metric",
 		"foo%20hev_abcdefghijklmnopqrstuvwxyz_total",
 		"foo%20hev_dispatch",
+		"hk_word",
+		"hk_short_id",
 		"metrics: hev_cluster_agents_working and hev_dispatch_runs_total via hev_dispatch / hev_board_post",
 		"set HEV_API_KEY or HEVLAYER_API_KEY in hev_ kit",
 	} {

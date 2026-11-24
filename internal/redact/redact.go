@@ -22,16 +22,59 @@ import (
 // Version identifies the scrubbing policy for upgrade migration bookkeeping.
 const Version = "gitleaks-8.24.3-kit-4"
 
-// Hosted keys have a long opaque suffix. Preserve short hk_ identifiers.
-var kitKey = regexp.MustCompile(`\bhk_[A-Za-z0-9_-]{16,}`)
+// Hosted and provider credential patterns shared by the full scrubber and
+// HideKitKeys. Capture group 1 isolates the credential so surrounding
+// delimiters and URL percent-escapes are preserved intact.
+var (
+	skTokenPattern       = regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(sk-[A-Za-z0-9_-]{16,})`)
+	layerKeyPattern      = regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{24,})(?:$|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})`)
+	layerKeyExactPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{32})(?:$|[^A-Za-z0-9])`)
+	kitKeyPattern        = regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(hk_[A-Za-z0-9_-]{16,})`)
+)
 
-// HideKitKeys removes hosted credentials from diagnostics. A known key is
-// removed even if an older service issued one with a shorter suffix.
+// replaceGroup replaces capture group g of each match with repl while advancing
+// only to the end of group g so trailing delimiters (such as _ or %26) remain
+// available as leading boundaries for back-to-back tokens.
+func replaceGroup(s string, re *regexp.Regexp, group int, repl string) string {
+	var out strings.Builder
+	pos := 0
+	for pos < len(s) {
+		m := re.FindStringSubmatchIndex(s[pos:])
+		if m == nil {
+			break
+		}
+		gStart, gEnd := m[group*2], m[group*2+1]
+		if gStart < 0 || gEnd <= gStart {
+			if m[1] <= 0 {
+				break
+			}
+			out.WriteString(s[pos : pos+m[1]])
+			pos += m[1]
+			continue
+		}
+		out.WriteString(s[pos : pos+gStart])
+		out.WriteString(repl)
+		pos += gEnd
+	}
+	if pos == 0 {
+		return s
+	}
+	out.WriteString(s[pos:])
+	return out.String()
+}
+
+// HideKitKeys removes hosted and provider credentials (hev_, hvl_, hk_, sk-)
+// from diagnostics without corrupting surrounding delimiters, percent-escapes,
+// or short snake_case identifiers. A known key is removed even if an older
+// service issued one with a shorter suffix.
 func HideKitKeys(text, known string) string {
 	if known != "" {
 		text = strings.ReplaceAll(text, known, "[redacted]")
 	}
-	return kitKey.ReplaceAllString(text, "[redacted]")
+	for _, re := range []*regexp.Regexp{layerKeyPattern, layerKeyExactPattern, kitKeyPattern, skTokenPattern} {
+		text = replaceGroup(text, re, 1, "[redacted]")
+	}
+	return text
 }
 
 type Counts map[string]int
@@ -103,11 +146,10 @@ func New(salt []byte) (*Scrubber, error) {
 		{id: "authorization", re: regexp.MustCompile(`(?i)\bauthorization["']?\s*:\s*["']?(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+)?([^\r\n"'\x60]+)`), group: 1},
 		{id: "url-credentials", re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://([^\s/@]+:[^\s/@]+)@`), group: 1},
 		{id: "slack-token", re: regexp.MustCompile(`\bxox[a-z]-[A-Za-z0-9-]{10,}`)},
-		{id: "sk-token", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(sk-[A-Za-z0-9_-]{16,})`), group: 1},
-		{id: "layer-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{24,})(?:$|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})`), group: 1, advanceGroup: true},
-		{id: "layer-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{32})(?:$|[^A-Za-z0-9])`), group: 1, advanceGroup: true},
-		{id: "kit-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(hk_[A-Za-z0-9_-]{24,})`), group: 1},
-		{id: "kit-key", re: kitKey},
+		{id: "sk-token", re: skTokenPattern, group: 1},
+		{id: "layer-key", re: layerKeyPattern, group: 1, advanceGroup: true},
+		{id: "layer-key", re: layerKeyExactPattern, group: 1, advanceGroup: true},
+		{id: "kit-key", re: kitKeyPattern, group: 1},
 		{id: "turbopuffer", re: regexp.MustCompile(`\btpuf_[A-Za-z0-9_-]{16,}`)},
 		{id: "jwt", re: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)},
 		{id: "high-entropy-assignment", re: regexp.MustCompile(`\b[A-Za-z_][A-Za-z0-9_]*\s*=\s*["']?([A-Za-z0-9_+/=.-]{20,})`), group: 1, entropy: 3.5},

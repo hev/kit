@@ -23,7 +23,7 @@ var secretPatterns = []secretPattern{
 	{re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{24,})(?:$|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})`), repl: redacted, group: 1},
 	{re: regexp.MustCompile(`(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{32})(?:$|[^A-Za-z0-9])`), repl: redacted, group: 1},
 	// Legacy Club Kit (hk_) keys (including after URL percent-escapes).
-	{re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(hk_[A-Za-z0-9_-]{24,})`), repl: redacted, group: 1},
+	{re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(hk_[A-Za-z0-9_-]{16,})`), repl: redacted, group: 1},
 	// key=value pairs (and JSON "key": "value") that name a key or token.
 	{re: regexp.MustCompile(`(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|secret)"?\s*[=:]\s*"?)[^\s"',&]{8,}`), repl: "${1}" + redacted},
 	// The ChatGPT account header and its JSON form, whatever the value.

@@ -42,6 +42,7 @@ func TestKitAndLayerTokenRedactionBothSides(t *testing.T) {
 		{"hev-key", "hev_" + hevPayload, hevPayload, "layer-key"},
 		{"hvl-key", "hvl_" + hvlPayload, hvlPayload, "layer-key"},
 		{"hk-key", "hk_" + hkPayload, hkPayload, "kit-key"},
+		{"hk-21-char", "hk_abCD0123_sample-value", "abCD0123_sample-value", "kit-key"},
 		{"sk-or-v1", "sk-or-v1-" + skOrPayload, skOrPayload, "sk-token"},
 	}
 
@@ -148,11 +149,103 @@ func TestKitAndLayerTokenRedactionBothSides(t *testing.T) {
 		"foo%20hev_dispatch",
 		"set HEV_API_KEY or HEVLAYER_API_KEY before calling hev_dispatch and hev_board_post",
 		"hk_short_id",
+		"hk_word",
 	}
 	for _, keep := range preserved {
 		out, counts := s.Text(keep)
 		if out != keep || len(counts) != 0 {
 			t.Errorf("permitted input %q was mangled to %q (counts=%v)", keep, out, counts)
+		}
+	}
+}
+
+func TestHideKitKeysBothSides(t *testing.T) {
+	hevPayload := strings.Repeat("a1B2", 8)
+	hvlPayload := strings.Repeat("Z9y8", 8)
+	hkPayload := strings.Repeat("Ab9_-1", 7) + "A"
+	skOrPayload := strings.Repeat("deadbeef", 8)
+
+	hevToken := "hev_" + hevPayload
+	hvlToken := "hvl_" + hvlPayload
+	hkToken := "hk_" + hkPayload
+	hkShort21 := "hk_abCD0123_sample-value"
+	skToken := "sk-or-v1-" + skOrPayload
+
+	// Refused/scrubbed side without passing known key.
+	for _, tc := range []struct {
+		name, token, payload string
+	}{
+		{"hev", hevToken, hevPayload},
+		{"hvl", hvlToken, hvlPayload},
+		{"hk-43", hkToken, hkPayload},
+		{"hk-21", hkShort21, "abCD0123_sample-value"},
+		{"sk-or-v1", skToken, skOrPayload},
+	} {
+		t.Run("scrub/"+tc.name, func(t *testing.T) {
+			for _, in := range []string{
+				tc.token,
+				"error with " + tc.token + " inside",
+				`{"error":"bad ` + tc.token + `"}`,
+				"auth=Bearer%20" + tc.token,
+				"q=a%3D" + tc.token + "%26b=1",
+				"q=" + tc.token + "%26" + tc.token,
+			} {
+				out := HideKitKeys(in, "")
+				if strings.Contains(out, tc.token) || strings.Contains(out, tc.payload) {
+					t.Errorf("HideKitKeys(%q) = %q leaked %s", in, out, tc.name)
+				}
+				if !strings.Contains(out, "[redacted]") {
+					t.Errorf("HideKitKeys(%q) = %q missing [redacted]", in, out)
+				}
+				if HideKitKeys(out, "") != out {
+					t.Errorf("HideKitKeys(%q) not idempotent: %q", in, out)
+				}
+			}
+			if got := HideKitKeys("q=a%3D"+tc.token+"%26b=1", ""); got != "q=a%3D[redacted]%26b=1" {
+				t.Errorf("pct delimiter mismatch for %s: got %q", tc.name, got)
+			}
+			if got := HideKitKeys("q="+tc.token+"%26"+tc.token, ""); got != "q=[redacted]%26[redacted]" {
+				t.Errorf("pct back-to-back mismatch for %s: got %q", tc.name, got)
+			}
+		})
+	}
+
+	// Exact 32-char underscore-adjacent hev_/hvl_ tokens preserve surrounding underscores.
+	for _, uc := range []struct{ in, want string }{
+		{"X_" + hevToken, "X_[redacted]"},
+		{hevToken + "_x", "[redacted]_x"},
+		{"X_" + hevToken + "_x", "X_[redacted]_x"},
+		{"X_" + hvlToken + "_y", "X_[redacted]_y"},
+		{hevToken + "_" + hevToken, "[redacted]_[redacted]"},
+		{hevToken + "_" + hvlToken, "[redacted]_[redacted]"},
+	} {
+		if got := HideKitKeys(uc.in, ""); got != uc.want {
+			t.Errorf("HideKitKeys(%q) = %q, want %q", uc.in, got, uc.want)
+		}
+	}
+
+	// Explicit known short legacy key is also replaced.
+	if got := HideKitKeys("err hk_short123 and "+hevToken, "hk_short123"); got != "err [redacted] and [redacted]" {
+		t.Errorf("known + pattern HideKitKeys = %q", got)
+	}
+
+	// Permitted/preserved side: snake_case identifiers, metrics, short hk_ words, and wordmark prose.
+	for _, keep := range []string{
+		"hk_word",
+		"hk_short_id",
+		"hev_dispatch",
+		"hev_board_post",
+		"hev_cluster_agents_working",
+		"hev_dispatch_runs_total",
+		"my_hev_metric",
+		"hev_abcdefghijklmnopqrstuvwxyz_total",
+		"hvl_abcdefghijklmnopqrstuvwxyz_metric",
+		"hev_ kit",
+		"Welcome to hev_ kit v0.7",
+		"foo%20hev_dispatch",
+	} {
+		if got := HideKitKeys(keep, ""); got != keep {
+			t.Errorf("HideKitKeys(%q) = %q, want unchanged", keep, got)
 		}
 	}
 }
