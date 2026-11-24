@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/hevpaths"
 	"github.com/hev/kit/internal/platformops"
 )
 
@@ -56,11 +57,26 @@ type Message struct {
 
 type Store struct{ dir string }
 
+// AtStateDir places the native inbox under the resolved peers state directory.
+func AtStateDir(dir string) Store {
+	if dir == "" {
+		return Store{}
+	}
+	return Store{filepath.Join(dir, "native")}
+}
+
+// AtHome resolves the peers surface under home so legacy ~/.local/state/peers-v2
+// hosts never get ~/.hev/peers/ created underneath them.
 func AtHome(home string) Store {
 	if home == "" {
 		return Store{}
 	}
-	return Store{filepath.Join(home, ".hev", "peers", "native")}
+	return AtStateDir(hevpaths.ResolveHome(home, hevpaths.Peers).Dir)
+}
+
+// Default resolves the active user's peers surface (honouring HEV_PEERS_STATE).
+func Default() Store {
+	return AtStateDir(hevpaths.Dir(hevpaths.Peers))
 }
 
 func name(pid int) string { return fmt.Sprintf("kit-%d", pid) }

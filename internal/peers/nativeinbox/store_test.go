@@ -3,6 +3,7 @@ package nativeinbox
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -155,5 +156,32 @@ func TestInboxErrorsCarryNeitherPathsNorMessageBodies(t *testing.T) {
 	}
 	if err := s.Close(peer); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAtHomeRespectsLegacyPeersV2Layout(t *testing.T) {
+	home := t.TempDir()
+	legacy := filepath.Join(home, ".local", "state", "peers-v2")
+	if err := os.MkdirAll(legacy, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s := AtHome(home)
+	peer, err := s.Register(home, "main", "%9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close(peer) })
+	if s.dir != filepath.Join(legacy, "native") {
+		t.Fatalf("legacy store dir = %q, want %q", s.dir, filepath.Join(legacy, "native"))
+	}
+	if _, err := os.Stat(filepath.Join(home, ".hev", "peers")); !os.IsNotExist(err) {
+		t.Fatalf("legacy host unexpectedly created ~/.hev/peers: %v", err)
+	}
+
+	// Fresh host with ~/.hev/peers uses ~/.hev/peers/native.
+	freshHome := t.TempDir()
+	fresh := AtHome(freshHome)
+	if fresh.dir != filepath.Join(freshHome, ".hev", "peers", "native") {
+		t.Fatalf("fresh store dir = %q", fresh.dir)
 	}
 }
