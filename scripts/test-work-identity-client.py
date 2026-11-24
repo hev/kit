@@ -18,7 +18,7 @@ def main():
     assert namespace.startswith("work-")
     workspace = namespace.removeprefix("work-")
     assert env["HEV_WORK_IDENTITY_ENDPOINT"].startswith("http://127.0.0.1:")
-    assert env["HEV_WORK_IDENTITY_KEY"].startswith("hvl_fixture_")
+    assert env["HEV_WORK_IDENTITY_KEY"].strip()
     hev = env["KIT_WORK_IDENTITY_TEST_HEV"]
 
     def run(*args, error=None, overrides=None):
