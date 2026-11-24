@@ -268,7 +268,7 @@ func (m *TUI) peersOverlayView(width, height int) string {
 			ansi.Truncate(r.Cwd, cwdMax, "…"),
 			youTag)
 		if i == p.cursor {
-			cur = lipgloss.NewStyle().Foreground(accent).Render("› ")
+			cur = lipgloss.NewStyle().Foreground(hlLavender).Render("› ")
 			line = lipgloss.NewStyle().Bold(true).Render(line)
 		}
 		b.WriteString(cur + line + "\n")

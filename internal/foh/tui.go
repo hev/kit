@@ -172,7 +172,7 @@ func NewTUI(opts TUIOptions) *TUI {
 	// Keep the input clean and unboxed; horizontal rules frame it in View().
 	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	in.BlurredStyle.CursorLine = lipgloss.NewStyle()
-	in.FocusedStyle.Prompt = lipgloss.NewStyle().Bold(true).Foreground(accent)
+	in.FocusedStyle.Prompt = lipgloss.NewStyle().Bold(true).Foreground(hlLavender)
 	in.BlurredStyle.Prompt = dimStyle
 	if opts.Color {
 		in.Cursor.Style = lipgloss.NewStyle().Foreground(accent)
@@ -1400,7 +1400,7 @@ func (m *TUI) resumePickerView(width, height int) string {
 		title := ansi.Truncate(s.Title, titleMax, "…")
 		line := fmt.Sprintf("%s %s %-10s %s", hBadge, age, dir, title)
 		if i == r.cursor {
-			cur = lipgloss.NewStyle().Foreground(accent).Render("› ")
+			cur = lipgloss.NewStyle().Foreground(hlLavender).Render("› ")
 			line = lipgloss.NewStyle().Bold(true).Render(line)
 		}
 		b.WriteString(cur + line + "\n")
@@ -1854,7 +1854,7 @@ func (m *TUI) pickerView(height int) string {
 			line += "  (active)"
 		}
 		if i == p.cursor {
-			cur = lipgloss.NewStyle().Foreground(accent).Render("› ")
+			cur = lipgloss.NewStyle().Foreground(hlLavender).Render("› ")
 			line = lipgloss.NewStyle().Bold(true).Render(line)
 		}
 		b.WriteString(cur + star + line + "\n")
