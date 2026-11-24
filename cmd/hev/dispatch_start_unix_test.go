@@ -4,15 +4,39 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hev/kit/internal/dispatch"
+	"github.com/hev/kit/pkg/workidentity"
 )
 
 func TestDispatchStartSharedCapacityOutput(t *testing.T) {
+	var requests atomic.Int32
+	layer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer layer.Close()
+	t.Setenv("HEV_WORK_IDENTITY_ENDPOINT", layer.URL)
+	t.Setenv("HEV_WORK_IDENTITY_KEY", "synthetic-test-key")
+	identity := newDispatchCommand()
+	var stdout, stderr bytes.Buffer
+	identity.SetOut(&stdout)
+	identity.SetErr(&stderr)
+	identity.SetArgs([]string{"identity", "--workspace", "10000000-0000-4000-8000-000000000001",
+		"accept", "20000000-0000-4000-8000-000000000001", "2", "1", "30000000-0000-4000-8000-000000000001"})
+	var failure *workidentity.Error
+	if err := identity.Execute(); !errors.As(err, &failure) || !failure.Retryable || !failure.UnknownCommit || stdout.Len() != 0 {
+		t.Fatalf("outage write = %v, stdout = %q", err, stdout.String())
+	}
+
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
@@ -40,6 +64,9 @@ func TestDispatchStartSharedCapacityOutput(t *testing.T) {
 		if _, err := dispatch.Handle(dispatch.Request{Action: "stop", Name: "sample"}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("Layer received %d calls, want only the explicit identity write", requests.Load())
 	}
 }
 

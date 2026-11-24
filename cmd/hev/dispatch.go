@@ -77,6 +77,7 @@ func newDispatchCommand() *cobra.Command {
 		return startDispatch(cmd, c, h, o, string(b), configPath)
 	}
 	d.AddCommand(newDispatchRun(load, &configPath, &host))
+	d.AddCommand(newDispatchIdentityCommand())
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
 	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return dispatch.Load(dispatch.ConfigPath(configPath)) }, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate"} {
