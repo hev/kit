@@ -3,10 +3,12 @@ package foh
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -34,6 +36,38 @@ func newTestTUI(t *testing.T, p Provider) (*TUI, *Agent) {
 	// Deliver the catalog as Init would.
 	m.Update(m.loadCatalog()())
 	return m, a
+}
+
+func TestTUICatalogDeadlineAllowsScopedBudgetWait(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider Provider
+		timeout  time.Duration
+	}{
+		{"legacy", NewRouter(&scripted{}), 30 * time.Second},
+		{"scoped", NewRouter(&scopedInference{}), scopeResolveTimeout + scopeVerifyTimeout + catalogTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := newTestTUI(t, tc.provider)
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			m.opts.CatalogContext = parent
+			m.opts.Catalog = func(ctx context.Context) ([]Model, CatalogSource, error) {
+				deadline, ok := ctx.Deadline()
+				if left := time.Until(deadline); !ok || left > tc.timeout || left < tc.timeout-time.Second {
+					t.Errorf("catalog deadline remaining %v, want about %v", left, tc.timeout)
+				}
+				return nil, "", ctx.Err()
+			}
+			if result := m.loadCatalog()().(catalogMsg); result.err != nil {
+				t.Fatal(result.err)
+			}
+			cancel()
+			if result := m.loadCatalog()().(catalogMsg); !errors.Is(result.err, context.Canceled) {
+				t.Fatal("catalog must honor cancellation from the FOH session")
+			}
+		})
+	}
 }
 
 func key(t tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: t} }

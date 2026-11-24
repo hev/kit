@@ -20,15 +20,16 @@ type CatalogLoader func(ctx context.Context) ([]Model, CatalogSource, error)
 
 // TUIOptions configures the meta-harness TUI.
 type TUIOptions struct {
-	Agent        *Agent
-	Catalog      CatalogLoader
-	Favorites    *Favorites
-	Composer     PromptComposer
-	Version      string
-	Cwd          string
-	Workspace    string
-	SummaryModel string
-	Color        bool
+	Agent          *Agent
+	Catalog        CatalogLoader
+	CatalogContext context.Context
+	Favorites      *Favorites
+	Composer       PromptComposer
+	Version        string
+	Cwd            string
+	Workspace      string
+	SummaryModel   string
+	Color          bool
 }
 
 type entryKind int
@@ -185,8 +186,19 @@ func (m *TUI) loadCatalog() tea.Cmd {
 		return nil
 	}
 	load := m.opts.Catalog
+	parent := m.opts.CatalogContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	timeout := 30 * time.Second
+	if m.opts.Agent != nil {
+		if router, ok := m.opts.Agent.Provider.(*Router); ok && router.Has(ProviderScopedInference) {
+			// Scope loads run in parallel, with three bounded stages per scope.
+			timeout = scopeResolveTimeout + scopeVerifyTimeout + catalogTimeout
+		}
+	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
 		models, src, err := load(ctx)
 		return catalogMsg{models, src, err}
