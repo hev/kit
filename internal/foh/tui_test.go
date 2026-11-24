@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/hev/kit/internal/cluster"
 )
 
 var testCatalog = []Model{
@@ -184,6 +186,9 @@ func drain(t *testing.T, m *TUI, cmd tea.Cmd) {
 		if _, done := msg.(agentDoneMsg); done {
 			return
 		}
+		if evs, ok := msg.(agentEventsMsg); ok && evs.done {
+			return
+		}
 		if next != nil {
 			queue = append(queue, next)
 		}
@@ -306,5 +311,200 @@ func TestTUIBackgroundGrid(t *testing.T) {
 	// Non-grid rows stay untouched.
 	if out[0] != "" || out[3] != "" {
 		t.Fatalf("non-grid rows modified: row0=%q row3=%q", out[0], out[3])
+	}
+}
+
+func TestTUIInputWrapAndSinglePromptCaret(t *testing.T) {
+	m, _ := newTestTUI(t, &scripted{})
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 24})
+	m.input.SetValue("line one\nline two")
+	m.syncInputHeight()
+	if m.input.Height() < 2 {
+		t.Fatalf("height = %d, want >= 2", m.input.Height())
+	}
+	view := ansi.Strip(m.input.View())
+	if strings.Count(view, "›") != 1 {
+		t.Fatalf("expected single top caret, got:\n%s", view)
+	}
+	// Long sentence must word-wrap and grow height automatically.
+	m.input.SetValue("this is a long sentence with multiple words that should soft wrap across lines")
+	m.syncInputHeight()
+	if m.input.Height() < 2 {
+		t.Fatalf("wrapped height = %d, want >= 2", m.input.Height())
+	}
+}
+
+func TestHevDocsMultiSiteResolution(t *testing.T) {
+	ts := NewToolset(t.TempDir(), nil)
+	site, base, err := ts.docsBaseURL("layer")
+	if err != nil || site != "layer" || base != DefaultLayerDocsURL {
+		t.Fatalf("layer = %q %q %v", site, base, err)
+	}
+	site, base, err = ts.docsBaseURL("mind")
+	if err != nil || site != "mind" || base != DefaultMindDocsURL {
+		t.Fatalf("mind = %q %q %v", site, base, err)
+	}
+	if _, _, err := ts.docsBaseURL("evil"); err == nil {
+		t.Fatal("expected unknown site error")
+	}
+}
+
+func TestTUIToolCallsHaveNoBoxOutline(t *testing.T) {
+	m, _ := newTestTUI(t, &scripted{})
+	m.opts.Color = true
+	m.applyEvent(Event{Kind: EventToolStart, Call: call("c1", "hev_dispatch", `{"action":"ls"}`)})
+	m.applyEvent(Event{Kind: EventToolResult, Call: call("c1", "hev_dispatch", `{}`), Result: ToolResult{
+		Card: &Card{Tool: "hev_dispatch", Action: "ls", Summary: "2 runs", Body: "a\nb\nc", OK: true},
+	}})
+	m.applyEvent(Event{Kind: EventToolStart, Call: call("c2", "bash", `{"command":"echo hi"}`)})
+	m.applyEvent(Event{Kind: EventToolResult, Call: call("c2", "bash", `{}`), Result: ToolResult{Content: "hi"}})
+
+	checkNoBox := func(label, s string) {
+		t.Helper()
+		for _, ch := range []string{"╭", "╮", "╰", "╯", "┌", "┐", "└", "┘"} {
+			if strings.Contains(s, ch) {
+				t.Fatalf("%s rendered box-outline char %q:\n%s", label, ch, s)
+			}
+		}
+	}
+	checkNoBox("collapsed", plain(m))
+	m.Update(key(tea.KeyCtrlO))
+	checkNoBox("expanded", plain(m))
+}
+
+func TestTUIWaitEventCoalescesText(t *testing.T) {
+	ch := make(chan Event, 8)
+	ch <- Event{Kind: EventText, Text: "hel"}
+	ch <- Event{Kind: EventText, Text: "lo "}
+	ch <- Event{Kind: EventText, Text: "world"}
+	ch <- Event{Kind: EventToolStart, Call: call("c1", "glob", `{}`)}
+	ch <- Event{Kind: EventText, Text: "after"}
+	close(ch)
+
+	msg := waitEvent(ch)()
+	batch, ok := msg.(agentEventsMsg)
+	if !ok {
+		t.Fatalf("got %T, want agentEventsMsg", msg)
+	}
+	if !batch.done {
+		t.Fatal("expected done=true when channel closed in batch")
+	}
+	if len(batch.evs) != 3 {
+		t.Fatalf("len(evs) = %d, want 3: %#v", len(batch.evs), batch.evs)
+	}
+	if batch.evs[0].Kind != EventText || batch.evs[0].Text != "hello world" {
+		t.Fatalf("evs[0] = %#v, want merged text", batch.evs[0])
+	}
+	if batch.evs[1].Kind != EventToolStart {
+		t.Fatalf("evs[1] = %#v, want EventToolStart", batch.evs[1])
+	}
+	if batch.evs[2].Kind != EventText || batch.evs[2].Text != "after" {
+		t.Fatalf("evs[2] = %#v, want trailing text", batch.evs[2])
+	}
+}
+
+func TestTUIStreamingMarkdownCacheAndThrottle(t *testing.T) {
+	m, _ := newTestTUI(t, &scripted{})
+	m.busy = true
+	m.applyEvent(Event{Kind: EventText, Text: "first chunk"})
+	v1 := plain(m)
+	if !strings.Contains(v1, "first chunk") {
+		t.Fatalf("initial stream text missing:\n%s", v1)
+	}
+	// Immediate second delta within throttle window reuses cached render.
+	m.applyEvent(Event{Kind: EventText, Text: " second chunk"})
+	v2 := plain(m)
+	if strings.Contains(v2, "second chunk") {
+		t.Fatalf("expected streaming markdown render to throttle within %v", streamMarkdownInterval)
+	}
+	// Once the interval elapses, streaming render refreshes.
+	m.entries[len(m.entries)-1].cacheAt = time.Now().Add(-streamMarkdownInterval - time.Millisecond)
+	if !strings.Contains(plain(m), "second chunk") {
+		t.Fatal("streaming markdown did not refresh after throttle interval")
+	}
+	// Completing the turn always flushes immediately regardless of throttle.
+	m.applyEvent(Event{Kind: EventText, Text: " final chunk"})
+	m.busy = false
+	if !strings.Contains(plain(m), "final chunk") {
+		t.Fatal("final text did not flush when turn finished")
+	}
+}
+
+func TestTUITerminalNoiseFilteredFromInput(t *testing.T) {
+	m, _ := newTestTUI(t, &scripted{})
+
+	// Refused: leaked SGR mouse, OSC color report, CSI focus/DA/CPR, and stray Alt sequences.
+	noise := []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("[<64;45;12M")},
+		{Type: tea.KeyRunes, Runes: []rune("64;45;12m")},
+		{Type: tea.KeyRunes, Runes: []rune("11;rgb:1111/1111/1111")},
+		{Type: tea.KeyRunes, Runes: []rune("[?62;1;2c")},
+		{Type: tea.KeyRunes, Runes: []rune("[12;34R")},
+		{Type: tea.KeyRunes, Runes: []rune("[I")},
+		{Type: tea.KeyRunes, Runes: []rune("O"), Alt: true},
+		// Split OSC: ESC ] 11;rgb:1111/1111/1111 ESC \
+		{Type: tea.KeyRunes, Runes: []rune("]"), Alt: true},
+		{Type: tea.KeyRunes, Runes: []rune("1")},
+		{Type: tea.KeyRunes, Runes: []rune("1")},
+		{Type: tea.KeyRunes, Runes: []rune(";rgb:1111/1111/1111")},
+		{Type: tea.KeyRunes, Runes: []rune(`\`), Alt: true},
+		// Split CSI: ESC [ ? 6 2 ; 1 c
+		{Type: tea.KeyRunes, Runes: []rune("["), Alt: true},
+		{Type: tea.KeyRunes, Runes: []rune("?62;1")},
+		{Type: tea.KeyRunes, Runes: []rune("c")},
+	}
+	for _, msg := range noise {
+		m.Update(msg)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("terminal noise leaked into input: %q", got)
+	}
+
+	// Kept: normal typing and bracketed paste.
+	typeText(m, "hello [1, 2] rgb(1,2,3)")
+	if got := m.input.Value(); got != "hello [1, 2] rgb(1,2,3)" {
+		t.Fatalf("normal typing was dropped: %q", got)
+	}
+	m.input.Reset()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;45;12M"), Paste: true})
+	if got := m.input.Value(); got != "[<64;45;12M" {
+		t.Fatalf("explicit bracketed paste was dropped: %q", got)
+	}
+}
+
+func TestTUIFooterDoesNotDuplicateMainShimmer(t *testing.T) {
+	m, _ := newTestTUI(t, &scripted{})
+	n := 2
+	m.chrome = ChromeSnapshot{
+		Members: []cluster.Member{
+			{
+				Facts: cluster.Facts{Name: "mini", OS: "darwin", Dispatch: true, Activity: &cluster.Activity{AgentsWorking: &n}},
+				State: "alive",
+			},
+		},
+	}
+	m.busy = true
+	m.thinkVerb = "traversing the bowl…"
+
+	v := plain(m)
+	if count := strings.Count(v, m.thinkVerb); count != 1 {
+		t.Fatalf("expected shimmer verb once (main area only), got %d:\n%s", count, v)
+	}
+	footer := ansi.Strip(m.statusChromeBar(120))
+	if strings.Contains(footer, m.thinkVerb) {
+		t.Fatalf("footer duplicated main shimmer: %q", footer)
+	}
+	if !strings.Contains(footer, "peers 2") || !strings.Contains(footer, "mini") {
+		t.Fatalf("footer lost cluster counts while busy: %q", footer)
+	}
+
+	// With no cluster chrome, busy footer shows plain hint (no shimmer verb).
+	m.chrome = ChromeSnapshot{}
+	footerEmpty := ansi.Strip(m.statusChromeBar(120))
+	if strings.Contains(footerEmpty, m.thinkVerb) {
+		t.Fatalf("empty-chrome footer duplicated shimmer: %q", footerEmpty)
+	}
+	if !strings.Contains(footerEmpty, "Enter steers") {
+		t.Fatalf("empty-chrome busy footer missing steer hint: %q", footerEmpty)
 	}
 }

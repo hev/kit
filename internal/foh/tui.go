@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -51,7 +52,21 @@ type entry struct {
 	card    *Card
 	callID  string
 	running bool
+
+	cacheText   string
+	cacheWidth  int
+	cacheColor  bool
+	cacheRender string
+	cacheAt     time.Time
 }
+
+type escAbsorbMode int
+
+const (
+	escNone escAbsorbMode = iota
+	escOSC
+	escCSI
+)
 
 // TUI is the Bubble Tea model for hev kit.
 type TUI struct {
@@ -72,6 +87,14 @@ type TUI struct {
 	cancel      context.CancelFunc
 	events      chan Event
 	expandCards bool
+
+	splashCache string
+	splashWidth int
+	splashColor bool
+	splashModel string
+
+	escMode  escAbsorbMode
+	escUntil time.Time
 
 	chrome        ChromeSnapshot
 	watched       []watchedRun
@@ -119,6 +142,10 @@ type picker struct {
 }
 
 type agentEventMsg struct{ ev Event }
+type agentEventsMsg struct {
+	evs  []Event
+	done bool
+}
 type agentDoneMsg struct{ err error }
 type shimmerTickMsg struct{}
 type catalogMsg struct {
@@ -131,7 +158,12 @@ type catalogMsg struct {
 func NewTUI(opts TUIOptions) *TUI {
 	in := textarea.New()
 	in.Placeholder = "Ask hev kit…  (Shift+Enter newline · /help)"
-	in.Prompt = "› "
+	in.SetPromptFunc(2, func(lineIdx int) string {
+		if lineIdx == 0 {
+			return "› "
+		}
+		return "  "
+	})
 	in.ShowLineNumbers = false
 	in.CharLimit = 32 << 10
 	in.SetHeight(1)
@@ -171,17 +203,28 @@ func (m *TUI) scheduleChrome() tea.Cmd {
 	return tea.Tick(chromeTick(), func(time.Time) tea.Msg { return chromeTickMsg{} })
 }
 
+func wrappedVisualLines(line string, width int) int {
+	if width <= 0 || line == "" {
+		return 1
+	}
+	wrapped := ansi.Wordwrap(line, width, "")
+	hard := ansi.Hardwrap(wrapped, width, true)
+	n := strings.Count(hard, "\n") + 1
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
 func (m *TUI) syncInputHeight() {
 	lines := strings.Split(m.input.Value(), "\n")
 	w := max(10, m.input.Width())
 	visual := 0
 	for _, l := range lines {
-		n := len([]rune(l))
-		if n == 0 {
-			visual++
-			continue
-		}
-		visual += (n + w - 1) / w
+		visual += wrappedVisualLines(l, w)
+	}
+	if li := m.input.LineInfo(); li.Height > visual {
+		visual = li.Height
 	}
 	h := max(1, min(8, visual))
 	m.input.SetHeight(h)
@@ -204,13 +247,33 @@ func shimmerTick() tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return shimmerTickMsg{} })
 }
 
+const maxEventBatch = 64
+
 func waitEvent(ch <-chan Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
 			return agentDoneMsg{}
 		}
-		return agentEventMsg{ev}
+		evs := []Event{ev}
+		done := false
+		for i := 1; i < maxEventBatch; i++ {
+			select {
+			case next, ok := <-ch:
+				if !ok {
+					done = true
+					return agentEventsMsg{evs: evs, done: done}
+				}
+				if next.Kind == EventText && evs[len(evs)-1].Kind == EventText {
+					evs[len(evs)-1].Text += next.Text
+					continue
+				}
+				evs = append(evs, next)
+			default:
+				return agentEventsMsg{evs: evs}
+			}
+		}
+		return agentEventsMsg{evs: evs, done: done}
 	}
 }
 
@@ -219,7 +282,7 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.input.SetWidth(max(10, msg.Width-4))
+		m.input.SetWidth(max(10, msg.Width-2))
 		m.syncInputHeight()
 		return m, nil
 	case chromeMsg:
@@ -419,20 +482,24 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, waitEvent(m.events))
 		return m, tea.Batch(cmds...)
+	case agentEventsMsg:
+		var cmds []tea.Cmd
+		for _, ev := range msg.evs {
+			if wcmd := m.applyEvent(ev); wcmd != nil {
+				cmds = append(cmds, wcmd)
+			}
+		}
+		if msg.done {
+			doneCmd := m.finishAgentTurn()
+			if doneCmd != nil {
+				cmds = append(cmds, doneCmd)
+			}
+		} else if m.events != nil {
+			cmds = append(cmds, waitEvent(m.events))
+		}
+		return m, tea.Batch(cmds...)
 	case agentDoneMsg:
-		m.busy, m.events = false, nil
-		m.opts.Agent.append(m.hevContext...)
-		m.hevContext = nil
-		if m.cancel != nil {
-			m.cancel()
-			m.cancel = nil
-		}
-		if len(m.pendingAuto) > 0 {
-			next := m.pendingAuto[0]
-			m.pendingAuto = m.pendingAuto[1:]
-			return m, m.startAutoTurn(next)
-		}
-		return m, nil
+		return m, m.finishAgentTurn()
 	case tea.MouseMsg:
 		if m.picker != nil {
 			return m, nil
@@ -462,6 +529,138 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+func (m *TUI) finishAgentTurn() tea.Cmd {
+	m.busy, m.events = false, nil
+	m.opts.Agent.append(m.hevContext...)
+	m.hevContext = nil
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+	if len(m.pendingAuto) > 0 {
+		next := m.pendingAuto[0]
+		m.pendingAuto = m.pendingAuto[1:]
+		return m.startAutoTurn(next)
+	}
+	return nil
+}
+
+var (
+	// Terminal response/escape fragments that Bubble Tea v1 can split out of
+	// SGR mouse tracking, OSC color queries, CSI device attributes, CPR, or
+	// focus reports and deliver as plain KeyRunes.
+	sgrMouseNoiseRe = regexp.MustCompile(`^(?:\[?<)?\d+;\d+;\d+[Mm](?:\[?<\d+;\d+;\d+[Mm])*$`)
+	oscRGBNoiseRe   = regexp.MustCompile(`rgb:[0-9a-fA-F]{2,4}/[0-9a-fA-F]{2,4}/[0-9a-fA-F]{2,4}`)
+	csiNoiseRe      = regexp.MustCompile(`^(?:\[\?[0-9;]+[a-zA-Z]|\[[0-9;]+[RuMm]|\[[IO])$`)
+)
+
+const escAbsorbWindow = 100 * time.Millisecond
+
+// absorbTerminalNoise drops leaked terminal escape/report sequences (OSC color
+// reports, split SGR mouse wheel events, CSI DA/CPR/focus reports, and stray
+// unbound Alt+key introducers) before they can be inserted into the textarea.
+func (m *TUI) absorbTerminalNoise(msg tea.KeyMsg, now time.Time) bool {
+	if msg.Paste {
+		m.escMode = escNone
+		return false
+	}
+	// Handle active split-escape absorption (ESC ] ... or ESC [ ...).
+	if m.escMode != escNone {
+		if now.After(m.escUntil) {
+			m.escMode = escNone
+		} else {
+			switch m.escMode {
+			case escOSC:
+				if msg.Type == tea.KeyCtrlG || msg.Type == tea.KeyEsc {
+					m.escMode = escNone
+					return true
+				}
+				if msg.Alt && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == '\\' {
+					m.escMode = escNone
+					return true
+				}
+				if msg.Type == tea.KeyRunes && isOSCBody(msg.Runes) {
+					m.escUntil = now.Add(escAbsorbWindow)
+					return true
+				}
+				m.escMode = escNone
+			case escCSI:
+				if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+					allParam := true
+					finalFound := false
+					for i, r := range msg.Runes {
+						if isCSIParam(r) {
+							continue
+						}
+						if i == len(msg.Runes)-1 && r >= '@' && r <= '~' {
+							finalFound = true
+							allParam = false
+							continue
+						}
+						allParam = false
+						finalFound = false
+						break
+					}
+					if allParam {
+						m.escUntil = now.Add(escAbsorbWindow)
+						return true
+					}
+					if finalFound {
+						m.escMode = escNone
+						return true
+					}
+				}
+				m.escMode = escNone
+			}
+		}
+	}
+	if msg.Alt && msg.Type == tea.KeyRunes {
+		if len(msg.Runes) == 1 {
+			switch msg.Runes[0] {
+			case ']':
+				m.escMode = escOSC
+				m.escUntil = now.Add(escAbsorbWindow)
+				return true
+			case '[':
+				m.escMode = escCSI
+				m.escUntil = now.Add(escAbsorbWindow)
+				return true
+			case 'b', 'f', 'd', 'c', 'l', 'u', '<', '>':
+				// Known bubbles/textarea Alt editing bindings.
+				return false
+			default:
+				// Stray unbound Alt+<rune> (e.g. ESC \ or ESC O): textarea's
+				// default branch would otherwise insert the raw rune.
+				return true
+			}
+		}
+		return true
+	}
+	if msg.Type == tea.KeyRunes && len(msg.Runes) >= 2 {
+		s := string(msg.Runes)
+		if sgrMouseNoiseRe.MatchString(s) || oscRGBNoiseRe.MatchString(s) || csiNoiseRe.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func isOSCBody(rs []rune) bool {
+	if len(rs) == 0 {
+		return false
+	}
+	for _, r := range rs {
+		if r < 0x21 || r > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func isCSIParam(r rune) bool {
+	return (r >= '0' && r <= '9') || r == ';' || r == ':' || r == '?' || r == '<' || r == '>' || r == '=' || r == '!' || r == '"'
 }
 
 func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -554,6 +753,9 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startTurn(text)
+	}
+	if m.absorbTerminalNoise(msg, time.Now()) {
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -1385,11 +1587,14 @@ var (
 	sysStyle  = lipgloss.NewStyle().Foreground(brandInkSoft).Italic(true)
 	errStyle  = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	dimStyle  = lipgloss.NewStyle().Foreground(brandMuted)
-	cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(signal).Padding(0, 1)
 	badge     = lipgloss.NewStyle().Foreground(brandInk).Background(signal).Bold(true).Padding(0, 1)
 )
 
 func (m *TUI) splash() string {
+	model := m.opts.Agent.Model()
+	if m.splashCache != "" && m.splashWidth == m.width && m.splashColor == m.opts.Color && m.splashModel == model {
+		return m.splashCache
+	}
 	mascot := RenderMascot(m.width, m.opts.Color)
 	ws := m.opts.Workspace
 	if ws == "" {
@@ -1401,12 +1606,16 @@ func (m *TUI) splash() string {
 		"",
 		"cwd        " + m.opts.Cwd,
 		"workspace  " + ws,
-		"model      " + userStyle.Render(m.opts.Agent.Model()) + dimStyle.Render(" via "+m.opts.Agent.ProviderFor(m.opts.Agent.Model())),
+		"model      " + userStyle.Render(model) + dimStyle.Render(" via "+m.opts.Agent.ProviderFor(model)),
 		"",
 		dimStyle.Render("Ctrl+M model picker · /prompt · /help"),
 		dimStyle.Render("hev kit runs without permissions. It's your responsibility to secure your compute."),
 	}, "\n"))
-	return lipgloss.JoinHorizontal(lipgloss.Top, mascot, "   ", info)
+	m.splashCache = lipgloss.JoinHorizontal(lipgloss.Top, mascot, "   ", info)
+	m.splashWidth = m.width
+	m.splashColor = m.opts.Color
+	m.splashModel = model
+	return m.splashCache
 }
 
 func (m *TUI) headerBar() string {
@@ -1474,12 +1683,28 @@ func (m *TUI) renderCard(c *Card, width int, running bool) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *TUI) renderEntry(e entry, width int) string {
+const streamMarkdownInterval = 75 * time.Millisecond
+
+func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 	switch e.kind {
 	case entryUser:
 		return userStyle.Render("you › ") + e.text
 	case entryAssistant:
-		return renderMarkdown(e.text, width, m.opts.Color)
+		if e.cacheRender != "" && e.cacheWidth == width && e.cacheColor == m.opts.Color {
+			if e.cacheText == e.text {
+				return e.cacheRender
+			}
+			if streaming && time.Since(e.cacheAt) < streamMarkdownInterval {
+				return e.cacheRender
+			}
+		}
+		rendered := renderMarkdown(e.text, width, m.opts.Color)
+		e.cacheText = e.text
+		e.cacheWidth = width
+		e.cacheColor = m.opts.Color
+		e.cacheRender = rendered
+		e.cacheAt = time.Now()
+		return rendered
 	case entryTool:
 		if e.running {
 			return renderShimmer(e.text, m.frame, m.opts.Color)
@@ -1645,23 +1870,22 @@ func (m *TUI) statusChromeBar(width int) string {
 	if !m.opts.Color {
 		right = model + " · " + prov
 	}
-	var left string
-	if m.busy {
-		left = renderShimmer(m.activeVerb(), m.frame, m.opts.Color) + dimStyle.Render("  Enter steers · Ctrl+C cancels")
-	} else {
-		left = renderChrome(m.chrome, m.opts.Color)
-		if len(m.watched) > 0 {
-			wb := fmt.Sprintf("◉ watching %d", len(m.watched))
-			if m.opts.Color {
-				wb = userStyle.Render(wb)
-			}
-			if left != "" {
-				left = wb + "  " + left
-			} else {
-				left = wb
-			}
+	left := renderChrome(m.chrome, m.opts.Color)
+	if len(m.watched) > 0 {
+		wb := fmt.Sprintf("◉ watching %d", len(m.watched))
+		if m.opts.Color {
+			wb = userStyle.Render(wb)
 		}
-		if left == "" {
+		if left != "" {
+			left = wb + "  " + left
+		} else {
+			left = wb
+		}
+	}
+	if left == "" {
+		if m.busy {
+			left = dimStyle.Render("Enter steers · Ctrl+C cancels")
+		} else {
 			left = dimStyle.Render("/dispatch · Ctrl+M model · Shift+Enter newline · /help")
 		}
 	}
@@ -1731,11 +1955,13 @@ func (m *TUI) View() string {
 	transcript.WriteString(m.splash())
 	hasRunningTool := false
 	prevCompact := false
-	for _, e := range m.entries {
+	for i := range m.entries {
+		e := &m.entries[i]
 		if e.running {
 			hasRunningTool = true
 		}
-		rendered := m.renderEntry(e, innerWidth)
+		streaming := m.busy && i == len(m.entries)-1
+		rendered := m.renderEntry(e, innerWidth, streaming)
 		if rendered == "" {
 			continue
 		}
