@@ -109,7 +109,7 @@ var (
 		"figuring out what we actually need…",
 		"don't bother me…",
 		"getting coffee…",
-		"getting to the top…",
+		"summiting…",
 		"bonking…",
 		"hopefully not bonking…",
 		"locked in…",
@@ -128,7 +128,7 @@ var (
 		"breaking trail…",
 		"skinning up the ridge…",
 		"reading the snowpack…",
-		"clipping the chains…",
+		"chaining up…",
 		"sending the pitch…",
 		"checking the beta…",
 		"shaving grams off the pack…",
@@ -138,6 +138,17 @@ var (
 		"traversing the bowl…",
 		"brewing at basecamp…",
 		"earning the turns…",
+		// Bob Marley & misc lyrics
+		"one love…",
+		"forever loving jah…",
+		"feel it in the one drop…",
+		"here I am a stone…",
+		"don't be a coconut…",
+		"I just wanted to be one of the strokes…",
+		"wearing tracky bottoms tucked in socks…",
+		"a scary gargoyle on a tower…",
+		"the digital won't let me go…",
+		"fire coming out a monkeys head…",
 	}
 )
 
