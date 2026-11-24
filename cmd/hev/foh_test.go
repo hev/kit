@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -13,14 +14,22 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/hev/kit/internal/foh"
+	"github.com/hev/kit/internal/secrets"
 )
 
 // runHevChild runs this test binary as hev (see TestMain) with an isolated
 // HOME and no inherited provider keys.
 func runHevChild(t *testing.T, home string, env []string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], args...)
 	base := []string{"HEV_TEST_AS_HEV=1", "HOME=" + home, "USERPROFILE=" + home, "PATH=" + os.Getenv("PATH"), "TMUX_TMPDIR=" + t.TempDir()}
 	if v := os.Getenv("SYSTEMROOT"); v != "" {
 		base = append(base, "SYSTEMROOT="+v)
@@ -327,6 +336,10 @@ printf '%s\n' "$*" >> "$OP_ARGV"
 awk '{
   if (sub(/^\{\{ op:\/\/vault\/alpha\/credential \}\}/, "")) c="A"
   else if (sub(/^\{\{ op:\/\/vault\/beta\/credential \}\}/, "")) c="B"
+  else if (match($0, /extra-[C-H]/)) {
+    c=substr($0,RSTART+6,1)
+    sub(/^\{\{ op:\/\/vault\/extra-[C-H]\/credential \}\}/, "")
+  }
   else exit 2
   printf "hev_"; for(i=0;i<32;i++) printf "%s",c; printf "%s",$0
 }'
@@ -336,6 +349,7 @@ awk '{
 	}
 	keyA := "hev_" + strings.Repeat("A", 32)
 	keyB := "hev_" + strings.Repeat("B", 32)
+	var turnSteps atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		workspace := ""
@@ -345,6 +359,13 @@ awk '{
 		case keyB:
 			workspace = "team-b"
 		default:
+			for letter := byte('C'); letter <= 'H'; letter++ {
+				if key == "hev_"+strings.Repeat(string(letter), 32) {
+					workspace = "team-" + strings.ToLower(string(letter))
+				}
+			}
+		}
+		if workspace == "" {
 			t.Error("hosted request did not use a configured credential")
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -352,7 +373,24 @@ awk '{
 		switch r.URL.Path {
 		case "/v1/whoami":
 			fmt.Fprintf(w, `{"author":{"id":"user"},"team":{"id":%q}}`, workspace)
+		case "/v1/inference/models":
+			fmt.Fprintf(w, `{"data":[{"id":"test/model","name":%q}]}`, key)
 		case "/v1/inference/chat/completions":
+			var request foh.ChatRequest
+			if json.NewDecoder(r.Body).Decode(&request) != nil {
+				t.Error("malformed synthetic inference request")
+				return
+			}
+			if request.Model == "test/multi-step" {
+				step := turnSteps.Add(1)
+				if workspace != "team-a" {
+					t.Error("multi-step turn changed credentials")
+				}
+				if step <= 7 {
+					fmt.Fprintf(w, "data: "+`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-%d","type":"function","function":{"name":"glob","arguments":"{\"pattern\":\"*.none\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\ndata: [DONE]\n\n", step)
+					return
+				}
+			}
 			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q}}]}\n\ndata: [DONE]\n\n", workspace+" "+key)
 		default:
 			http.NotFound(w, r)
@@ -399,17 +437,137 @@ api_key_ref = "op://vault/beta/credential"
 	if err != nil || string(calls) != "inject\ninject\n" {
 		t.Fatal("credential resolver did not use exactly one argument-free reference injection per scope")
 	}
-	err = filepath.WalkDir(home, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || !entry.Type().IsRegular() {
-			return err
+	// Each workload starts with its own empty ledger and the default policy.
+	newHome := func(config string) string {
+		t.Helper()
+		h := t.TempDir()
+		if err := os.Mkdir(filepath.Join(h, ".hev"), 0700); err != nil {
+			t.Fatal(err)
 		}
-		data, err := os.ReadFile(path)
-		if strings.Contains(string(data), keyA) || strings.Contains(string(data), keyB) {
-			t.Error("CLI trace, process arguments, or another file contained a credential")
+		if err := os.WriteFile(filepath.Join(h, ".hev", "config.toml"), []byte(config), 0600); err != nil {
+			t.Fatal(err)
 		}
-		return err
-	})
+		return h
+	}
+	burstHome := newHome(fmt.Sprintf(cfg, server.URL))
+	turnHome := newHome(fmt.Sprintf(cfg, server.URL))
+	catalogConfig := fmt.Sprintf(cfg, server.URL)
+	for letter := 'C'; letter <= 'H'; letter++ {
+		catalogConfig += fmt.Sprintf(`[[foh.key_scopes]]
+name = "extra-%s"
+account = "user"
+workspace = "team-%s"
+api_key_ref = "op://vault/extra-%c/credential"
+`, strings.ToLower(string(letter)), strings.ToLower(string(letter)), letter)
+	}
+	catalogHome := newHome(catalogConfig)
+	t.Setenv("HOME", catalogHome)
+	t.Setenv("USERPROFILE", catalogHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(catalogHome, ".config"))
+	t.Setenv("HEV_SECRETS_CACHE", "off")
+	t.Setenv("HEV_SECRETS_POLICY", "")
+	t.Setenv("HEV_SECRETS_READ_LOG", filepath.Join(catalogHome, ".hev", "secrets", "op-reads.log"))
+	t.Setenv("OP_SERVICE_ACCOUNT_TOKEN", "synthetic-op-service-token")
+	t.Setenv("OP_ARGV", filepath.Join(catalogHome, "op-argv"))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	config, err := foh.LoadConfig(filepath.Join(catalogHome, ".hev", "config.toml"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	catalog, err := config.ScopedInference()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	child := func(h, scope, model, workspace string) {
+		childEnv := append(append([]string(nil), env...),
+			"OP_ARGV="+filepath.Join(h, "op-argv"), "HEV_TEST_ARGV_LOG="+filepath.Join(h, "hev-argv"))
+		out, stderr, code := runHevChild(t, h, childEnv, "foh", "--once", "ping", "--model", "scope/"+scope+"/"+model)
+		if code != 0 || !strings.HasSuffix(strings.TrimSpace(out), workspace+" [REDACTED]") ||
+			strings.Contains(stderr, keyA) || strings.Contains(stderr, keyB) {
+			t.Errorf("%s did not complete with the selected workspace and redacted output (exit %d)", model, code)
+		}
+	}
+	var workloads sync.WaitGroup
+	for i := range 8 {
+		workloads.Go(func() {
+			if i%2 == 0 {
+				child(burstHome, "alpha", "test/model", "team-a")
+			} else {
+				child(burstHome, "beta", "test/model", "team-b")
+			}
+		})
+	}
+	workloads.Go(func() { child(turnHome, "alpha", "test/multi-step", "team-a") })
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	models, _, catalogErr := catalog.Models(ctx, false)
+	workloads.Wait()
+	if catalogErr != nil || len(models) != 8 {
+		t.Fatalf("the eight-scope catalog did not finish under the default budget: %d models, %v", len(models), catalogErr)
+	}
+	for _, scope := range config.KeyScopes {
+		found := false
+		for _, model := range models {
+			if model.ID == "scope/"+scope.Name+"/test/model" && model.Name == "[REDACTED] ("+scope.Name+")" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("catalog omitted the redacted model for %s", scope.Name)
+		}
+	}
+	if turnSteps.Load() != 8 {
+		t.Errorf("multi-step turn made %d inference requests, want 8", turnSteps.Load())
+	}
+	for _, h := range []string{burstHome, turnHome, catalogHome} {
+		calls, err := os.ReadFile(filepath.Join(h, "op-argv"))
+		if err != nil || string(calls) != strings.Repeat("inject\n", 8) {
+			t.Error("each successful workload must make exactly eight argument-free reads")
+		}
+		data, err := os.ReadFile(filepath.Join(h, ".hev", "secrets", "budget.json"))
+		var ledger struct{ Spends []secrets.Spend }
+		if err != nil || json.Unmarshal(data, &ledger) != nil || len(ledger.Spends) != 8 {
+			t.Error("expected eight charged reads in one isolated ledger")
+			continue
+		}
+		for _, spend := range ledger.Spends {
+			var used int
+			for _, other := range ledger.Spends {
+				age := spend.At.Sub(other.At)
+				if age >= 0 && age < time.Minute && spend.Caller == other.Caller {
+					used += other.Requests
+				}
+				if spend.Caller != other.Caller {
+					t.Error("workload did not share one caller budget")
+				}
+			}
+			if used > 5 {
+				t.Error("workload exceeded five charged reads in a rolling minute")
+			}
+		}
+	}
+	for _, h := range []string{home, burstHome, turnHome} {
+		data, err := os.ReadFile(filepath.Join(h, "hev-argv"))
+		if err != nil || len(data) == 0 {
+			t.Error("missing CLI process argument evidence")
+		}
+	}
+	for _, h := range []string{home, burstHome, turnHome, catalogHome} {
+		err = filepath.WalkDir(h, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || !entry.Type().IsRegular() {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			for letter := 'A'; letter <= 'H'; letter++ {
+				if bytes.Contains(data, []byte("hev_"+strings.Repeat(string(letter), 32))) {
+					t.Error("CLI trace, process arguments, or another file contained a credential")
+				}
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

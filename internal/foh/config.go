@@ -267,16 +267,16 @@ func (c Config) ResolveModel(flag string, favorites []string, available func(id 
 
 // ResolveSecretRef reads a secret reference through hev secrets. Tests replace it.
 var ResolveSecretRef = func(ctx context.Context, ref string) (string, error) {
-	return resolveSecretRef(ctx, ref, time.Hour)
+	return resolveSecretRef(ctx, ref, time.Hour, 0)
 }
 
-func resolveSecretRef(ctx context.Context, ref string, ttl time.Duration) (string, error) {
+func resolveSecretRef(ctx context.Context, ref string, ttl, callerWait time.Duration) (string, error) {
 	uri, err := secrets.ExpandRef(ref)
 	if err != nil {
 		return "", err
 	}
 	refs := []secrets.Ref{{Name: "FOH_API_KEY", URI: uri, TTL: ttl}}
-	values, err := secrets.ResolveWith(ctx, refs, secrets.Options{Caller: secrets.DefaultCaller("hev foh"), Notice: io.Discard})
+	values, err := secrets.ResolveWith(ctx, refs, secrets.Options{Caller: secrets.DefaultCaller("hev foh"), Notice: io.Discard, CallerWait: callerWait})
 	if err != nil {
 		return "", err
 	}

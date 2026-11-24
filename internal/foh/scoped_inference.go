@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	scopedModelPrefix = "scope/"
-	maxKeyScopes      = 8
-	scopeReadTimeout  = 10 * time.Second
+	scopedModelPrefix   = "scope/"
+	maxKeyScopes        = 8
+	scopeResolveTimeout = 75 * time.Second
+	scopeVerifyTimeout  = 10 * time.Second
 )
 
 var (
@@ -70,7 +71,7 @@ func (c Config) ScopedInference() (Provider, error) {
 	return &scopedInference{
 		service: service, scopes: append([]KeyScope(nil), c.KeyScopes...),
 		resolve: func(ctx context.Context, ref string) (string, error) {
-			return resolveSecretRef(ctx, ref, 0)
+			return resolveSecretRef(ctx, ref, 0, scopeResolveTimeout)
 		},
 	}, nil
 }
@@ -95,13 +96,19 @@ func (p *scopedInference) scope(model string) (KeyScope, string, error) {
 }
 
 func (p *scopedInference) client(ctx context.Context, scope KeyScope) (*Client, error) {
-	ctx, cancel := context.WithTimeout(ctx, scopeReadTimeout)
-	defer cancel()
 	key, err := p.resolve(ctx, scope.APIKeyRef)
+	switch {
+	case errors.Is(err, context.Canceled):
+		return nil, errors.New("Club Kit credential resolution canceled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, errors.New("timed out resolving a Club Kit credential for the selected scope")
+	}
 	if err != nil || !hostedTokenPattern.MatchString(key) {
 		return nil, errors.New("could not resolve a Club Kit credential for the selected scope")
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, scopeVerifyTimeout)
+	defer cancel()
 	client := NewClient(p.service, key)
 	req, err := client.newRequest(ctx, http.MethodGet, "/v1/whoami", nil)
 	if err != nil {

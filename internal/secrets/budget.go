@@ -110,15 +110,31 @@ func hostPolicy() (Policy, error) {
 // withLedger locks across processes, reserves before a request, and fails
 // closed on corruption or write failure. No secret, URI or token is stored.
 func withLedger(now time.Time, f func(*ledger) error) error {
+	return withLedgerContext(context.Background(), now, f)
+}
+
+func withLedgerContext(ctx context.Context, now time.Time, f func(*ledger) error) error {
 	dir := policyDir()
 	if err := platformops.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	unlock, err := platformops.LockPath(filepath.Join(dir, "budget.lock"), false)
-	if err != nil {
-		return err
+	lock := filepath.Join(dir, "budget.lock")
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		unlock, err := platformops.LockPath(lock, true)
+		if err == nil {
+			defer unlock()
+			break
+		}
+		if !platformops.IsLockBusy(err) {
+			return err
+		}
+		if err := waitForBudget(ctx, 20*time.Millisecond); err != nil {
+			return err
+		}
 	}
-	defer unlock()
 	path := filepath.Join(dir, "budget.json")
 	l := ledger{Warnings: map[string]bool{}}
 	b, err := os.ReadFile(path)
@@ -168,17 +184,42 @@ func reserve(now time.Time, caller, provider string, n int) error {
 	return reserveWith(now, caller, provider, n, nil)
 }
 func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error {
+	return reserveWithContext(context.Background(), now, caller, provider, n, c)
+}
+
+const callerThrottleMessage = "secrets budget: caller throttled; wait for the rolling window or raise host policy"
+
+type callerThrottle struct{ retryAt time.Time }
+
+func (*callerThrottle) Error() string { return callerThrottleMessage }
+
+func waitForBudget(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
+}
+
+func reserveWithContext(ctx context.Context, now time.Time, caller, provider string, n int, c *Cache) error {
 	p, err := hostPolicy()
 	if err != nil {
 		return fmt.Errorf("secrets budget: %v", err)
 	}
 	caller = sanitizeField(caller, 96)
-	err = withLedger(now, func(l *ledger) error {
+	err = withLedgerContext(ctx, now, func(l *ledger) error {
 		s := budgetView(p, l, now)
 		used := 0
+		var oldest time.Time
 		for _, v := range l.Spends {
 			if v.Caller == caller && now.Sub(v.At) < time.Minute {
 				used += v.Requests
+				if oldest.IsZero() || v.At.Before(oldest) {
+					oldest = v.At
+				}
 			}
 		}
 		reason := ""
@@ -201,6 +242,9 @@ func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error 
 		if reason != "" && !(p.Override != "" && p.Override != l.Override) {
 			l.Throttles++
 			l.LastCaller = caller
+			if reason == "caller throttled" && n <= p.CallerMinute && !oldest.IsZero() {
+				return &callerThrottle{retryAt: oldest.Add(time.Minute)}
+			}
 			return fmt.Errorf("secrets budget: %s; wait for the rolling window or raise host policy", reason)
 		}
 		if reason != "" {
@@ -213,6 +257,9 @@ func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error 
 		return nil
 	})
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if !IsBudgetError(err) {
 			err = fmt.Errorf("secrets budget: %v", err)
 		}
