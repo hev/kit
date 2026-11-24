@@ -1714,10 +1714,32 @@ func (m *TUI) renderCard(c *Card, width int, running bool) string {
 
 const streamMarkdownInterval = 75 * time.Millisecond
 
+func wrapPrefixed(prefix, contIndent, text string, width int) string {
+	avail := max(10, width-ansi.StringWidth(prefix))
+	var out []string
+	first := true
+	for _, para := range strings.Split(text, "\n") {
+		wrapped := ansi.Hardwrap(ansi.Wordwrap(para, avail, ""), avail, true)
+		for _, line := range strings.Split(wrapped, "\n") {
+			if first {
+				out = append(out, prefix+line)
+				first = false
+			} else {
+				out = append(out, contIndent+line)
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 	switch e.kind {
 	case entryUser:
-		return userStyle.Render("you › ") + e.text
+		prefix := "you › "
+		if m.opts.Color {
+			prefix = userStyle.Render(prefix)
+		}
+		return wrapPrefixed(prefix, "      ", e.text, width)
 	case entryAssistant:
 		if e.cacheRender != "" && e.cacheWidth == width && e.cacheColor == m.opts.Color {
 			if e.cacheText == e.text {
@@ -1738,11 +1760,19 @@ func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 		if e.running {
 			return renderShimmer(e.text, m.frame, m.opts.Color)
 		}
-		line := e.text
+		toolName, toolArgs, _ := strings.Cut(e.text, " ")
+		head := "· " + toolName
 		if m.opts.Color {
-			line = styleHevCommands(line)
+			head = hevBadgeStyle.Render(hevToolEmoji(toolName, true) + " " + toolName)
 		}
-		out := dimStyle.Render("· ") + line + "\n"
+		if toolArgs != "" {
+			argText := ansi.Truncate(toolArgs, max(10, width-ansi.StringWidth(head)-1), "…")
+			if m.opts.Color {
+				argText = styleHevCommands(argText)
+			}
+			head += " " + argText
+		}
+		out := head + "\n"
 		if e.detail != "" {
 			dl := strings.Split(strings.TrimRight(e.detail, "\n"), "\n")
 			for i, l := range dl {
@@ -1757,13 +1787,20 @@ func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 	case entryCard:
 		return m.renderCard(e.card, width, e.running)
 	case entrySystem:
-		s := sysStyle.Render(e.text)
+		s := wrapPrefixed("", "", e.text, width)
+		if m.opts.Color {
+			s = sysStyle.Render(s)
+		}
 		if e.detail != "" {
-			s += "\n" + dimStyle.Render(e.detail)
+			s += "\n" + dimStyle.Render(wrapPrefixed("", "", e.detail, width))
 		}
 		return s
 	case entryError:
-		return errStyle.Render("✗ " + e.text)
+		prefix := "✗ "
+		if m.opts.Color {
+			return errStyle.Render(wrapPrefixed(prefix, "  ", e.text, width))
+		}
+		return wrapPrefixed(prefix, "  ", e.text, width)
 	}
 	return ""
 }

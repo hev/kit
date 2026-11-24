@@ -44,6 +44,12 @@ func hevToolEmoji(tool string, color bool) string {
 		return "⚡"
 	case "hev review":
 		return "🔎"
+	case "hev evidence":
+		return "📦"
+	case "hev preview":
+		return "🖼"
+	case "hev update":
+		return "⬆"
 	case "hev watch":
 		return "👁"
 	case "hev up", "hev d":
@@ -52,6 +58,16 @@ func hevToolEmoji(tool string, color bool) string {
 		return "■"
 	case "hev version":
 		return "ℹ"
+	case "bash":
+		return "💻"
+	case "read_file":
+		return "📄"
+	case "edit_file":
+		return "✏"
+	case "grep":
+		return "🔎"
+	case "glob":
+		return "📂"
 	default:
 		if strings.HasPrefix(tool, "hev") {
 			return "🔧"
@@ -61,19 +77,27 @@ func hevToolEmoji(tool string, color bool) string {
 }
 
 // detectBashHevCommand inspects a bash tool call's arguments and returns
-// ("hev <subcmd>", "<rest>") when the command invokes `hev ...` directly.
+// ("hev <subcmd>", "<rest>") when the command invokes `hev ...` directly,
+// including piped (|), chained (; / &&), or multi-line commands.
 func detectBashHevCommand(argsJSON string) (tool, action string, ok bool) {
 	cmd := strings.TrimSpace(argField(argsJSON, "command"))
-	if cmd == "" || strings.ContainsAny(cmd, "\n;|&") {
+	if cmd == "" {
 		return "", "", false
 	}
-	fields := strings.Fields(cmd)
+	firstLine, _, _ := strings.Cut(cmd, "\n")
+	fields := strings.Fields(firstLine)
 	if len(fields) < 2 || fields[0] != "hev" {
 		return "", "", false
 	}
-	tool = "hev " + fields[1]
-	if len(fields) > 2 {
-		action = truncateLine(strings.Join(fields[2:], " "), 40)
+	sub := strings.TrimRight(fields[1], ";|&")
+	if sub == "" {
+		return "", "", false
+	}
+	tool = "hev " + sub
+	rest := strings.TrimSpace(strings.TrimPrefix(firstLine, fields[0]))
+	rest = strings.TrimSpace(strings.TrimPrefix(rest, fields[1]))
+	if rest != "" {
+		action = truncateLine(rest, 48)
 	}
 	return tool, action, true
 }

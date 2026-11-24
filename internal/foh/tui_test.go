@@ -346,6 +346,23 @@ func TestTUIInputWrapAndSinglePromptCaret(t *testing.T) {
 			t.Fatalf("input line width %d exceeds inner width 38: %q", w, line)
 		}
 	}
+	// Long user messages in the transcript scroll window must wrap instead of clipping.
+	userRendered := ansi.Strip(m.renderEntry(&entry{kind: entryUser, text: sentence}, 38, false))
+	if !strings.Contains(userRendered, "alpha") || !strings.Contains(userRendered, "mu") || !strings.Contains(userRendered, "\n") {
+		t.Fatalf("entryUser did not wrap:\n%s", userRendered)
+	}
+	for _, line := range strings.Split(userRendered, "\n") {
+		if w := ansi.StringWidth(line); w > 38 {
+			t.Fatalf("entryUser line width %d exceeds 38: %q", w, line)
+		}
+	}
+	// Piped/chained bash hev commands must still be detected as styled hev cards.
+	if tool, action, ok := detectBashHevCommand(`{"command":"hev orchestrate show kit-edge --host oven | sed -n '1,5p'"}`); !ok || tool != "hev orchestrate" || !strings.Contains(action, "show kit-edge") {
+		t.Fatalf("piped bash hev = (%q, %q, %v)", tool, action, ok)
+	}
+	if tool, _, ok := detectBashHevCommand(`{"command":"hev orchestrate show a --host oven; hev orchestrate show b --host oven"}`); !ok || tool != "hev orchestrate" {
+		t.Fatalf("chained bash hev = (%q, %v)", tool, ok)
+	}
 }
 
 func TestHevDocsMultiSiteResolution(t *testing.T) {
