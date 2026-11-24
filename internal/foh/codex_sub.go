@@ -535,8 +535,14 @@ func responsesInput(msgs []Message) (string, []map[string]any) {
 		case "system":
 			instructions = append(instructions, m.Content)
 		case "user":
-			items = append(items, map[string]any{"type": "message", "role": "user",
-				"content": []map[string]any{{"type": "input_text", "text": m.Content}}})
+			content := make([]map[string]any, 0, len(m.Images)+1)
+			if m.Content != "" || len(m.Images) == 0 {
+				content = append(content, map[string]any{"type": "input_text", "text": m.Content})
+			}
+			for _, img := range m.Images {
+				content = append(content, map[string]any{"type": "input_image", "image_url": img.DataURL()})
+			}
+			items = append(items, map[string]any{"type": "message", "role": "user", "content": content})
 		case "assistant":
 			if m.Content != "" {
 				items = append(items, map[string]any{"type": "message", "role": "assistant",

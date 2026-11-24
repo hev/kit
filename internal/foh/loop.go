@@ -209,6 +209,11 @@ func (a *Agent) injectSteers(steers []string, turn int, emit func(Event)) {
 // Run executes one user turn: stream, run tools, inject steers between tool
 // calls, and repeat until the model answers without tool calls.
 func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
+	return a.RunWithImages(ctx, user, nil, emit)
+}
+
+// RunWithImages executes one user turn with optional attached images.
+func (a *Agent) RunWithImages(ctx context.Context, user string, images []ImageAttachment, emit func(Event)) error {
 	if emit == nil {
 		emit = func(Event) {}
 	}
@@ -217,9 +222,20 @@ func (a *Agent) Run(ctx context.Context, user string, emit func(Event)) error {
 	turn := a.turn
 	a.mu.Unlock()
 	a.syncSecrets()
-	a.append(Message{Role: "user", Content: user})
+	a.append(Message{Role: "user", Content: user, Images: append([]ImageAttachment(nil), images...)})
 	cur := a.Model()
-	a.Session.Write(Record{Type: "user", Turn: turn, Role: "user", Content: user, Model: cur, Provider: a.ProviderFor(cur)})
+	logged := user
+	if len(images) > 0 {
+		var markers []string
+		for _, img := range images {
+			markers = append(markers, fmt.Sprintf("[image %s %s]", img.MediaType, formatByteSize(img.Bytes)))
+		}
+		if logged != "" {
+			logged += "\n"
+		}
+		logged += strings.Join(markers, " ")
+	}
+	a.Session.Write(Record{Type: "user", Turn: turn, Role: "user", Content: logged, Model: cur, Provider: a.ProviderFor(cur)})
 	steps := a.MaxSteps
 	if steps <= 0 {
 		steps = DefaultMaxSteps
