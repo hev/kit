@@ -105,7 +105,7 @@ func TestHEVDNeverPastesIntoUnregisteredTerminal(t *testing.T) {
 	old := e.Command
 	e.Command = func(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
 		if name == "tmux" && args[0] == "list-panes" {
-			return "desk\t%7\t700\tcodex\t/work\t\t\n", nil
+			return "desk\x1f%7\x1f700\x1fcodex\x1f/work\x1f\x1f\n", nil
 		}
 		if name == "tmux" && (args[0] == "load-buffer" || args[0] == "paste-buffer" || args[0] == "send-keys") {
 			t.Fatal("HTTP triggered terminal input")

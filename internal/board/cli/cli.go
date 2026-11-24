@@ -31,6 +31,7 @@ import (
 	"github.com/hev/kit/internal/board/who"
 	"github.com/hev/kit/internal/hooks"
 	"github.com/hev/kit/internal/storagemode"
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 func Run(args []string) error { return RunWorkspace(args, workspace.Selection{}) }
@@ -177,6 +178,9 @@ func logged(h http.Handler) http.Handler {
 
 func baseURL() string { return strings.TrimRight(settings.Current.URL, "/") }
 
+// KitClient, when set, sends board calls to the signed-in team.
+var KitClient *kitapi.Client
+
 var client = &http.Client{Timeout: 10 * time.Second, Transport: inProcess{}}
 
 func call(method, path string, in, out any) error {
@@ -198,6 +202,24 @@ func send(method, path, contentType string, body io.Reader, out any, hc *http.Cl
 }
 
 func sendContext(ctx context.Context, method, path, contentType string, body io.Reader, out any, hc *http.Client) error {
+	if KitClient != nil {
+		p, err := url.Parse(path)
+		if err != nil {
+			return err
+		}
+		var payload []byte
+		if body != nil {
+			payload, err = io.ReadAll(body)
+			if err != nil {
+				return err
+			}
+		}
+		raw, err := KitClient.DoRaw(ctx, method, "/v1/board"+strings.TrimPrefix(p.Path, "/api"), p.Query(), payload)
+		if err != nil || out == nil {
+			return err
+		}
+		return json.Unmarshal(raw, out)
+	}
 	if baseURL() == "" {
 		return errors.New("configure board.url or FACTORY_BOARD_URL")
 	}
