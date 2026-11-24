@@ -539,3 +539,28 @@ func TestTUIFooterDoesNotDuplicateMainShimmer(t *testing.T) {
 		t.Fatalf("empty-chrome busy footer missing steer hint: %q", footerEmpty)
 	}
 }
+
+func TestTUIEscCancelsBusyTurnWithoutQuittingIdle(t *testing.T) {
+	m, _ := newTestTUI(t, &scripted{})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	// Idle: Esc must not quit.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.quitting || cmd != nil {
+		t.Fatalf("idle Esc should not quit: quitting=%v cmd=%v", m.quitting, cmd)
+	}
+	// Busy: Esc cancels active turn and clears queued auto-turns.
+	cancelled := false
+	m.setBusy(true)
+	m.cancel = func() { cancelled = true }
+	m.pendingAuto = []string{"queued"}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !cancelled {
+		t.Fatal("busy Esc did not call cancel")
+	}
+	if len(m.pendingAuto) != 0 {
+		t.Fatalf("busy Esc left pendingAuto = %v", m.pendingAuto)
+	}
+	if m.quitting {
+		t.Fatal("busy Esc should not quit the TUI")
+	}
+}

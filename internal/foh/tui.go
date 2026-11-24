@@ -685,12 +685,21 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyCtrlC:
 		if m.busy && m.cancel != nil {
+			m.pendingAuto = nil
 			m.cancel()
 			m.system("turn cancelled")
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
+	case msg.Type == tea.KeyEsc:
+		if m.busy && m.cancel != nil {
+			m.pendingAuto = nil
+			m.cancel()
+			m.system("turn cancelled")
+			return m, nil
+		}
+		return m, nil
 	case msg.Type == tea.KeyCtrlO:
 		m.expandCards = !m.expandCards
 		return m, nil
@@ -1950,7 +1959,7 @@ func (m *TUI) statusChromeBar(width int) string {
 	}
 	if left == "" {
 		if m.busy {
-			left = dimStyle.Render("Enter steers · Ctrl+C cancels")
+			left = dimStyle.Render("Enter steers · Esc cancels")
 		} else {
 			left = dimStyle.Render("/dispatch · Ctrl+M model · Shift+Enter newline · /help")
 		}
