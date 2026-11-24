@@ -29,6 +29,10 @@ subscription (codex/... models), with an in-harness model picker, a composable
 system prompt and first-class hev tools (dispatch, peers, board, traces,
 status).
 
+Type / to browse CLI commands. Run /cluster or /board search "swim failover"
+directly and use Ctrl+O to expand command output. /review hands the terminal
+to the review tool. /secrets accepts diagnostic commands only.
+
 hev kit runs without permissions. It's your responsibility to secure your
 compute.
 
@@ -137,7 +141,7 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 		return runFOHOnce(ctx, agent, once, out, cmd.ErrOrStderr())
 	}
 	tui := foh.NewTUI(foh.TUIOptions{
-		Agent: agent, Favorites: favorites, Composer: composer, Version: version.String(),
+		Agent: agent, HevCommands: hevSlashCommands(rootCmd), Favorites: favorites, Composer: composer, Version: version.String(),
 		Cwd: cwd, Workspace: workspace, SummaryModel: cfg.SummaryModel, Color: color,
 		Catalog: func(ctx context.Context) ([]foh.Model, foh.CatalogSource, error) {
 			return router.Models(ctx, false)
@@ -153,6 +157,37 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	return err
+}
+
+// hevSlashCommands derives the kit palette from the same commands as CLI help.
+func hevSlashCommands(root *cobra.Command) []foh.HevSlashCommand {
+	var commands []foh.HevSlashCommand
+	for _, cmd := range root.Commands() {
+		name := cmd.Name()
+		switch name {
+		case "serve", "collect", "browse", "kit", "foh", "init", "onboard", "hook", "completion", "help", "skills-preview":
+			continue
+		}
+		if cmd.Hidden {
+			continue
+		}
+		command := foh.HevSlashCommand{
+			Name: name, Summary: cmd.Short, Group: cmd.GroupID,
+			TakesArg: cmd.HasAvailableSubCommands() || cmd.HasLocalFlags() || cmd.DisableFlagParsing || strings.Contains(cmd.Use, " "),
+		}
+		switch name {
+		case "cluster", "orchestrate", "traces", "cron", "service", "workspace":
+			command.DefaultArgs = []string{"ls"}
+		case "board":
+			command.DefaultArgs = []string{"list"}
+		case "review":
+			command.Mode = foh.HevSlashTerminal
+		case "secrets":
+			command.Mode = foh.HevSlashGuarded
+		}
+		commands = append(commands, command)
+	}
+	return commands
 }
 
 // fohProviders builds the provider router: OpenRouter when a key resolves,
