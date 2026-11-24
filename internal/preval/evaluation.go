@@ -53,8 +53,9 @@ type PullRequest struct {
 
 type Source struct {
 	PullRequest
-	Revision string `json:"revision"`
-	EventID  string `json:"event_id"`
+	Revision   string    `json:"revision"`
+	EventID    string    `json:"event_id"`
+	OccurredAt time.Time `json:"occurred_at,omitzero"`
 }
 
 type Provenance struct {
@@ -111,6 +112,10 @@ type Attribution struct {
 	Correction  *Observation `json:"correction,omitempty"`
 }
 
+func isCorrection(outcome string) bool {
+	return outcome == Superseded || outcome == Corrected || outcome == Reverted
+}
+
 func score(value float64) *float64 { return &value }
 
 // Project uses only successful provider observations. A zero LastActivity
@@ -136,10 +141,18 @@ func Project(link Attribution, observation Observation, previous *Evaluation, st
 	id := sha256.Sum256(key)
 
 	if link.Correction != nil {
+		observedAt := observation.ObservedAt
 		if !slices.Contains([]string{Superseded, Corrected, Reverted}, link.Correction.Outcome) || link.Correction.ObservedAt.After(observation.ObservedAt) {
 			return Evaluation{}, errInvalid
 		}
 		observation = *link.Correction
+		if observation.ObservedAt.IsZero() {
+			return Evaluation{}, errInvalid
+		}
+		// Source identifies the correction. The projection revision is the time
+		// we observed it, which must follow any previous provider poll.
+		observation.Source.OccurredAt = observation.ObservedAt.UTC()
+		observation.ObservedAt = observedAt
 	}
 	if observation.ObservedAt.IsZero() || observation.LastActivity.After(observation.ObservedAt) ||
 		observation.Source.ID <= 0 || !observation.Source.Repository.valid() ||
@@ -185,10 +198,13 @@ func Project(link Attribution, observation Observation, previous *Evaluation, st
 		return Evaluation{}, errInvalid
 	}
 	if !result.ObservedAt.After(previous.ObservedAt) ||
+		isCorrection(previous.Outcome) && (!isCorrection(result.Outcome) ||
+			previous.Source != result.Source && !result.Source.OccurredAt.After(previous.Source.OccurredAt)) ||
 		previous.Outcome == Merged && (result.Outcome == Active || result.Outcome == Stale || result.Outcome == Closed) {
 		return *previous, nil
 	}
-	if previous.Outcome == result.Outcome && previous.Source.PullRequest == result.Source.PullRequest {
+	if previous.Outcome == result.Outcome && previous.Source.PullRequest == result.Source.PullRequest &&
+		(!isCorrection(result.Outcome) || previous.Source == result.Source) {
 		result.Learning = previous.Learning
 		sameLinks := slices.Equal(previous.Provenance.TraceSessionIDs, result.Provenance.TraceSessionIDs) &&
 			slices.Equal(previous.Provenance.EvidenceIDs, result.Provenance.EvidenceIDs)
@@ -221,6 +237,7 @@ func (e *Evaluation) UnmarshalJSON(raw []byte) error {
 func (e Evaluation) Valid() bool {
 	p := e.Provenance
 	if e.Schema != Schema || e.PolicyVersion != PolicyVersion || e.ObservedAt.IsZero() ||
+		e.Source.OccurredAt.After(e.ObservedAt) || !isCorrection(e.Outcome) && !e.Source.OccurredAt.IsZero() ||
 		e.Source.ID <= 0 || !e.Source.Repository.valid() || !identifier.MatchString(e.Source.Revision) || !identifier.MatchString(e.Source.EventID) ||
 		!identifier.MatchString(e.ID) || !identifier.MatchString(p.OrderID) || !identifier.MatchString(p.AttemptID) ||
 		p.TraceSessionIDs == nil || p.EvidenceIDs == nil || !validIDs(p.TraceSessionIDs, 32) || !validIDs(p.EvidenceIDs, 32) ||

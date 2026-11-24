@@ -5,9 +5,37 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 
 	"github.com/hev/kit/internal/preval"
 )
+
+// EvaluationSample reads a bounded transcript excerpt for an exact session.
+func (c *Client) EvaluationSample(ctx context.Context, id string) (string, error) {
+	query := map[string]any{
+		"filters": []any{"session_id", "Eq", id}, "rank_by": []any{"seq", "asc"},
+		"top_k": 16, "include_attributes": []string{"session_id", "text"},
+	}
+	var out struct {
+		Rows []struct {
+			SessionID string `json:"session_id"`
+			Text      string `json:"text"`
+		} `json:"rows"`
+		Error string `json:"error"`
+	}
+	err := c.doContextBounded(ctx, "POST", "/v2/namespaces/"+c.Namespace+"-blocks/query", query, &out, 1<<20)
+	if err != nil || out.Error != "" {
+		return "", errors.New("trace sample unavailable")
+	}
+	var sample strings.Builder
+	for _, row := range out.Rows[:min(len(out.Rows), 16)] {
+		if row.SessionID == id && row.Text != "" && sample.Len() < 4800 {
+			sample.WriteString(row.Text[:min(len(row.Text), 4799-sample.Len())])
+			sample.WriteByte('\n')
+		}
+	}
+	return sample.String(), nil
+}
 
 func (c *Client) ReadEvaluation(id string) (*preval.Evaluation, string, error) {
 	doc, err := c.readSessionSource(id)

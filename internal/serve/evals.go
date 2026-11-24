@@ -125,9 +125,6 @@ func (s *Server) joinedCorpus(rows []trace.SessionRow) ([]map[string]any, error)
 }
 func (s *Server) sessionData(row trace.SessionRow, blocks []trace.BlockRow) (map[string]any, error) {
 	data := buildSessionImages(row, blocks, s.imageLocal)
-	if row.Evaluation != nil {
-		data["evaluation"] = row.Evaluation
-	}
 	data["eval_baseline"] = s.sessionBaseline(projectName(row.RepoURL))
 	reader, ok := s.reader.(evalReader)
 	if !ok {

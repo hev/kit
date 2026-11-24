@@ -9,11 +9,16 @@ import (
 	"github.com/hev/kit/internal/preval"
 )
 
-func orderEvaluationDocument(order, attempt string) (map[string]json.RawMessage, string, error) {
+func orderEvaluationDocument(workspace, order, attempt string) (map[string]json.RawMessage, string, error) {
 	if !filepath.IsLocal(order) || filepath.Base(order) != order {
 		return nil, "", preval.ErrConflict
 	}
-	path := filepath.Join(Root(), order, "result.json")
+	dir := filepath.Join(Root(), order)
+	var meta Meta
+	if readJSON(filepath.Join(dir, "meta.json"), &meta) != nil || meta.Forward != nil || checkRunWorkspace(workspace, meta) != nil {
+		return nil, "", preval.ErrConflict
+	}
+	path := filepath.Join(dir, "result.json")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", err
@@ -30,8 +35,8 @@ func orderEvaluationDocument(order, attempt string) (map[string]json.RawMessage,
 }
 
 // ReadEvaluation checks the active attempt identity before reading its projection.
-func ReadEvaluation(order, attempt string) (*preval.Evaluation, error) {
-	document, _, err := orderEvaluationDocument(order, attempt)
+func ReadEvaluation(workspace, order, attempt string) (*preval.Evaluation, error) {
+	document, _, err := orderEvaluationDocument(workspace, order, attempt)
 	if err != nil || document["evaluation"] == nil {
 		return nil, err
 	}
@@ -42,31 +47,33 @@ func ReadEvaluation(order, attempt string) (*preval.Evaluation, error) {
 
 // SetEvaluation patches the existing result without reserializing other fields
 // through the current Result type.
-func SetEvaluation(eval preval.Evaluation) error { return SetEvaluationConditional(eval, "") }
+func SetEvaluation(workspace string, eval preval.Evaluation) error {
+	return SetEvaluationConditional(workspace, eval, "")
+}
 
 func OrderEvaluationRevision(order, attempt string, evaluation *preval.Evaluation) string {
 	return preval.Revision([]string{order, attempt}, evaluation)
 }
 
-func SetEvaluationConditional(eval preval.Evaluation, expected string) error {
-	_, err := patchEvaluation(eval, expected)
+func SetEvaluationConditional(workspace string, eval preval.Evaluation, expected string) error {
+	_, err := patchEvaluation(workspace, eval, expected)
 	return err
 }
 
-func ClaimEvaluationLearning(eval preval.Evaluation) (bool, error) {
+func ClaimEvaluationLearning(workspace string, eval preval.Evaluation) (bool, error) {
 	if eval.Learning.Status != "failed" {
 		return false, preval.ErrConflict
 	}
-	return patchEvaluation(eval, "")
+	return patchEvaluation(workspace, eval, "")
 }
 
-func patchEvaluation(eval preval.Evaluation, expected string) (bool, error) {
+func patchEvaluation(workspace string, eval preval.Evaluation, expected string) (bool, error) {
 	release, err := lockRoot()
 	if err != nil {
 		return false, err
 	}
 	defer release()
-	doc, path, err := orderEvaluationDocument(eval.Provenance.OrderID, eval.Provenance.AttemptID)
+	doc, path, err := orderEvaluationDocument(workspace, eval.Provenance.OrderID, eval.Provenance.AttemptID)
 	if err != nil {
 		return false, err
 	}

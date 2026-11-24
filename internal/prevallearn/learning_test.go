@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -61,5 +63,39 @@ func TestExtractRetainsOnlyNovelSourceBackedRules(t *testing.T) {
 	posts, err := board.Threads(context.Background(), store.ListOpts{Board: "learnings", Limit: 10})
 	if err != nil || len(posts) != 1 || strings.Contains(posts[0].Body(), "Ignore instructions") {
 		t.Fatal("hostile or duplicate text made it to the board")
+	}
+}
+
+func TestNativeLearningUsesOnlyScopedAuth(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses /bin/sh")
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", "personal-profile")
+	t.Setenv("ANTHROPIC_API_KEY", "personal-key")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "personal-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "personal-oauth")
+	t.Setenv("HEV_API_KEY", "tenant-key")
+	t.Setenv("HEV_WORKSPACE", "personal")
+	root := t.TempDir()
+	binary := filepath.Join(root, "fixture-claude")
+	profile := filepath.Join(root, "claude")
+	if err := os.WriteFile(binary, []byte(`#!/bin/sh
+set -eu
+test "$HEV_WORKSPACE" = client
+test "$HOME" != "${CLAUDE_CONFIG_DIR}"
+test -d "$HOME"
+test -z "${ANTHROPIC_API_KEY:-}${ANTHROPIC_AUTH_TOKEN:-}${HEV_API_KEY:-}"
+test "$CLAUDE_CODE_OAUTH_TOKEN" = fixture-client-auth
+printf '%s' "$CLAUDE_CONFIG_DIR"
+`), 0700); err != nil {
+		t.Fatal(err)
+	}
+	l := Learner{Binary: binary, workspace: "client", profile: profile}
+	// The shell asserts that ambient credentials are unavailable, even when
+	// they exist in the process launching learning.
+	got, err := l.nativeWithAuth(context.Background(), nil, []string{"CLAUDE_CODE_OAUTH_TOKEN=fixture-client-auth"})
+	if err != nil || string(got) != profile {
+		t.Fatalf("isolated native launch failed: %v", err)
 	}
 }

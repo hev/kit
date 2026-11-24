@@ -115,7 +115,7 @@ func (r *Reconciler) reconcile(ctx context.Context, pr PullRequest, activity tim
 			}
 			observation = &snapshot
 		}
-		if err := r.repair(ctx, link.Attribution, *observation, r.providers[link.ProviderIndex], learn); err != nil {
+		if err := r.repair(ctx, link.Attribution, *observation, learn); err != nil {
 			failed = true
 		}
 	}
@@ -125,7 +125,7 @@ func (r *Reconciler) reconcile(ctx context.Context, pr PullRequest, activity tim
 	return nil
 }
 
-func (r *Reconciler) repair(ctx context.Context, link Attribution, observation Observation, provider Provider, learn bool) error {
+func (r *Reconciler) repair(ctx context.Context, link Attribution, observation Observation, learn bool) error {
 	old, err := r.documents.ReadOrder(ctx, link.Provenance)
 	if err != nil {
 		return err
@@ -168,6 +168,16 @@ func (r *Reconciler) repair(ctx context.Context, link Attribution, observation O
 	claimed, err := r.documents.ClaimLearning(ctx, evaluation)
 	if err != nil || !claimed {
 		return err
+	}
+	var provider Provider
+	for _, configured := range r.providers {
+		if configured.Repository == evaluation.Source.PullRequest.Repository {
+			provider = configured
+			break
+		}
+	}
+	if provider.Token == "" {
+		return nil
 	}
 	out, err := r.learner.Learn(ctx, provider, evaluation)
 	if err != nil {

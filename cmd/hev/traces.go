@@ -16,6 +16,8 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/hev/kit/internal/preval"
+
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/harness"
 	"github.com/hev/kit/internal/store"
@@ -202,7 +204,16 @@ func runTrace(cmd *cobra.Command, args []string) error {
 	if traceJSON {
 		turns = blockTurns(cl, turns)
 	}
-	return showNamespaceTurns(turns, os.Stdout)
+	if !traceJSON {
+		if reader, ok := cl.(interface {
+			ReadEvaluation(string) (*preval.Evaluation, string, error)
+		}); ok {
+			if evaluation, _, err := reader.ReadEvaluation(turns[0].SessionID); err == nil && evaluation != nil && evaluation.Valid() {
+				fmt.Fprintf(cmd.OutOrStdout(), "PR outcome %s. %s\n", evaluation.Outcome, evaluation.Reason)
+			}
+		}
+	}
+	return showNamespaceTurns(turns, cmd.OutOrStdout())
 }
 
 // blockTurns prefers the session's whole-block rows for --json: unlike the

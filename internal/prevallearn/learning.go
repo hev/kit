@@ -34,14 +34,17 @@ var errLearning = errors.New("pull request learning could not finish")
 var paths = regexp.MustCompile(`(?i)(?:https?://|file://|[a-z]:[\\/]|(?:~|\.{1,2})?[/\\])[a-z0-9_./\\~:@%+?&=#-]+`)
 
 type Learner struct {
-	Board   learningBoard
-	Root    string
-	Model   string
-	Binary  string
-	Sources func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)
-	scrub   *redact.Scrubber
-	secrets []string
-	run     func(context.Context, []byte) ([]byte, error)
+	Board     learningBoard
+	Root      string
+	Model     string
+	Binary    string
+	Sources   func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)
+	scrub     *redact.Scrubber
+	secrets   []string
+	workspace string
+	profile   string
+	auth      func(context.Context) ([]string, []string, error)
+	run       func(context.Context, []byte) ([]byte, error)
 }
 
 type learningBoard interface {
@@ -49,20 +52,12 @@ type learningBoard interface {
 	CreateThread(context.Context, store.NewThread) (*store.Thread, error)
 }
 
-func New(root, model string, sources func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)) (*Learner, error) {
-	board, err := store.NewFiles(root)
-	if err != nil {
-		return nil, errLearning
-	}
+func NewWithBoard(board *store.Store, root, model string, sources func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)) (*Learner, error) {
 	return newLearner(board, root, model, sources)
 }
 
 func newLearner(board learningBoard, root, model string, sources func(context.Context, preval.Evaluation) ([]preval.Excerpt, error)) (*Learner, error) {
 	if model == "" || sources == nil {
-		return nil, errLearning
-	}
-	binary, err := exec.LookPath("claude")
-	if err != nil {
 		return nil, errLearning
 	}
 	var salt [32]byte
@@ -73,12 +68,22 @@ func newLearner(board learningBoard, root, model string, sources func(context.Co
 	if err != nil {
 		return nil, errLearning
 	}
-	learner := &Learner{Board: board, Root: root, Model: model, Binary: binary, Sources: sources, scrub: scrubber}
+	learner := &Learner{Board: board, Root: root, Model: model, Sources: sources, scrub: scrubber}
 	learner.run = learner.native
 	return learner, nil
 }
 
+// Scope selects the workspace identity and explicitly resolved credentials.
+func (l *Learner) Scope(workspace, profile string, auth func(context.Context) ([]string, []string, error)) {
+	l.workspace, l.profile, l.auth = workspace, profile, auth
+}
+
 func (l *Learner) clean(s string) string {
+	for _, secret := range l.secrets {
+		if secret != "" {
+			s = strings.ReplaceAll(s, secret, "[redacted]")
+		}
+	}
 	s = strings.ToValidUTF8(s, " ")
 	s, _ = l.scrub.Text(s)
 	s = paths.ReplaceAllString(s, "[path removed]")
@@ -110,6 +115,20 @@ type judgment struct {
 }
 
 func (l *Learner) Learn(ctx context.Context, provider preval.Provider, evaluation preval.Evaluation) (preval.Learning, error) {
+	call := *l
+	call.secrets = append(slices.Clone(l.secrets), provider.Token, provider.HookSecret,
+		os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("ANTHROPIC_AUTH_TOKEN"), os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"))
+	if l.auth != nil {
+		env, values, err := l.auth(ctx)
+		if err != nil || len(env) == 0 {
+			return preval.Learning{}, errLearning
+		}
+		call.secrets = append(call.secrets, values...)
+		call.run = func(ctx context.Context, input []byte) ([]byte, error) {
+			return call.nativeWithAuth(ctx, input, env)
+		}
+	}
+	l = &call
 	if evaluation.Source.PullRequest.Repository != provider.Repository {
 		return preval.Learning{}, errLearning
 	}
@@ -133,17 +152,7 @@ func (l *Learner) Learn(ctx context.Context, provider preval.Provider, evaluatio
 		}
 		known = append(known, l.clean(body))
 	}
-	material := make([]preval.Excerpt, 0, len(local)+len(review))
-	secrets := append([]string{provider.Token, provider.HookSecret, os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")}, l.secrets...)
-	for _, item := range append(local, review...) {
-		for _, secret := range secrets {
-			if secret != "" {
-				item.Text = strings.ReplaceAll(item.Text, secret, "[redacted]")
-			}
-		}
-		material = append(material, item)
-	}
-	return l.extract(ctx, evaluation, material, known)
+	return l.extract(ctx, evaluation, append(local, review...), known)
 }
 
 func (l *Learner) extract(ctx context.Context, evaluation preval.Evaluation, material []preval.Excerpt, known []string) (preval.Learning, error) {
@@ -277,6 +286,10 @@ func (o *cappedOutput) Write(p []byte) (int, error) {
 }
 
 func (l *Learner) native(ctx context.Context, input []byte) ([]byte, error) {
+	return l.nativeWithAuth(ctx, input, nil)
+}
+
+func (l *Learner) nativeWithAuth(ctx context.Context, input []byte, auth []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 65*time.Second)
 	defer cancel()
 	dir, err := os.MkdirTemp("", "hev-pr-learning-")
@@ -284,16 +297,30 @@ func (l *Learner) native(ctx context.Context, input []byte) ([]byte, error) {
 		return nil, errLearning
 	}
 	defer os.RemoveAll(dir)
-	cmd := exec.CommandContext(ctx, l.Binary, "-p", "--bare", "--no-session-persistence", "--disable-slash-commands",
+	binary := l.Binary
+	if binary == "" {
+		binary = "claude"
+	}
+	cmd := exec.CommandContext(ctx, binary, "-p", "--bare", "--no-session-persistence", "--disable-slash-commands",
 		"--strict-mcp-config", "--tools", "", "--model", l.Model, "--system-prompt", systemPrompt)
 	cmd.Dir = dir
 	// Pass only explicitly approved Claude credentials and basic runtime
 	// variables. Provider tokens and tenant writer keys stay in the parent.
-	for _, key := range []string{"PATH", "SYSTEMROOT", "USERPROFILE", "HOME", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+	for _, key := range []string{"PATH", "SYSTEMROOT"} {
 		if value, ok := os.LookupEnv(key); ok {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 	}
+	home := filepath.Join(dir, "home")
+	if err := os.Mkdir(home, 0700); err != nil {
+		return nil, errLearning
+	}
+	profile := l.profile
+	if profile == "" {
+		profile = filepath.Join(home, ".claude")
+	}
+	cmd.Env = append(cmd.Env, "HOME="+home, "USERPROFILE="+home, "CLAUDE_CONFIG_DIR="+profile, "HEV_WORKSPACE="+l.workspace)
+	cmd.Env = append(cmd.Env, auth...)
 	cmd.Stdin = bytes.NewReader(input)
 	cmd.WaitDelay = 2 * time.Second
 	var out cappedOutput

@@ -189,12 +189,26 @@ func TestStaleAndCorrectionRequireEvidence(t *testing.T) {
 		t.Fatalf("ordinary edit penalized merge: %v", err)
 	}
 	later.Outcome, later.Source.ID = Reverted, 2
+	// A successful poll occurred after the correction event but before it
+	// was registered. Its wall clock must not mask the correction.
+	merged.ObservedAt = later.ObservedAt.Add(time.Second)
 	link.Correction = &later
-	observation.ObservedAt = later.ObservedAt.Add(time.Second)
+	observation.ObservedAt = later.ObservedAt.Add(2 * time.Second)
 	reverted, err := Project(link, observation, &merged, 0, false)
 	if err != nil || reverted.Outcome != Reverted || reverted.ID != merged.ID || reverted.Source.ID != 2 {
 		t.Fatalf("explicit revert failed: %v", err)
 	}
+	observation.ObservedAt = observation.ObservedAt.Add(time.Minute)
+	replay, err := Project(link, observation, &reverted, 0, false)
+	if err != nil || !replay.ObservedAt.Equal(reverted.ObservedAt) {
+		t.Fatalf("correction replay changed projection: %v", err)
+	}
+	link.Correction = nil
+	poll, err := Project(link, observation, &reverted, 0, false)
+	if err != nil || poll.Outcome != Reverted {
+		t.Fatalf("ordinary poll erased correction: %v", err)
+	}
+	link.Correction = &later
 	other := observation
 	other.Source.ID = 3
 	if _, err := Project(link, other, &merged, 0, false); err == nil {

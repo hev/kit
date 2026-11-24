@@ -105,7 +105,7 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 		if json.Unmarshal(req.Evaluation, &evaluation) != nil || !evaluation.Valid() || evaluation.Provenance.OrderID != q.Name {
 			return Reply{}, ErrRejected
 		}
-		if err := dispatch.SetEvaluationConditional(evaluation, req.IfMatch); err != nil {
+		if err := dispatch.SetEvaluationConditional(q.WorkspaceName, evaluation, req.IfMatch); err != nil {
 			if errors.Is(err, preval.ErrConflict) {
 				return Reply{}, ErrPrecondition
 			}

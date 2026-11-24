@@ -1133,7 +1133,7 @@ func (s *Store) SetEvaluationConditional(ctx context.Context, id, expected strin
 }
 
 // EvaluationSample returns a bounded set of text blocks from one session.
-func (s *Store) EvaluationSample(id string) (sample string, err error) {
+func (s *Store) EvaluationSample(ctx context.Context, id string) (sample string, err error) {
 	err = s.lockedRead(func() error {
 		file, err := os.Open(s.path("blocks", keyOf(id)))
 		if err != nil {
@@ -1143,10 +1143,13 @@ func (s *Store) EvaluationSample(id string) (sample string, err error) {
 		scanner := bufio.NewScanner(io.LimitReader(file, 192<<10))
 		scanner.Buffer(make([]byte, 4096), 64<<10)
 		var text strings.Builder
-		for scanner.Scan() && text.Len() < 4800 {
+		for text.Len() < 4800 && scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			var row trace.BlockRow
 			if json.Unmarshal(scanner.Bytes(), &row) == nil && row.SessionID == id {
-				text.WriteString(row.Text[:min(len(row.Text), 4800-text.Len())])
+				text.WriteString(row.Text[:min(len(row.Text), 4799-text.Len())])
 				text.WriteByte('\n')
 			}
 		}

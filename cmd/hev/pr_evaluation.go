@@ -10,18 +10,22 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
+	boardlayer "github.com/hev/kit/internal/board/layer"
+	boardsettings "github.com/hev/kit/internal/board/settings"
+	boardstore "github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/evidence"
-	"github.com/hev/kit/internal/filearchive"
-	"github.com/hev/kit/internal/hevpaths"
+	"github.com/hev/kit/internal/hostlabel"
+	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/preval"
 	"github.com/hev/kit/internal/prevallearn"
+	"github.com/hev/kit/internal/workspace"
 	"github.com/spf13/cobra"
-	"path/filepath"
-	"strings"
 )
 
 type prProviderConfig struct {
@@ -50,21 +54,27 @@ type prEvaluationConfig struct {
 }
 
 type localEvaluationDocuments struct {
-	traces   *filearchive.Store
+	workspace string
+	traces    interface {
+		SetEvaluationConditional(context.Context, string, string, preval.Evaluation) (string, error)
+		ReadEvaluation(string) (*preval.Evaluation, string, error)
+		EvaluationSample(context.Context, string) (string, error)
+	}
 	evidence *evidence.Store
 }
 
 func (d localEvaluationDocuments) ReadOrder(_ context.Context, p preval.Provenance) (*preval.Evaluation, error) {
-	return dispatch.ReadEvaluation(p.OrderID, p.AttemptID)
+	return dispatch.ReadEvaluation(d.workspace, p.OrderID, p.AttemptID)
 }
 func (d localEvaluationDocuments) WriteOrder(_ context.Context, e preval.Evaluation) error {
-	return dispatch.SetEvaluation(e)
+	return dispatch.SetEvaluation(d.workspace, e)
 }
 func (d localEvaluationDocuments) ClaimLearning(_ context.Context, e preval.Evaluation) (bool, error) {
-	return dispatch.ClaimEvaluationLearning(e)
+	return dispatch.ClaimEvaluationLearning(d.workspace, e)
 }
-func (d localEvaluationDocuments) WriteTrace(_ context.Context, id string, e preval.Evaluation) error {
-	return d.traces.SetEvaluation(id, e)
+func (d localEvaluationDocuments) WriteTrace(ctx context.Context, id string, e preval.Evaluation) error {
+	_, err := d.traces.SetEvaluationConditional(ctx, id, "", e)
+	return err
 }
 func (d localEvaluationDocuments) WriteEvidence(_ context.Context, id string, e preval.Evaluation) error {
 	return d.evidence.SetEvaluation(id, e)
@@ -97,6 +107,10 @@ func loadPREvaluation(path string) (*preval.Reconciler, error) {
 		providers = append(providers, preval.Provider{Repository: provider.Repository, Name: provider.Name,
 			HookUser: provider.HookUser, HookSecret: os.Getenv(provider.HookSecretEnv), Token: os.Getenv(provider.TokenEnv)})
 	}
+	w, err := currentWorkspace()
+	if err != nil || !w.AllowsHost(hostlabel.Self(os.Hostname)) {
+		return nil, errors.New("cannot resolve pull request evaluation workspace on this host")
+	}
 	var documents preval.Documents
 	var local localEvaluationDocuments
 	if hosted := config.Hosted; hosted != nil {
@@ -112,15 +126,20 @@ func loadPREvaluation(path string) (*preval.Reconciler, error) {
 		documents = preval.HostedDocuments{BaseURL: hosted.BaseURL, OrderPath: hosted.OrderPath, TracePath: hosted.TracePath,
 			EvidencePath: hosted.EvidencePath, Token: os.Getenv(hosted.TokenEnv)}
 	} else {
-		traces, err := filearchive.OpenLazy(filearchive.Root(""), config.TraceNamespace)
+		target, err := openTarget(config.TraceNamespace, nil)
 		if err != nil {
 			return nil, errors.New("cannot open local trace archive")
 		}
-		ev, err := evidence.Open(evidence.Root())
+		ev, err := evidence.Open(evidenceWorkspaceRoot(w))
 		if err != nil {
 			return nil, errors.New("cannot open local evidence store")
 		}
-		local = localEvaluationDocuments{traces: traces, evidence: ev}
+		local = localEvaluationDocuments{workspace: w.Name, evidence: ev}
+		if target.Layer != nil {
+			local.traces = target.Layer
+		} else {
+			local.traces = target.Files
+		}
 		documents = local
 	}
 	reconciler, err := preval.NewReconciler(providers, config.Links, documents, staleAfter)
@@ -132,14 +151,57 @@ func loadPREvaluation(path string) (*preval.Reconciler, error) {
 		if hosted, ok := documents.(preval.HostedDocuments); ok {
 			learner, err = prevallearn.NewHosted(hosted, config.LearningModel)
 		} else {
-			learner, err = prevallearn.New(hevpaths.Dir(hevpaths.Board), config.LearningModel, local.learningSources)
+			board, root, openErr := prLearningBoard(w)
+			if openErr != nil {
+				return nil, openErr
+			}
+			learner, err = prevallearn.NewWithBoard(board, root, config.LearningModel, local.learningSources)
 		}
 		if err != nil {
 			return nil, err
 		}
+		learner.Scope(w.Name, w.Profile("claude"), func(ctx context.Context) ([]string, []string, error) {
+			return dispatch.PRLearningClaudeAuth(ctx, w)
+		})
 		reconciler.EnableLearning(learner)
 	}
 	return reconciler, nil
+}
+
+func prLearningBoard(w workspace.Selection) (*boardstore.Store, string, error) {
+	unavailable := errors.New("cannot open the selected workspace's learning board")
+	if w.IsolatedStorage() {
+		if w.Layer.BoardURL != "" {
+			return nil, "", unavailable
+		}
+		key, err := layerenv.WorkspaceKey(w)
+		if err != nil {
+			return nil, "", unavailable
+		}
+		if key != "" {
+			_, namespace := w.Namespaces()
+			endpoint := defaultString(w.Layer.Endpoint, layerenv.HostedEndpoint)
+			return boardstore.New(boardlayer.New(endpoint, key, namespace, "")), "", nil
+		}
+		root := filepath.Join(w.Root(), "board")
+		board, err := boardstore.NewFiles(root)
+		if err != nil {
+			return nil, "", unavailable
+		}
+		return board, root, nil
+	}
+	if err := boardsettings.Load(); err != nil || boardsettings.Current.URLSet || boardsettings.Current.ReadOnly {
+		return nil, "", unavailable
+	}
+	board, err := boardstore.Open()
+	if err != nil {
+		return nil, "", unavailable
+	}
+	info := board.Info()
+	if info.Mode == "filesystem" {
+		return board, boardsettings.Dir(), nil
+	}
+	return board, "", nil
 }
 
 func init() {
@@ -197,6 +259,13 @@ func init() {
 	rootCmd.AddCommand(cmd)
 }
 
+func evidenceWorkspaceRoot(w workspace.Selection) string {
+	if w.IsolatedStorage() {
+		return filepath.Join(w.Root(), "evidence")
+	}
+	return evidence.Root()
+}
+
 func readPREvalExcerpt(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -207,15 +276,23 @@ func readPREvalExcerpt(path string) (string, error) {
 	return string(body), err
 }
 
-func (d localEvaluationDocuments) learningSources(_ context.Context, e preval.Evaluation) ([]preval.Excerpt, error) {
+func (d localEvaluationDocuments) learningSources(ctx context.Context, e preval.Evaluation) ([]preval.Excerpt, error) {
 	p := e.Provenance
+	prior, err := d.ReadOrder(ctx, p)
+	if err != nil || prior == nil || prior.ID != e.ID || !prior.ObservedAt.Equal(e.ObservedAt) {
+		return nil, preval.ErrConflict
+	}
 	doc, err := readPREvalExcerpt(filepath.Join(dispatch.Root(), p.OrderID, "order.md"))
 	if err != nil {
 		return nil, err
 	}
 	sources := []preval.Excerpt{{Reference: "order:" + p.OrderID, Text: doc}}
 	for _, id := range p.TraceSessionIDs[:min(5, len(p.TraceSessionIDs))] {
-		sample, err := d.traces.EvaluationSample(id)
+		current, _, err := d.traces.ReadEvaluation(id)
+		if err != nil || current == nil || current.ID != e.ID || !current.ObservedAt.Equal(e.ObservedAt) {
+			return nil, preval.ErrConflict
+		}
+		sample, err := d.traces.EvaluationSample(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -223,8 +300,8 @@ func (d localEvaluationDocuments) learningSources(_ context.Context, e preval.Ev
 	}
 	for _, id := range p.EvidenceIDs[:min(5, len(p.EvidenceIDs))] {
 		pkg, err := d.evidence.Load(id)
-		if err != nil {
-			return nil, err
+		if err != nil || pkg.Evaluation == nil || pkg.Evaluation.ID != e.ID || !pkg.Evaluation.ObservedAt.Equal(e.ObservedAt) {
+			return nil, preval.ErrConflict
 		}
 		var text strings.Builder
 		text.WriteString(pkg.Summary)

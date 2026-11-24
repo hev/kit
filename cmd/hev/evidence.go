@@ -37,13 +37,19 @@ type evidenceStore interface {
 }
 
 var openEvidence = func(cmd *cobra.Command) (evidenceStore, error) {
-	if hosted, err := hostedEvidence(cmd.Context()); err != nil || hosted != nil {
-		if err != nil {
-			return nil, err
-		}
-		return hosted, nil
+	w, err := currentWorkspace()
+	if err != nil {
+		return nil, err
 	}
-	s, err := evidence.Open(evidence.Root())
+	if !w.IsolatedStorage() {
+		if hosted, err := hostedEvidence(cmd.Context()); err != nil || hosted != nil {
+			if err != nil {
+				return nil, err
+			}
+			return hosted, nil
+		}
+	}
+	s, err := evidence.Open(evidenceWorkspaceRoot(w))
 	if err != nil {
 		return nil, err
 	}

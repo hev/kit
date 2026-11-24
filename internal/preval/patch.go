@@ -22,7 +22,12 @@ func Patch(document map[string]json.RawMessage, evaluation Evaluation) (bool, er
 	}
 	if raw := document["evaluation"]; len(raw) > 0 && string(raw) != "null" {
 		var current Evaluation
-		if json.Unmarshal(raw, &current) != nil || current.ID != evaluation.ID {
+		if json.Unmarshal(raw, &current) != nil || current.ID != evaluation.ID || current.Provenance.OrderID != evaluation.Provenance.OrderID ||
+			!containsAll(evaluation.Provenance.TraceSessionIDs, current.Provenance.TraceSessionIDs) ||
+			!containsAll(evaluation.Provenance.EvidenceIDs, current.Provenance.EvidenceIDs) ||
+			current.Provenance.AttemptID != evaluation.Provenance.AttemptID ||
+			isCorrection(current.Outcome) && (!isCorrection(evaluation.Outcome) ||
+				current.Source != evaluation.Source && !evaluation.Source.OccurredAt.After(current.Source.OccurredAt)) {
 			return false, ErrConflict
 		}
 		if current.ObservedAt.After(evaluation.ObservedAt) {

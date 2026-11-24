@@ -35,6 +35,8 @@ func (h HostedDocuments) request(ctx context.Context, method, prefix, id, revisi
 	path := strings.TrimRight(h.BaseURL, "/") + strings.TrimRight(prefix, "/") + "/" + url.PathEscape(id)
 	if method == http.MethodPut {
 		path += "/evaluation"
+	} else if !metadataOnly && prefix == h.TracePath {
+		path += "?view=evaluation&sample=transcript"
 	} else if metadataOnly && (prefix == h.TracePath || prefix == h.OrderPath) {
 		path += "?view=evaluation"
 	}
@@ -151,15 +153,11 @@ func (h HostedDocuments) LearningMaterial(ctx context.Context, eval Evaluation) 
 		}
 		body, err := io.ReadAll(io.LimitReader(response.Body, maxPayload+1))
 		var doc struct {
-			Evaluation  *Evaluation
-			Order       string
-			Summary     string
-			FirstPrompt string `json:"first_prompt"`
-			Turns       []struct {
-				Prompt string
-				Items  []struct{ Text string }
-			}
-			Claims []struct {
+			Evaluation *Evaluation
+			Order      string
+			Summary    string
+			Sample     string
+			Claims     []struct {
 				Criterion string
 				Text      string
 			}
@@ -183,14 +181,7 @@ func (h HostedDocuments) LearningMaterial(ctx context.Context, eval Evaluation) 
 		case "order":
 			add(doc.Order)
 		case "trace":
-			add(doc.Summary)
-			add(doc.FirstPrompt)
-			for _, turn := range doc.Turns[:min(8, len(doc.Turns))] {
-				add(turn.Prompt)
-				for _, item := range turn.Items[:min(8, len(turn.Items))] {
-					add(item.Text)
-				}
-			}
+			add(doc.Sample)
 		case "evidence":
 			add(doc.Summary)
 			for _, claim := range doc.Claims[:min(8, len(doc.Claims))] {
