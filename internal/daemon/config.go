@@ -405,7 +405,7 @@ func applyConfigFile(c *Config, forDaemon bool) error {
 	if forDaemon && (fc.Layer.APIKeyFile != nil || usableLegacyKey(fc.Layer.APIKey)) {
 		checked, err := platformops.ReadPrivateFile(c.ConfigPath, 1<<20)
 		if err != nil || !bytes.Equal(checked, raw) {
-			return errors.New("hevd: protect the Layer configuration file before starting capture")
+			return errors.New("hevd: protect the Layer configuration file before starting capture. On Unix, use chmod 600 and check ancestor directory permissions. On Windows, disable ACL inheritance on the config and its parent directory and allow only the daemon account, SYSTEM and Administrators.")
 		}
 	}
 	if md.IsDefined("projects") {

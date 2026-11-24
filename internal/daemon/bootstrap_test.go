@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -163,5 +164,40 @@ func TestHEVLayerBootstrapEmptyFileSettingFailsClosed(t *testing.T) {
 	t.Setenv("HEVLAYER_API_KEY", "")
 	if target, err := OpenTarget(cfg, ""); err == nil || target.Files != nil {
 		t.Fatal("CLI selected a file archive on a hevd Layer host")
+	}
+}
+
+func TestHEVLayerBootstrapInlineMigrationDiagnostic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix mode fixture; protected ACLs are covered by native Windows tests")
+	}
+	isolate(t, "")
+	dir, err := filepath.EvalSymlinks(testenv.SocketDir(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	const key = "fixture-inline-daemon-secret"
+	if err := os.WriteFile(path, []byte("[layer]\napi_key = \""+key+"\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HEV_CONFIG", path)
+	cfg, err := loadConfig(true)
+	if cfg != nil || err == nil || !strings.Contains(err.Error(), "chmod 600") ||
+		!strings.Contains(err.Error(), "ancestor") || strings.Contains(err.Error(), key) || strings.Contains(err.Error(), path) {
+		t.Fatal("unprotected inline configuration did not get a redacted migration diagnostic")
+	}
+	if err := platformops.SecureFile(path); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = loadConfig(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := primaryCredential(cfg); err != nil || got != key {
+		t.Fatal("legacy inline credential was refused after migration")
 	}
 }

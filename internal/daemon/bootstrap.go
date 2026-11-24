@@ -35,7 +35,7 @@ func primaryCredential(cfg *Config) (string, string, error) {
 		}
 		raw, err := platformops.ReadPrivateFile(path, 4096)
 		if err != nil {
-			return "", "", errors.New("hevd: [layer].api_key_file is unreadable or unprotected")
+			return "", "", errors.New("hevd: [layer].api_key_file is unreadable or unprotected. Check the file and its directory permissions.")
 		}
 		key, source = strings.TrimSpace(string(raw)), "config [layer].api_key_file"
 	} else if env := layerenv.Get("HEVLAYER_API_KEY"); usableLegacyKey(env) {

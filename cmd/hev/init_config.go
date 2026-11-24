@@ -16,6 +16,12 @@ import (
 
 var errLayerBootstrapManaged = errors.New("the Layer target uses [layer].api_key_file; manage hevd directly or remove that setting before changing the storage target")
 
+func hasDiskBootstrap(doc map[string]any) bool {
+	layer, _ := doc["layer"].(map[string]any)
+	_, configured := layer["api_key_file"]
+	return configured
+}
+
 func loadInitConfig(path string) (initFileConfig, error) {
 	var cfg initFileConfig
 	info, err := os.Lstat(path)
@@ -50,9 +56,7 @@ func loadInitConfig(path string) (initFileConfig, error) {
 	cfg.Layer = target.Layer
 	cfg.source, cfg.exists = raw, true
 	_, cfg.hasLocal = doc["local"]
-	if layer, ok := doc["layer"].(map[string]any); ok {
-		_, cfg.hasBootstrap = layer["api_key_file"]
-	}
+	cfg.hasBootstrap = hasDiskBootstrap(doc)
 	return cfg, nil
 }
 
