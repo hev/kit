@@ -1679,7 +1679,7 @@ func (m *TUI) renderCard(c *Card, width int, running bool) string {
 		title += " " + hevCmdStyle.Render(c.Action)
 	}
 	if running {
-		return title + "  " + renderShimmer("running…", m.frame, m.opts.Color)
+		return ansi.Truncate(title+"  "+renderShimmer("running…", m.frame, m.opts.Color), max(10, width), "…")
 	}
 	header := title
 	if c.Summary != "" {
@@ -1691,16 +1691,22 @@ func (m *TUI) renderCard(c *Card, width int, running bool) string {
 	}
 	body := strings.TrimSpace(c.Body)
 	if body == "" {
-		return header
+		return ansi.Truncate(header, max(10, width), "…")
 	}
 	bl := strings.Split(body, "\n")
 	// Collapsed by default on success: single sleek line with Ctrl+O hint.
 	if !m.expandCards && c.OK {
 		if len(bl) > 1 {
-			return header + dimStyle.Render(fmt.Sprintf("  (%d lines · Ctrl+O)", len(bl)))
+			suffix := dimStyle.Render(fmt.Sprintf("  (%d lines · Ctrl+O)", len(bl)))
+			sw := ansi.StringWidth(suffix)
+			if avail := width - sw; avail > 12 {
+				return ansi.Truncate(header, avail, "…") + suffix
+			}
+			return ansi.Truncate(header+suffix, max(10, width), "…")
 		}
-		return header
+		return ansi.Truncate(header, max(10, width), "…")
 	}
+	header = ansi.Truncate(header, max(10, width), "…")
 	// Expanded (Ctrl+O) or error: compact indented lines with a subtle left bar, no box outline.
 	bar := "  "
 	if m.opts.Color {

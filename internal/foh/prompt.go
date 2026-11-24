@@ -39,14 +39,14 @@ above, call hev directly via bash using this CLI reference — do not waste turn
 running "hev --help" or browsing hev_docs first. Reserve hev_docs for conceptual
 docs, config schemas, or behavior not covered here.
 
-hev CLI quick reference (global flag: -w/--workspace; most ls/show/status take --json):
+hev CLI quick reference (global flag: -w/--workspace; pass --json only where listed):
 - hev dispatch ORDER.md [--host H] [--supersedes OLD] [--trace ID] [--json]
-  subcommands: ls, show NAME [--host H], hosts, logs NAME [--host H], stop,
-  retry, rework, amend, close, adopt, say, sweep, clean, compact, gc, notices, validate
+  subcommands: ls [--json], show NAME [--host H] [--json], hosts [--json], logs NAME [--host H],
+  stop, retry, rework, amend, close, adopt, say, sweep, clean, compact, gc, notices, validate
 - hev steer TARGET MESSAGE [--host H] [--level note|urgent|halt|redirect] [--json]
   subcommands: ls [TARGET] [--host H], show ID [--host H], ack
-- hev orchestrate: ls, show, start, stop, pause, resume, wake, say, logs,
-  adopt, retire, follow, swarm, apply, render, reconcile, notices
+- hev orchestrate: ls [--json] [--orphaned], show NAME [--host H] (plain text, no --json),
+  start, stop, pause, resume, wake, say, logs, adopt, retire, follow, swarm, apply, render, reconcile, notices
 - hev peers: ls [--json], read TARGET [-n N], send TARGET - (stdin), wait, role, inbox, chat
 - hev board: [ls] [--board B] [--tag T] [--json], search QUERY [--board B] [--tag T] [--since 7d],
   read ID [--images DIR], post --board B --title TITLE [-m TEXT|-f FILE|stdin] [--image FILE],
