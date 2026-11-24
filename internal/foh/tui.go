@@ -3,6 +3,7 @@ package foh
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -103,6 +104,8 @@ type TUI struct {
 	peerBusy      bool
 	peerLog       []peerExchange
 	pendingAuto   []string
+	pastedTexts   map[string]string
+	pendingImages []ImageAttachment
 	callArgs      map[string]struct{ tool, action, args string }
 	models        []Model
 	catalogSource CatalogSource
@@ -699,6 +702,12 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.system("turn cancelled")
 			return m, nil
 		}
+		if len(m.pendingImages) > 0 {
+			m.pendingImages = nil
+		}
+		return m, nil
+	case msg.Type == tea.KeyCtrlV:
+		m.attachClipboardImage()
 		return m, nil
 	case msg.Type == tea.KeyCtrlO:
 		m.expandCards = !m.expandCards
@@ -740,50 +749,85 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncInputHeight()
 		return m, nil
 	case msg.Type == tea.KeyEnter: // also Ctrl+M: terminals send the same byte
-		text := strings.TrimLeftFunc(m.input.Value(), unicode.IsSpace)
-		if text == "" {
+		rawDisplay := strings.TrimLeftFunc(m.input.Value(), unicode.IsSpace)
+		if rawDisplay == "" && len(m.pendingImages) == 0 {
 			return m, m.openPicker()
 		}
 		// Resolve slash-command prefix (e.g. "/dis" -> "/dispatch") when selecting from typeahead.
-		if matches := m.matchingCommands(); len(matches) > 0 {
-			sel := matches[min(m.cmdCursor, len(matches)-1)]
-			text = sel.Name
+		if len(m.pendingImages) == 0 {
+			if matches := m.matchingCommands(); len(matches) > 0 {
+				sel := matches[min(m.cmdCursor, len(matches)-1)]
+				rawDisplay = sel.Name
+			}
 		}
+		fullText := expandPastedTokens(rawDisplay, m.pastedTexts)
+		imgs := m.pendingImages
 		m.input.Reset()
+		m.pastedTexts = nil
+		m.pendingImages = nil
 		m.cmdCursor, m.cmdStart = 0, 0
 		m.scroll = 0
 		m.syncInputHeight()
-		if strings.HasPrefix(text, "/") || strings.HasPrefix(text, ":") {
-			return m, m.command(text)
+		if len(imgs) == 0 && (strings.HasPrefix(fullText, "/") || strings.HasPrefix(fullText, ":")) {
+			return m, m.command(fullText)
 		}
-		text = strings.TrimSpace(text)
+		fullText = strings.TrimSpace(fullText)
+		displayText := strings.TrimSpace(rawDisplay)
 		// Incoming peer messages pasted by `peers send`: always show in the
 		// lower status bar; background (agent-only) by default, or interrupt
 		// the main user thread when tagged [interrupt] / [urgent].
-		if sender, body, interrupt, ok := parsePeerMessage(text); ok {
-			m.recordPeer("←", sender, body)
-			if interrupt {
-				m.system(fmt.Sprintf("⇄ [interrupt] from %s: %s", sender, body))
-				if m.busy {
-					m.pendingAuto = append(m.pendingAuto, text)
-					return m, nil
+		if len(imgs) == 0 {
+			if sender, body, interrupt, ok := parsePeerMessage(fullText); ok {
+				m.recordPeer("←", sender, body)
+				if interrupt {
+					m.system(fmt.Sprintf("⇄ [interrupt] from %s: %s", sender, body))
+					if m.busy {
+						m.pendingAuto = append(m.pendingAuto, fullText)
+						return m, nil
+					}
+					return m, m.startAutoTurn(fullText)
 				}
-				return m, m.startAutoTurn(text)
+				return m, m.startBackgroundPeerTurn(sender, fullText)
 			}
-			return m, m.startBackgroundPeerTurn(sender, text)
 		}
 		if m.busy {
-			if m.opts.Agent.Steer(text) {
-				m.entries = append(m.entries, entry{kind: entrySystem, text: "↪ steer queued: lands at the next tool boundary", detail: text})
+			if m.opts.Agent.Steer(fullText) {
+				m.entries = append(m.entries, entry{kind: entrySystem, text: "↪ steer queued: lands at the next tool boundary", detail: displayText})
 			} else {
 				m.system("steer queue full; wait for the turn to finish")
 			}
 			return m, nil
 		}
-		return m, m.startTurn(text)
+		return m, m.startTurnWithImages(displayText, fullText, imgs)
 	}
 	if m.absorbTerminalNoise(msg, time.Now()) {
 		return m, nil
+	}
+	if msg.Paste && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+		raw := string(msg.Runes)
+		if att, ok, err := loadImageFile(raw); ok {
+			if err != nil {
+				m.entries = append(m.entries, entry{kind: entryError, text: err.Error()})
+				return m, nil
+			}
+			m.addPendingImage(att)
+			return m, nil
+		}
+		if shouldCollapsePaste(raw) {
+			norm := normalizePasteText(raw)
+			if m.pastedTexts == nil {
+				m.pastedTexts = map[string]string{}
+			}
+			if len(m.pastedTexts) < maxPendingPastes {
+				tok := makePastePlaceholder(norm, m.pastedTexts)
+				m.pastedTexts[tok] = norm
+				m.prepareInputGrowth()
+				m.input.InsertString(tok)
+				m.cmdCursor, m.cmdStart = 0, 0
+				m.syncInputHeight()
+				return m, nil
+			}
+		}
 	}
 	var cmd tea.Cmd
 	m.prepareInputGrowth()
@@ -791,6 +835,25 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.cmdCursor, m.cmdStart = 0, 0
 	m.syncInputHeight()
 	return m, cmd
+}
+
+func (m *TUI) addPendingImage(att ImageAttachment) {
+	if len(m.pendingImages) >= maxPendingImages {
+		m.entries = append(m.entries, entry{kind: entryError, text: fmt.Sprintf("maximum %d images per message", maxPendingImages)})
+		return
+	}
+	m.pendingImages = append(m.pendingImages, att)
+}
+
+func (m *TUI) attachClipboardImage() {
+	att, err := clipboardImageReader(context.Background())
+	if err != nil {
+		if !errors.Is(err, errNoClipboardImage) {
+			m.entries = append(m.entries, entry{kind: entryError, text: err.Error()})
+		}
+		return
+	}
+	m.addPendingImage(att)
 }
 
 func (m *TUI) system(text string) {
@@ -1073,15 +1136,30 @@ func (m *TUI) command(text string) tea.Cmd {
 }
 
 func (m *TUI) startTurn(text string) tea.Cmd {
-	m.entries = append(m.entries, entry{kind: entryUser, text: text})
-	return m.runAgentTurn(text)
+	return m.startTurnWithImages(text, text, nil)
+}
+
+func (m *TUI) startTurnWithImages(display, prompt string, images []ImageAttachment) tea.Cmd {
+	entryText := display
+	if len(images) > 0 {
+		var badges []string
+		for _, img := range images {
+			badges = append(badges, fmt.Sprintf("[image: %s · %s]", img.Label, formatByteSize(img.Bytes)))
+		}
+		if entryText != "" {
+			entryText += " "
+		}
+		entryText += strings.Join(badges, " ")
+	}
+	m.entries = append(m.entries, entry{kind: entryUser, text: entryText})
+	return m.runAgentTurn(prompt, images)
 }
 
 func (m *TUI) startAutoTurn(text string) tea.Cmd {
-	return m.runAgentTurn(text)
+	return m.runAgentTurn(text, nil)
 }
 
-func (m *TUI) runAgentTurn(text string) tea.Cmd {
+func (m *TUI) runAgentTurn(text string, images []ImageAttachment) tea.Cmd {
 	m.setBusy(true)
 	m.thinkVerb = pickAlpineVerb()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1091,7 +1169,7 @@ func (m *TUI) runAgentTurn(text string) tea.Cmd {
 	agent := m.opts.Agent
 	go func() {
 		defer close(ch)
-		_ = agent.Run(ctx, text, func(ev Event) {
+		_ = agent.RunWithImages(ctx, text, images, func(ev Event) {
 			select {
 			case ch <- ev:
 			case <-ctx.Done():
@@ -1866,6 +1944,22 @@ func (m *TUI) pickerView(height int) string {
 	return b.String()
 }
 
+func (m *TUI) renderPendingAttachments(width int) string {
+	if len(m.pendingImages) == 0 {
+		return ""
+	}
+	var names []string
+	for _, img := range m.pendingImages {
+		names = append(names, fmt.Sprintf("%s (%s)", img.Label, formatByteSize(img.Bytes)))
+	}
+	line := fmt.Sprintf("🖼 %d image(s) attached: %s · Esc clears", len(m.pendingImages), strings.Join(names, ", "))
+	line = ansi.Truncate(line, max(16, width), "…")
+	if m.opts.Color {
+		return " " + hevBadgeStyle.Render(line)
+	}
+	return " " + line
+}
+
 func (m *TUI) horizontalRule(width int) string {
 	line := strings.Repeat("─", max(10, width))
 	if !m.opts.Color {
@@ -2004,6 +2098,9 @@ func (m *TUI) View() string {
 	}
 	suggestions := m.renderCommandSuggestions(innerWidth)
 	footer := rule + "\n" + inputBlock + "\n" + rule + "\n" + chromeBar
+	if attach := m.renderPendingAttachments(innerWidth); attach != "" {
+		footer = attach + "\n" + footer
+	}
 	if suggestions != "" {
 		footer = suggestions + "\n" + footer
 	}

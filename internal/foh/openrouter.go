@@ -16,11 +16,44 @@ import (
 
 // Message is one OpenAI-compatible chat message.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role       string            `json:"role"`
+	Content    string            `json:"content"`
+	Images     []ImageAttachment `json:"-"`
+	ToolCalls  []ToolCall        `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	Name       string            `json:"name,omitempty"`
+}
+
+// MarshalJSON encodes plain text messages as a string content field and
+// multimodal messages (with Images) as an OpenAI/OpenRouter content-part array.
+func (m Message) MarshalJSON() ([]byte, error) {
+	if len(m.Images) == 0 {
+		type plain Message
+		return json.Marshal(plain(m))
+	}
+	parts := make([]map[string]any, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+	}
+	for _, img := range m.Images {
+		parts = append(parts, map[string]any{
+			"type":      "image_url",
+			"image_url": map[string]string{"url": img.DataURL()},
+		})
+	}
+	return json.Marshal(struct {
+		Role       string           `json:"role"`
+		Content    []map[string]any `json:"content"`
+		ToolCalls  []ToolCall       `json:"tool_calls,omitempty"`
+		ToolCallID string           `json:"tool_call_id,omitempty"`
+		Name       string           `json:"name,omitempty"`
+	}{
+		Role:       m.Role,
+		Content:    parts,
+		ToolCalls:  m.ToolCalls,
+		ToolCallID: m.ToolCallID,
+		Name:       m.Name,
+	})
 }
 
 // ToolCall is an assistant request to run a tool.
