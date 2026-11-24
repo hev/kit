@@ -18,7 +18,7 @@ import (
 const (
 	scopedModelPrefix   = "scope/"
 	maxKeyScopes        = 8
-	scopeResolveTimeout = 75 * time.Second
+	scopeResolveTimeout = 135 * time.Second
 	scopeVerifyTimeout  = 10 * time.Second
 )
 

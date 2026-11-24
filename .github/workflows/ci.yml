@@ -52,7 +52,7 @@ jobs:
         run: go test -race -count=3 -timeout=15m -skip '^TestFOHScopedCredentialRefCLI$' ./...
 
       - name: Scoped credential CLI acceptance under default policy
-        # This exercise waits for an actual rolling minute in three cold workloads.
+        # The contended workload waits across two actual rolling minutes.
         run: go test -race -count=1 -timeout=3m ./cmd/hev -run '^TestFOHScopedCredentialRefCLI$'
 
       - name: Watch and intake Cobra routing

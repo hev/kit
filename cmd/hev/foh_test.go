@@ -27,7 +27,7 @@ import (
 // HOME and no inherited provider keys.
 func runHevChild(t *testing.T, home string, env []string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], args...)
 	base := []string{"HEV_TEST_AS_HEV=1", "HOME=" + home, "USERPROFILE=" + home, "PATH=" + os.Getenv("PATH"), "TMUX_TMPDIR=" + t.TempDir()}
@@ -450,6 +450,7 @@ api_key_ref = "op://vault/beta/credential"
 		return h
 	}
 	burstHome := newHome(fmt.Sprintf(cfg, server.URL))
+	contendedHome := newHome(fmt.Sprintf(cfg, server.URL))
 	turnHome := newHome(fmt.Sprintf(cfg, server.URL))
 	catalogConfig := fmt.Sprintf(cfg, server.URL)
 	for letter := 'C'; letter <= 'H'; letter++ {
@@ -488,16 +489,29 @@ api_key_ref = "op://vault/extra-%c/credential"
 			t.Errorf("%s did not complete with the selected workspace and redacted output (exit %d)", model, code)
 		}
 	}
-	var workloads sync.WaitGroup
-	for i := range 8 {
-		workloads.Go(func() {
-			if i%2 == 0 {
-				child(burstHome, "alpha", "test/model", "team-a")
-			} else {
-				child(burstHome, "beta", "test/model", "team-b")
-			}
-		})
+	burst := func(h string) {
+		var calls sync.WaitGroup
+		for i := range 8 {
+			calls.Go(func() {
+				if i%2 == 0 {
+					child(h, "alpha", "test/model", "team-a")
+				} else {
+					child(h, "beta", "test/model", "team-b")
+				}
+			})
+		}
+		calls.Wait()
 	}
+	var workloads sync.WaitGroup
+	workloads.Go(func() { burst(burstHome) })
+	workloads.Go(func() {
+		// Model three reads that a continuing turn charged before the cold
+		// processes reached the ledger. The last cold call needs window three.
+		for range 3 {
+			child(contendedHome, "alpha", "test/model", "team-a")
+		}
+		burst(contendedHome)
+	})
 	workloads.Go(func() { child(turnHome, "alpha", "test/multi-step", "team-a") })
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -520,15 +534,18 @@ api_key_ref = "op://vault/extra-%c/credential"
 	if turnSteps.Load() != 8 {
 		t.Errorf("multi-step turn made %d inference requests, want 8", turnSteps.Load())
 	}
-	for _, h := range []string{burstHome, turnHome, catalogHome} {
-		calls, err := os.ReadFile(filepath.Join(h, "op-argv"))
-		if err != nil || string(calls) != strings.Repeat("inject\n", 8) {
-			t.Error("each successful workload must make exactly eight argument-free reads")
+	for _, workload := range []struct {
+		home  string
+		reads int
+	}{{burstHome, 8}, {contendedHome, 11}, {turnHome, 8}, {catalogHome, 8}} {
+		calls, err := os.ReadFile(filepath.Join(workload.home, "op-argv"))
+		if err != nil || string(calls) != strings.Repeat("inject\n", workload.reads) {
+			t.Errorf("expected %d argument-free credential reads", workload.reads)
 		}
-		data, err := os.ReadFile(filepath.Join(h, ".hev", "secrets", "budget.json"))
+		data, err := os.ReadFile(filepath.Join(workload.home, ".hev", "secrets", "budget.json"))
 		var ledger struct{ Spends []secrets.Spend }
-		if err != nil || json.Unmarshal(data, &ledger) != nil || len(ledger.Spends) != 8 {
-			t.Error("expected eight charged reads in one isolated ledger")
+		if err != nil || json.Unmarshal(data, &ledger) != nil || len(ledger.Spends) != workload.reads {
+			t.Errorf("expected %d charged reads in one isolated ledger", workload.reads)
 			continue
 		}
 		for _, spend := range ledger.Spends {
@@ -547,13 +564,13 @@ api_key_ref = "op://vault/extra-%c/credential"
 			}
 		}
 	}
-	for _, h := range []string{home, burstHome, turnHome} {
+	for _, h := range []string{home, burstHome, contendedHome, turnHome} {
 		data, err := os.ReadFile(filepath.Join(h, "hev-argv"))
 		if err != nil || len(data) == 0 {
 			t.Error("missing CLI process argument evidence")
 		}
 	}
-	for _, h := range []string{home, burstHome, turnHome, catalogHome} {
+	for _, h := range []string{home, burstHome, contendedHome, turnHome, catalogHome} {
 		err = filepath.WalkDir(h, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil || !entry.Type().IsRegular() {
 				return err
