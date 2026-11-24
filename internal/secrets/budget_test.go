@@ -403,3 +403,46 @@ func TestCallerBudgetWaitThroughDaemon(t *testing.T) {
 		t.Fatal("daemon did not apply the default rolling budget")
 	}
 }
+
+func TestCallerBudgetWaitAdmitsOlderReadersBeforeContinuations(t *testing.T) {
+	fake(t)
+	const caller = "shared-parent"
+	now := time.Now()
+	for range 5 {
+		if err := reserve(now, caller, "op", 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait := func(at time.Time, ticket string) error {
+		ctx := context.WithValue(context.Background(), budgetTicketKey{}, ticket)
+		return reserveWithContext(ctx, at, caller, "op", 1, nil)
+	}
+	for _, ticket := range []string{"first-cold-read", "second-cold-read"} {
+		if err := wait(now, ticket); !IsBudgetError(err) {
+			t.Fatal("cold read must queue when all five slots are charged")
+		}
+	}
+	ready := now.Add(time.Minute)
+	for _, ticket := range []string{"turn-continuation", "second-cold-read"} {
+		if err := wait(ready, ticket); !IsBudgetError(err) {
+			t.Fatal("a later reader overtook the oldest pending read")
+		}
+	}
+	for _, ticket := range []string{"first-cold-read", "second-cold-read", "turn-continuation"} {
+		if err := wait(ready, ticket); err != nil {
+			t.Fatal("available budget must be admitted in registration order", err)
+		}
+	}
+	if err := reserve(ready, caller, "op", 1); err != nil {
+		t.Fatal("ordinary callers must still use available budget", err)
+	}
+	if err := reserve(ready, caller, "op", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := wait(ready, "abandoned"); !IsBudgetError(err) {
+		t.Fatal("queue must keep the five-read budget")
+	}
+	if err := wait(ready.Add(time.Minute+4*time.Second), "active"); err != nil {
+		t.Fatal("an abandoned ticket must expire without blocking subsequent reads", err)
+	}
+}

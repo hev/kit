@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,8 @@ type request struct {
 	Ping bool `json:",omitempty"`
 	// Caller names the requesting process in the read log only.
 	Caller string `json:",omitempty"`
+	// WaitTicket preserves a single-reference caller's place during retries.
+	WaitTicket string `json:",omitempty"`
 }
 type response struct {
 	Values      map[string]string
@@ -154,6 +157,9 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string
 		s.Daemon = true
 		r.Status = &s
 	} else {
+		if len(q.Refs) == 1 && validBudgetTicket(q.WaitTicket) {
+			ctx = context.WithValue(ctx, budgetTicketKey{}, q.WaitTicket)
+		}
 		var err error
 		r.Values, r.Sources, err = c.ResolveSources(ctx, q.Caller, q.Refs)
 		if err != nil {
@@ -438,8 +444,7 @@ func ResolveWith(ctx context.Context, refs []Ref, opts Options) (map[string]stri
 func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error) {
 	res := Result{Endpoint: Endpoint()}
 	// The caller expands secret:// through its host's manager, so the daemon
-	// (of any age) only ever receives op:// or azkv:// and the request format
-	// is unchanged.
+	// (of any age) only ever receives op:// or azkv://.
 	refs, err := ExpandRefs(refs)
 	if err != nil {
 		return res, err
@@ -450,6 +455,7 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 	if opts.Caller == "" {
 		opts.Caller = DefaultCaller("hev")
 	}
+	q := request{Refs: refs, Caller: opts.Caller}
 	if opts.CallerWait > 0 {
 		if len(refs) != 1 {
 			return res, errors.New("caller budget wait requires a single credential reference")
@@ -457,8 +463,9 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.CallerWait)
 		defer cancel()
+		q.WaitTicket = rand.Text()
+		ctx = context.WithValue(ctx, budgetTicketKey{}, q.WaitTicket)
 	}
-	q := request{Refs: refs, Caller: opts.Caller}
 	var r response
 	err = ErrUnavailable
 	reason := "HEV_SECRETS_CACHE=off"
@@ -507,6 +514,18 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		res.Sources = map[string]string{}
 	}
 	return res, nil
+}
+
+func validBudgetTicket(ticket string) bool {
+	if len(ticket) < 26 || len(ticket) > 64 {
+		return false
+	}
+	for _, ch := range ticket {
+		if (ch < 'A' || ch > 'Z') && (ch < '2' || ch > '7') {
+			return false
+		}
+	}
+	return true
 }
 
 func retryCallerBudget(ctx context.Context, opts Options, err error) (bool, error) {

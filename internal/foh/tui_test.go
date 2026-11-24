@@ -59,9 +59,16 @@ func TestTUICatalogDeadlineAllowsScopedBudgetWait(t *testing.T) {
 				}
 				return nil, "", ctx.Err()
 			}
-			if result := m.loadCatalog()().(catalogMsg); result.err != nil {
+			load := m.loadCatalog()
+			m.models = nil
+			if duplicate := m.openPicker(); duplicate != nil {
+				t.Fatal("opening the picker must reuse the startup catalog load")
+			}
+			result := load().(catalogMsg)
+			if result.err != nil {
 				t.Fatal(result.err)
 			}
+			m.Update(result)
 			cancel()
 			if result := m.loadCatalog()().(catalogMsg); !errors.Is(result.err, context.Canceled) {
 				t.Fatal("catalog must honor cancellation from the FOH session")

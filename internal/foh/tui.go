@@ -69,22 +69,23 @@ type TUI struct {
 	events      chan Event
 	expandCards bool
 
-	chrome        ChromeSnapshot
-	watched       []watchedRun
-	watchedSteers []watchedSteer
-	peerActivity  string
-	peerBusy      bool
-	peerLog       []peerExchange
-	pendingAuto   []string
-	callArgs      map[string]struct{ tool, action, args string }
-	models        []Model
-	catalogSource CatalogSource
-	picker        *picker
-	resumer       *resumePicker
-	peers         *peersOverlay
-	steerer       *steerOverlay
-	quitting      bool
-	nativePeer    *nativePeers
+	chrome         ChromeSnapshot
+	watched        []watchedRun
+	watchedSteers  []watchedSteer
+	peerActivity   string
+	peerBusy       bool
+	peerLog        []peerExchange
+	pendingAuto    []string
+	callArgs       map[string]struct{ tool, action, args string }
+	models         []Model
+	catalogLoading bool
+	catalogSource  CatalogSource
+	picker         *picker
+	resumer        *resumePicker
+	peers          *peersOverlay
+	steerer        *steerOverlay
+	quitting       bool
+	nativePeer     *nativePeers
 }
 
 type resumePicker struct {
@@ -182,9 +183,10 @@ func (m *TUI) syncInputHeight() {
 }
 
 func (m *TUI) loadCatalog() tea.Cmd {
-	if m.opts.Catalog == nil {
+	if m.opts.Catalog == nil || m.catalogLoading {
 		return nil
 	}
+	m.catalogLoading = true
 	load := m.opts.Catalog
 	parent := m.opts.CatalogContext
 	if parent == nil {
@@ -273,8 +275,10 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case catalogMsg:
+		m.catalogLoading = false
 		m.models, m.catalogSource = msg.models, msg.source
 		if m.picker != nil {
+			m.picker.note = ""
 			m.refilter()
 		}
 		return m, nil
