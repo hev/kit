@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -43,7 +44,9 @@ func TestWindowsForcedCommandWithSpaces(t *testing.T) {
 	}
 	raw := strings.SplitN(strings.TrimPrefix(line, `restrict,command="`), `" ssh-`, 2)[0]
 	command := strings.ReplaceAll(strings.ReplaceAll(raw, `\"`, `"`), `\\`, `\`)
-	c := exec.Command("cmd.exe", "/c", command)
+	c := exec.Command("cmd.exe")
+	// cmd.exe parses the raw command tail rather than using CommandLineToArgvW.
+	c.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe /d /s /c "` + command + `"`}
 	c.Env = append(os.Environ(), "HEV_NODES_COMMAND_HELPER=1")
 	out, e := c.CombinedOutput()
 	if e != nil {

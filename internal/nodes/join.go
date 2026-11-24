@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/platformops"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -193,7 +194,7 @@ func (s Store) JoinShort(target, code, home, config string, dial Dialer) (Joined
 		if e != nil {
 			return e
 		}
-		if e = os.WriteFile(path, pem.EncodeToMemory(b), 0600); e != nil {
+		if e = platformops.WriteFileAtomic(path, pem.EncodeToMemory(b), 0600); e != nil {
 			return e
 		}
 		return os.WriteFile(path+".pub", append(bytes.TrimSpace(ssh.MarshalAuthorizedKey(signer.PublicKey())), []byte(" "+comment+"\n")...), 0600)

@@ -30,17 +30,27 @@ func TestWindowsProtectedACL(t *testing.T) {
 			if err := secure(path, tc.admin); err != nil {
 				t.Fatal(err)
 			}
-			assertWindowsACL(t, path, tc.principal)
+			assertWindowsACL(t, path, 0, "S-1-5-18", tc.principal)
 
 			if err := secure(filepath.Join(path, "missing"), tc.admin); err == nil {
 				t.Fatal("expected ACL failure")
 			}
-			assertWindowsACL(t, path, tc.principal)
+			assertWindowsACL(t, path, 0, "S-1-5-18", tc.principal)
 		})
 	}
 }
 
-func assertWindowsACL(t *testing.T, path, principal string) {
+func assertPrivateJoinKey(t *testing.T, path string) {
+	t.Helper()
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWindowsACL(t, path, 0,
+		user.User.Sid.String(), "S-1-5-18", "S-1-5-32-544")
+}
+
+func assertWindowsACL(t *testing.T, path string, aceFlags byte, principals ...string) {
 	const fileAllAccess = 0x1f01ff
 	t.Helper()
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
@@ -52,18 +62,17 @@ func assertWindowsACL(t *testing.T, path, principal string) {
 		t.Fatalf("protected DACL required, flags=%#x, err=%v", flags, err)
 	}
 	acl, _, err := sd.DACL()
-	if err != nil || acl == nil || acl.AceCount != 2 {
-		t.Fatalf("expected exactly two access rules, err=%v", err)
+	if err != nil || acl == nil || int(acl.AceCount) != len(principals) {
+		t.Fatalf("unexpected number of access rules, err=%v", err)
 	}
-	want := [2]string{"S-1-5-18", principal}
 	for i := uint32(0); i < uint32(acl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(acl, i, &ace); err != nil {
 			t.Fatal(err)
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 ||
-			ace.Mask != fileAllAccess || sid.String() != want[i] {
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != aceFlags ||
+			ace.Mask != fileAllAccess || sid.String() != principals[i] {
 			t.Fatalf("unexpected access rule %d", i)
 		}
 	}

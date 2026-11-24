@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -203,7 +204,10 @@ func AuthorizedPath(goos, home, programData string, admin bool) string {
 	if goos == "windows" && admin {
 		return strings.TrimRight(programData, "/\\") + "/ssh/administrators_authorized_keys"
 	}
-	return filepath.Join(home, ".ssh", "authorized_keys")
+	if goos == "windows" {
+		return filepath.Join(home, ".ssh", "authorized_keys")
+	}
+	return path.Join(home, ".ssh", "authorized_keys")
 }
 
 // ACLArgs uses well-known SIDs so localized Windows installations work.
