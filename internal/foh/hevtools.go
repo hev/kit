@@ -158,8 +158,8 @@ var hevToolDefs = []struct {
 				return []string{"peers", "send", a.Target, "-"}, a.Message, need("message", a.Message)
 			}},
 		}},
-	{"hev_steer", "Steer a BOH dispatch run or orchestrator (o-NAME): send TARGET MESSAGE with optional level (note, urgent, halt, redirect), or ls TARGET for receipts.",
-		`{"type":"object","properties":{"action":{"type":"string","enum":["send","ls"]},"target":{"type":"string"},"message":{"type":"string"},"level":{"type":"string","enum":["note","urgent","halt","redirect"]}},"required":["action"]}`,
+	{"hev_steer", "Steer a BOH dispatch run or orchestrator (o-NAME): send TARGET MESSAGE with optional host and level (note, urgent, halt, redirect), ls [TARGET] with optional host, or show ID with optional host.",
+		`{"type":"object","properties":{"action":{"type":"string","enum":["send","ls","show"]},"target":{"type":"string"},"id":{"type":"string"},"host":{"type":"string"},"message":{"type":"string"},"level":{"type":"string","enum":["note","urgent","halt","redirect"]}},"required":["action"]}`,
 		map[string]hevAction{
 			"send": {func(a hevArgs) ([]string, string, error) {
 				if err := need("target", a.Target); err != nil {
@@ -169,16 +169,33 @@ var hevToolDefs = []struct {
 					return nil, "", err
 				}
 				argv := []string{"steer", a.Target, a.Message}
+				if h := strings.TrimSpace(a.Host); h != "" {
+					argv = append(argv, "--host", h)
+				}
 				if lvl := strings.TrimSpace(a.Level); lvl != "" {
 					argv = append(argv, "--level", lvl)
 				}
 				return argv, "", nil
 			}},
 			"ls": {func(a hevArgs) ([]string, string, error) {
-				if strings.TrimSpace(a.Target) != "" {
-					return []string{"steer", "ls", a.Target}, "", nil
+				argv := []string{"steer", "ls"}
+				if t := strings.TrimSpace(a.Target); t != "" {
+					argv = append(argv, t)
 				}
-				return []string{"steer", "ls"}, "", nil
+				if h := strings.TrimSpace(a.Host); h != "" {
+					argv = append(argv, "--host", h)
+				}
+				return argv, "", nil
+			}},
+			"show": {func(a hevArgs) ([]string, string, error) {
+				if err := need("id", a.ID); err != nil {
+					return nil, "", err
+				}
+				argv := []string{"steer", "show", a.ID}
+				if h := strings.TrimSpace(a.Host); h != "" {
+					argv = append(argv, "--host", h)
+				}
+				return argv, "", nil
 			}},
 		}},
 	{"hev_board", "Shared findings board: search QUERY, read ID, post a finding (board, title, body).",
