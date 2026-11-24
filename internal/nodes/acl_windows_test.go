@@ -41,6 +41,7 @@ func TestWindowsProtectedACL(t *testing.T) {
 }
 
 func assertWindowsACL(t *testing.T, path, principal string) {
+	const fileAllAccess = 0x1f01ff
 	t.Helper()
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
@@ -62,7 +63,7 @@ func assertWindowsACL(t *testing.T, path, principal string) {
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
 		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 ||
-			ace.Mask != windows.FILE_ALL_ACCESS || sid.String() != want[i] {
+			ace.Mask != fileAllAccess || sid.String() != want[i] {
 			t.Fatalf("unexpected access rule %d", i)
 		}
 	}
