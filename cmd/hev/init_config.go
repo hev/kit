@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"github.com/hev/kit/internal/platformops"
 	"github.com/pelletier/go-toml/v2/unstable"
 )
+
+var errLayerBootstrapManaged = errors.New("the Layer target uses [layer].api_key_file; manage hevd directly or remove that setting before changing the storage target")
 
 func loadInitConfig(path string) (initFileConfig, error) {
 	var cfg initFileConfig
@@ -47,6 +50,9 @@ func loadInitConfig(path string) (initFileConfig, error) {
 	cfg.Layer = target.Layer
 	cfg.source, cfg.exists = raw, true
 	_, cfg.hasLocal = doc["local"]
+	if layer, ok := doc["layer"].(map[string]any); ok {
+		_, cfg.hasBootstrap = layer["api_key_file"]
+	}
 	return cfg, nil
 }
 

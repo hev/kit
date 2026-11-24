@@ -21,11 +21,12 @@ var initCmd = &cobra.Command{
 }
 
 type initFileConfig struct {
-	Layer    initLayerConfig `toml:"layer"`
-	source   []byte
-	exists   bool
-	hasLocal bool
-	Capture  struct {
+	Layer        initLayerConfig `toml:"layer"`
+	source       []byte
+	exists       bool
+	hasLocal     bool
+	hasBootstrap bool
+	Capture      struct {
 		ScanInterval string `toml:"scan_interval"`
 	} `toml:"capture"`
 }
@@ -63,6 +64,9 @@ func runInteractiveInit(in io.Reader, out io.Writer) error {
 	cfg, err := loadInitConfig(path)
 	if err != nil {
 		return err
+	}
+	if cfg.hasBootstrap {
+		return errLayerBootstrapManaged
 	}
 	if cfg.hasLocal {
 		fmt.Fprintln(out, "Warning: this config contains [local]. Updating the Layer target preserves local and archive settings and does not stop the local stack. Review layer.store for the hosted target; use HEV_CONFIG for separate local and hosted configs.")

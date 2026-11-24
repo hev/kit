@@ -342,3 +342,21 @@ func TestEnsureLeavesAnIdenticalLoadedJobAlone(t *testing.T) {
 		t.Fatalf("calls:\n%s", got)
 	}
 }
+
+func TestHEVLayerUpRefusesToRepointDiskBootstrap(t *testing.T) {
+	home, log := sandbox(t, "0")
+	const text = "[layer]\napi_key_file = \"layer.key\"\n"
+	path := writeConfig(t, home, text)
+	t.Setenv("HEVLAYER_API_KEY", "fixture-unrelated-key")
+	var out bytes.Buffer
+	if err := runUp(context.Background(), &out, false); err != errLayerBootstrapManaged {
+		t.Fatalf("expected bootstrap target refusal, got %v", err)
+	}
+	if err := runInteractiveInit(strings.NewReader("yes\n"), &out); err != errLayerBootstrapManaged {
+		t.Fatalf("expected bootstrap target refusal from init, got %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != text || allCalls(t, log) != "" {
+		t.Fatal("bootstrap target refusal changed the configuration or executed an external command")
+	}
+}

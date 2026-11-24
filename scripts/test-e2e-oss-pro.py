@@ -339,7 +339,15 @@ def pro_switch(A, stub):
 
     # Trace writes and reads go to the stub, under HOME_A's key.
     seed_transcript(A.path, 2, "zebra pineapple")
-    capture_once(A, env, lambda: stub.writes("alice"), "Pro capture")
+    config_path = A.path / ".hev/config.toml"
+    key_path = config_path.with_name("layer.key")
+    key_path.touch(mode=0o600)
+    key_path.write_text(env["HEVLAYER_API_KEY"] + "\n")
+    text = config_path.read_text()
+    inline_key = next(line for line in text.splitlines() if line.startswith("api_key = "))
+    config_path.write_text(text.replace(inline_key, 'api_key_file = "layer.key"', 1))
+    capture_env = {name: value for name, value in env.items() if name != "HEVLAYER_API_KEY"}
+    capture_once(A, capture_env, lambda: stub.writes("alice"), "Pro disk bootstrap capture")
     stub_rows = stub.namespaces()
     assert stub_rows.get("hev-traces", 0) > 0, stub_rows
     n = len(stub.requests)
