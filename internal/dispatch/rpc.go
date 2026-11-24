@@ -39,17 +39,18 @@ type Request struct {
 	ReserveClass bool `json:"reserve_class,omitempty"`
 	// ClassToken is the token a ReserveClass probe returned. A start
 	// carrying it may release only that reservation, never a later one.
-	ClassToken       string           `json:"class_token,omitempty"`
-	Orchestrator     string           `json:"orchestrator,omitempty"`
-	Transfer         []byte           `json:"transfer,omitempty"`
-	FromValidation   bool             `json:"from_validation,omitempty"`
-	ValidationRecord ValidationRecord `json:"validation_record,omitempty"`
-	Offset           int64            `json:"offset,omitempty"`
-	Action           string           `json:"action"`
-	Name             string           `json:"name"`
-	Order            string           `json:"order,omitempty"`
-	Meta             Meta             `json:"meta"`
-	Note             string           `json:"note,omitempty"`
+	ClassToken       string                  `json:"class_token,omitempty"`
+	Orchestrator     string                  `json:"orchestrator,omitempty"`
+	Transfer         []byte                  `json:"transfer,omitempty"`
+	FromValidation   bool                    `json:"from_validation,omitempty"`
+	ValidationRecord ValidationRecord        `json:"validation_record,omitempty"`
+	Offset           int64                   `json:"offset,omitempty"`
+	Action           string                  `json:"action"`
+	Name             string                  `json:"name"`
+	Order            string                  `json:"order,omitempty"`
+	Meta             Meta                    `json:"meta"`
+	Note             string                  `json:"note,omitempty"`
+	Event            *attention.EventSummary `json:"event,omitempty"`
 	// Resolve names the open decision key a say answers with Note.
 	Resolve string `json:"resolve,omitempty"`
 	// SupersededBy is a close request's replacement run, [HOST/]NAME; Note
@@ -263,6 +264,9 @@ func rpcTransport(ctx context.Context, h Host, q Request) (Response, error) {
 	c := helperCommand(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=1", h.SSH, remote)
 	var errout strings.Builder
 	c.Stderr = &errout
+	if q.Action == "orchestrator-event" {
+		c.WaitDelay = 100 * time.Millisecond
+	}
 	c.Stdin = bytes.NewReader(b)
 	out, e := c.Output()
 	if e != nil {
@@ -332,7 +336,7 @@ func Inventory(c Config, host string) map[string]Response {
 	return out
 }
 func workerInternal(action string) bool {
-	return action == "validation-reserve" || action == "validation-result"
+	return action == "validation-reserve" || action == "validation-result" || action == "orchestrator-event"
 }
 
 func Handle(q Request) (r Response, handleErr error) {
@@ -454,6 +458,13 @@ func Handle(q Request) (r Response, handleErr error) {
 			}
 		}
 		return r, LaunchOrchestrator(s.Name)
+	}
+	if q.Action == "orchestrator-event" {
+		name, ok := strings.CutPrefix(q.Name, "o-")
+		if !ok || !ValidName(name) || q.Event == nil || !validEventSummary(*q.Event) {
+			return r, fmt.Errorf("invalid orchestrator event")
+		}
+		return r, receiveOrchestratorEvent(context.Background(), name, *q.Event, false)
 	}
 	if strings.HasPrefix(q.Name, "o-") && orchestratorRPCAction(q.Action) {
 		name := strings.TrimPrefix(q.Name, "o-")

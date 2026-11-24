@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/steer"
 	"github.com/spf13/cobra"
@@ -176,7 +177,7 @@ func scopeOnly(name string) bool {
 
 func newOrchestrateControl(action string) *cobra.Command {
 	var to, host string
-	var yes bool
+	var yes, showJSON bool
 	var round int
 	sub := &cobra.Command{Use: action + " NAME", Args: cobra.ExactArgs(1)}
 	switch action {
@@ -226,12 +227,12 @@ func newOrchestrateControl(action string) *cobra.Command {
 			verb = "retire"
 		}
 		if !t.local {
-			return remoteOrchestrateControl(cmd, t, name, verb, to, round)
+			return remoteOrchestrateControl(cmd, t, name, verb, to, round, showJSON)
 		}
 		dir := dispatch.OrchestratorDir(name)
 		switch verb {
 		case "show":
-			return showLocalOrchestrator(out, name, dir)
+			return showLocalOrchestrator(out, name, dir, showJSON)
 		case "logs":
 			p := filepath.Join(dir, "supervisor.log")
 			if round > 0 {
@@ -264,6 +265,8 @@ func newOrchestrateControl(action string) *cobra.Command {
 	}
 	sub.Flags().StringVar(&host, "host", "", "Dispatch host running the orchestrator (default: look locally, then on reachable hosts)")
 	switch action {
+	case "show":
+		sub.Flags().BoolVar(&showJSON, "json", false, "Show orchestrator state as JSON")
 	case "logs":
 		sub.Flags().IntVar(&round, "round", 0, "Round trace number")
 	case "adopt":
@@ -293,7 +296,7 @@ func printAdopt(w io.Writer, kind string, res dispatch.AdoptResult) {
 	}
 }
 
-func remoteOrchestrateControl(cmd *cobra.Command, t orchestratorTarget, name, verb, to string, round int) error {
+func remoteOrchestrateControl(cmd *cobra.Command, t orchestratorTarget, name, verb, to string, round int, showJSON bool) error {
 	w, err := currentWorkspace()
 	if err != nil {
 		return err
@@ -308,6 +311,9 @@ func remoteOrchestrateControl(cmd *cobra.Command, t orchestratorTarget, name, ve
 	out := cmd.OutOrStdout()
 	switch verb {
 	case "show":
+		if showJSON {
+			return writeOrchestratorShowJSON(out, name, t.host, r.Files, r.Names)
+		}
 		fmt.Fprintf(out, "Host: %s\n", t.host)
 		for _, f := range dispatch.OrchestratorShowFiles {
 			fmt.Fprintf(out, "--- %s ---\n%s\n", f, r.Files[f])
@@ -332,17 +338,46 @@ func remoteOrchestrateControl(cmd *cobra.Command, t orchestratorTarget, name, ve
 	return nil
 }
 
-func showLocalOrchestrator(w io.Writer, name, dir string) error {
+func writeOrchestratorShowJSON(w io.Writer, name, host string, files map[string]string, rounds []string) error {
+	spec, err := dispatch.ParseOrchestrator(files["spec.md"])
+	if err != nil {
+		return err
+	}
+	if host == "" {
+		host = spec.Host
+	}
+	return json.NewEncoder(w).Encode(struct {
+		Name      string                  `json:"name"`
+		Host      string                  `json:"host,omitempty"`
+		Subscribe *attention.Subscription `json:"subscribe,omitempty"`
+		Files     map[string]string       `json:"files"`
+		Rounds    []string                `json:"rounds"`
+	}{Name: name, Host: host, Subscribe: spec.Subscribe, Files: files, Rounds: rounds})
+}
+
+func showLocalOrchestrator(w io.Writer, name, dir string, showJSON bool) error {
+	files := make(map[string]string, len(dispatch.OrchestratorShowFiles))
+
 	for _, f := range dispatch.OrchestratorShowFiles {
 		b, e := os.ReadFile(filepath.Join(dir, f))
 		if e != nil && !os.IsNotExist(e) {
 			return e
 		}
-		fmt.Fprintf(w, "--- %s ---\n%s\n", f, b)
+		files[f] = string(b)
+		if !showJSON {
+			fmt.Fprintf(w, "--- %s ---\n%s\n", f, b)
+		}
 	}
 	entries, e := os.ReadDir(filepath.Join(dir, "rounds"))
 	if e != nil && !os.IsNotExist(e) {
 		return e
+	}
+	if showJSON {
+		rounds := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			rounds = append(rounds, entry.Name())
+		}
+		return writeOrchestratorShowJSON(w, name, "", files, rounds)
 	}
 	fmt.Fprint(w, "Rounds:")
 	for _, f := range entries {

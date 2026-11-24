@@ -83,6 +83,7 @@ mode: loop
 every: 1h
 max_lifetime: 2h
 agent: off
+subscribe: {events: [ready], sources: [run], hosts: [test-host]}
 manages:
   runs: {selector: 'issue=TASK-*'}
   repos: [app]
@@ -102,7 +103,17 @@ Test intake only.
             except (FileNotFoundError, json.JSONDecodeError):
                 return {}
         try:
+            assert run(hev, "orchestrate", "apply", "--dry-run", "-f", str(spec)).strip() == "valid intake"
+            assert not state_dir.exists(), "dry-run wrote orchestrator state"
+            invalid = root / "invalid-subscription.md"
+            invalid.write_text(spec.read_text().replace("events: [ready]", "events: [start]"))
+            rejected = subprocess.run([hev, "orchestrate", "apply", "--dry-run", "-f", str(invalid)],
+                                      env=env, text=True, capture_output=True, timeout=10)
+            assert rejected.returncode != 0 and "subscribe.events" in rejected.stderr, rejected
             run(hev, "orchestrate", "apply", "-f", str(spec))
+            assert "subscribe:" in run(hev, "orchestrate", "show", "intake")
+            shown = json.loads(run(hev, "orchestrate", "show", "intake", "--json"))
+            assert shown["subscribe"] == {"events": ["ready"], "sources": ["run"], "hosts": ["test-host"]}, shown
             wait_for(lambda: state().get("state") == "waiting")
             listed = json.loads(run(hev, "orchestrate", "ls", "--json"))
             assert len(listed) == 1 and listed[0]["name"] == "intake" and listed[0]["runs_today"] == 1, listed
