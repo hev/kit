@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,6 +24,7 @@ import (
 
 type Config struct {
 	captureTargets []captureTarget
+	bootstrapFile  *string
 
 	ConfigPath string
 
@@ -182,10 +185,11 @@ type archiveConfig struct {
 }
 
 type layerConfig struct {
-	Endpoint  string `toml:"endpoint"`
-	APIKey    string `toml:"api_key"`
-	Namespace string `toml:"namespace"`
-	Store     string `toml:"store,omitempty"`
+	Endpoint   string  `toml:"endpoint"`
+	APIKey     string  `toml:"api_key"`
+	APIKeyFile *string `toml:"api_key_file"`
+	Namespace  string  `toml:"namespace"`
+	Store      string  `toml:"store,omitempty"`
 }
 
 type captureConfig struct {
@@ -206,7 +210,9 @@ type captureConfig struct {
 	AgyDataDir         string         `toml:"agy_data_dir"`
 }
 
-func LoadConfig() (*Config, error) {
+func LoadConfig() (*Config, error) { return loadConfig(false) }
+
+func loadConfig(forDaemon bool) (*Config, error) {
 	layerenv.WarnDeprecated(os.Stderr)
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -262,7 +268,7 @@ func LoadConfig() (*Config, error) {
 		AgyDataDir:         trace.DefaultAgyRoot(),
 	}
 
-	if err := applyConfigFile(c); err != nil {
+	if err := applyConfigFile(c, forDaemon); err != nil {
 		return nil, err
 	}
 	if err := applyEnvOverrides(c); err != nil {
@@ -292,7 +298,7 @@ func DefaultConfigText() string {
 #
 # [layer]
 # endpoint = "https://aws-us-east-1.hevlayer.com"
-# api_key = ""
+# api_key_file = "layer.key" # relative to this config, hevd only
 # namespace = "hev-traces"
 
 [capture]
@@ -379,20 +385,28 @@ func SetActiveBucket(name string) (string, error) {
 	return path, nil
 }
 
-func applyConfigFile(c *Config) error {
+func applyConfigFile(c *Config, forDaemon bool) error {
 	if c.ConfigPath == "" {
 		return nil
 	}
-	if _, err := os.Stat(c.ConfigPath); os.IsNotExist(err) {
+	raw, err := os.ReadFile(c.ConfigPath)
+	if os.IsNotExist(err) {
 		return nil
-	} else if err != nil {
-		return fmt.Errorf("stat config %s: %w", c.ConfigPath, err)
+	}
+	if err != nil {
+		return fmt.Errorf("read config %s: %w", c.ConfigPath, err)
 	}
 
 	var fc fileConfig
-	md, err := toml.DecodeFile(c.ConfigPath, &fc)
+	md, err := toml.Decode(string(raw), &fc)
 	if err != nil {
 		return fmt.Errorf("read config %s: invalid TOML or daemon settings", c.ConfigPath)
+	}
+	if forDaemon && (fc.Layer.APIKeyFile != nil || usableLegacyKey(fc.Layer.APIKey)) {
+		checked, err := platformops.ReadPrivateFile(c.ConfigPath, 1<<20)
+		if err != nil || !bytes.Equal(checked, raw) {
+			return errors.New("hevd: protect the Layer configuration file before starting capture")
+		}
 	}
 	if md.IsDefined("projects") {
 		fmt.Fprintln(os.Stderr, "warning: [projects] is ignored (it never filtered capture); remove it")
@@ -400,6 +414,7 @@ func applyConfigFile(c *Config) error {
 	if fc.Layer.Endpoint != "" {
 		c.LayerEndpoint = fc.Layer.Endpoint
 	}
+	c.bootstrapFile = fc.Layer.APIKeyFile
 	if fc.Layer.APIKey != "" {
 		c.LayerAPIKey = fc.Layer.APIKey
 	}

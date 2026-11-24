@@ -102,7 +102,7 @@ class Home:
     def __init__(self, root, name, stubbin):
         self.name = name
         self.path = Path(root, name)
-        self.path.mkdir()
+        self.path.mkdir(mode=0o700)
         self.env = {
             "HOME": str(self.path), "USERPROFILE": str(self.path),
             "PATH": str(stubbin) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),

@@ -37,10 +37,11 @@ func Intent(configPath string) ([]string, error) {
 	}
 	var file struct {
 		Layer struct {
-			Endpoint  string `toml:"endpoint"`
-			Namespace string `toml:"namespace"`
-			Store     string `toml:"store"`
-			APIKey    string `toml:"api_key"`
+			Endpoint   string  `toml:"endpoint"`
+			Namespace  string  `toml:"namespace"`
+			Store      string  `toml:"store"`
+			APIKey     string  `toml:"api_key"`
+			APIKeyFile *string `toml:"api_key_file"`
 		} `toml:"layer"`
 	}
 	if _, err := toml.DecodeFile(configPath, &file); err != nil {
@@ -50,6 +51,9 @@ func Intent(configPath string) ([]string, error) {
 		return reasons, fmt.Errorf("read %s to find the storage mode: %w", configPath, err)
 	}
 	l := file.Layer
+	if l.APIKeyFile != nil {
+		reasons = append(reasons, "[layer].api_key_file is set for hevd")
+	}
 	endpoint := strings.TrimSpace(l.Endpoint)
 	retired := strings.EqualFold(strings.TrimSpace(l.Store), "pgvector") ||
 		strings.TrimSpace(l.APIKey) == layerenv.PlaceholderKey ||
