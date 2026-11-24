@@ -51,11 +51,11 @@ func osGlyph(goos string, color bool) string {
 }
 
 var (
-	chromeOnline  = lipgloss.NewStyle().Foreground(lipgloss.Color("#59C9A5"))
-	chromeOffline = lipgloss.NewStyle().Foreground(lipgloss.Color("#F3AE35"))
-	chromeName    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0DEF4"))
-	chromeMuted   = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
-	ruleStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#3B3E4F"))
+	chromeOnline  = lipgloss.NewStyle().Foreground(accent)
+	chromeOffline = lipgloss.NewStyle().Foreground(brandMuted)
+	chromeName    = lipgloss.NewStyle().Foreground(brandInkSoft)
+	chromeMuted   = lipgloss.NewStyle().Foreground(brandMuted)
+	ruleStyle     = lipgloss.NewStyle().Foreground(brandRule)
 )
 
 func derefInt(p *int) int {

@@ -15,6 +15,7 @@ import (
 	"github.com/hev/kit/internal/dispatch"
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/index"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/storagemode"
@@ -77,7 +78,7 @@ func openLegacyPrimary(ctx context.Context, cfg *Config, logger *slog.Logger) (T
 	// a rate limit clears. This is the existing supervisor startup behavior.
 	_, ref := layerenv.KeyRef()
 	conf := *cfg
-	if key := strings.TrimSpace(conf.LayerAPIKey); (key == "" || key == layerenv.PlaceholderKey) && ref != "" {
+	if key := strings.TrimSpace(conf.LayerAPIKey); (key == "" || key == layerenv.PlaceholderKey) && ref != "" && !conf.Kit.SignedIn() {
 		waitCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		key, err := layerKeyAfterCooldown(waitCtx, logger)
 		stop()
@@ -196,6 +197,21 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, r
 		}
 	}
 
+	var drainer *kitcapture.Drainer
+	startDrainer := func() {
+		if primary.Kit == nil {
+			return
+		}
+		logger.Info("signed in to Club Kit: capturing to the Club Kit API through a local outbox", "team", cfg.Kit.TeamSlug, "archive", primary.Files.Dir(), "outbox", primary.Kit.Outbox.Dir())
+		drainer = &kitcapture.Drainer{Outbox: primary.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
+		primary.Kit.Outbox.Logger = logger
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			drainer.Run(ctx)
+		}()
+	}
+	startDrainer()
 	cycle := captureCycle{state: index.LoadState()}
 	run := func() {
 		if err := dispatch.SweepQueueBackstop(); err != nil {
@@ -205,7 +221,7 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, r
 			var err error
 			conf := *cfg
 			_, ref := layerenv.KeyRef()
-			if key := strings.TrimSpace(conf.LayerAPIKey); (key == "" || key == layerenv.PlaceholderKey) && ref != "" {
+			if key := strings.TrimSpace(conf.LayerAPIKey); (key == "" || key == layerenv.PlaceholderKey) && ref != "" && !conf.Kit.SignedIn() {
 				conf.LayerAPIKey, err = resolveCaptureKey(ctx, ref, resolve)
 			}
 			if err == nil {
@@ -218,6 +234,7 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, r
 				return
 			}
 			recordPrimary(primary, logger)
+			startDrainer()
 			if primary.Layer != nil {
 				if gate := firstScanGate(cfg, func() error { _, err := primary.Layer.Health(); return err }); gate != nil {
 					if err := gate(ctx); err != nil {
@@ -230,7 +247,12 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, r
 		if primary.Layer != nil {
 			primaryStatus.Endpoint = CaptureEndpoint(primary.Layer.Endpoint)
 		}
-		status.publish(0, primaryStatus, cycle.run(ctx, primary, logger.With("target", primaryTarget)))
+		result := cycle.run(ctx, primary, logger.With("target", primaryTarget))
+		if drainer != nil {
+			drainer.Kick()
+			result.Notice = kitNotice(drainer, primary.Kit.Outbox)
+		}
+		status.publish(0, primaryStatus, result)
 	}
 	var gate func(context.Context) error
 	if primary.Layer != nil {

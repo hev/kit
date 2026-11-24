@@ -520,6 +520,16 @@ const ago = t => { const d=Date.now()-t; const h=d/36e5; if (h<1) return Math.ro
 const usageTotal = u => (u.input||0)+(u.output||0)+(u.cache_write||0)+(u.cache_read||0);
 const cacheHit = u => { const d=(u.input||0)+(u.cache_read||0)+(u.cache_write||0); return d? (u.cache_read||0)/d : 0; };
 const shortModel = m => (m||'').replace(/^claude-/,'').replace(/\[1m\]$/,'');
+const modelFamily = m => {
+  let s = (m||'').trim().toLowerCase();
+  const slash = s.lastIndexOf('/'); if (slash >= 0) s = s.slice(slash+1);
+  const tag = s.search(/[[@]/); if (tag > 0) s = s.slice(0, tag);
+  for (;;) {
+    const next = s.replace(/-\d{8}$/, '').replace(/-(?:none|minimal|low|medium|high|xhigh|max|tiered)$/, '');
+    if (next === s) return s;
+    s = next;
+  }
+};
 const tip = $('#tip');
 function showTip(e, text){ tip.textContent=text; tip.style.display='block'; moveTip(e); }
 function moveTip(e){ const x=e.clientX+14, y=e.clientY+14; tip.style.left=Math.min(x, innerWidth-380)+'px'; tip.style.top=Math.min(y, innerHeight-tip.offsetHeight-10)+'px'; }
@@ -829,7 +839,7 @@ function header(){
   m.append(el('span',{html:`${fmtDate(S.start)} · <b>${fmtMs(S.wall_ms)}</b> wall · ${fmtMs(S.model_ms)} api`}));
   m.append(el('span',{html:`<b>${fmtTok(usageTotal(S.usage)+usageTotal(S.agent_usage))}</b> tok · <b>${fmtUsd(S.cost)}</b>${S.rates_known?'':' <span title="a rate in this session is a placeholder">≈</span>'}`}));
   m.append(el('span',{html:`${fmtN(S.n_prompts)} prompts · ${fmtN(S.n_requests)} requests · ${fmtN(S.n_tools)} tools · ${S.agents.length} subagents`}));
-  m.append(el('span',{class:'pill'}, S.host+' · '+(S.size/1024/1024).toFixed(1)+' MB'));
+  m.append(el('span',{class:'pill'}, (S.author_name ? S.author_name+' · ' : '')+S.host+' · '+(S.size/1024/1024).toFixed(1)+' MB'));
   if(S.timing)m.append(el('span',{},timingLabel(S.timing)));
   h.append(m);
   const nav = el('div',{class:'subnav'});
@@ -858,6 +868,7 @@ function tracesView(){
   for(const r of rows.slice(shown,shown+200)){
    const tr=el('tr',{class:'row',onclick:()=>location.href=traceURL(r)});
    const title=el('td',{},el('a',{href:traceURL(r)},r.summary||r.id));
+   if(r.author_name)title.append(el('span',{class:'pill'},r.author_name));
    for(const skill of r.skills||[])title.append(el('span',{class:'pill'},skill));
    if(!r.summary)title.append(el('span',{class:'bf'},r.summary_reason));if(r.has_subagents)title.append(el('span',{class:'pill'},'subagents'));
    const repo=el('td',{class:'nw'});const repoLabel=r.project+' / '+(r.branch||'');
@@ -1410,18 +1421,27 @@ function statsView(){
   const tb=el('tbody'); pt.append(tb);
   for (const p of shown){ const k=p.name; const tr=el('tr',{class:'row', onclick:()=>{ setFilter('project',k); }}); tr.innerHTML=`<td>${p.repo?`<a class="repo" href="${p.repo}" target="_blank" onclick="event.stopPropagation()">${esc(k)} ↗</a>`:esc(k)}</td><td></td><td class="num">${fmtN(p.n)}</td><td class="num">${fmtN(p.prompts)}</td><td class="num">${fmtTok(p.tok)}</td><td class="num">${fmtMs(p.api)}</td><td class="num">${fmtMs(p.wall)}</td><td class="num">${fmtUsd(p.cost)}</td><td class="num">${fmtUsd(p.cost/Math.max(1,p.prompts))}</td>`; tr.children[1].append(spark(p.series)); tb.append(tr); }
   f.append(el('div',{class:'tables'}, pt));
-  f.append(el('div',{class:'rates'}, 'Rates, USD per million tokens (input / output / cache write 1h / cache read): '+Object.entries(DATA.rates).map(([m,r])=>`${m} ${r.join('/')}`).join(' · ')+'. Click a project row to filter Traces.'));
+  f.append(el('div',{class:'rates'}, 'Rates, USD per million tokens (input / output / cache write / cache read): '+Object.entries(DATA.rates).map(([m,r])=>`${m} ${r.join('/')}`).join(' · ')+'. Click a project row to filter Traces.'));
   v.append(f);
   requestAnimationFrame(()=>{
     const dayList=S.daily.map(d=>d.day);
     const dayRows=day=>S.daily.find(d=>d.day===day);
     const openDay=(day,models=[])=>{params.delete('q');params.set('since',day+'T00:00:00Z');const next=new Date(day+'T00:00:00Z');next.setUTCDate(next.getUTCDate()+1);params.set('until',next.toISOString());params.delete('weekday');params.delete('hour');if(models.length){params.delete('model');models.forEach(m=>params.append('model',m));}saveFilters();customOpen=true;rangeBar();refreshArchive('traces');};
-    const byModel=Object.create(null); const costByDay=Object.create(null); for (const d of S.daily){ costByDay[d.day]=d.spend; for(const [m,u] of Object.entries(d.models)){ (byModel[m]||(byModel[m]={}))[d.day]=u.tokens; } }
-    const models=Object.entries(byModel).sort((a,b)=>Object.values(b[1]).reduce((x,y)=>x+y,0)-Object.values(a[1]).reduce((x,y)=>x+y,0));
-    const top=models.slice(0,4); const rest=models.slice(4);
+    const byFamily=Object.create(null); const costByDay=Object.create(null);
+    for (const d of S.daily){
+      costByDay[d.day]=d.spend;
+      for(const [m,u] of Object.entries(d.models)){
+        const fam=modelFamily(m)||m;
+        const entry=byFamily[fam]||(byFamily[fam]={days:{},raw:new Set()});
+        entry.days[d.day]=(entry.days[d.day]||0)+u.tokens;
+        entry.raw.add(m);
+      }
+    }
+    const families=Object.entries(byFamily).sort((a,b)=>Object.values(b[1].days).reduce((x,y)=>x+y,0)-Object.values(a[1].days).reduce((x,y)=>x+y,0));
+    const top=families.slice(0,4); const rest=families.slice(4);
     const cols=['var(--c-out)','var(--c-in)','var(--c-cw)','var(--c-git)','var(--c-cr)'];
-    const ser=top.map(([m,d],i)=>({name:shortModel(m),models:[m],color:cols[i],values:dayList.map(day=>d[day]||0)}));
-    if (rest.length) ser.push({name:'other',models:rest.map(([m])=>m),color:cols[4],values:dayList.map(day=>rest.reduce((a,[m,d])=>a+(d[day]||0),0))});
+    const ser=top.map(([fam,entry],i)=>({name:shortModel(fam),models:[...entry.raw],color:cols[i],values:dayList.map(day=>entry.days[day]||0)}));
+    if (rest.length) ser.push({name:'other',models:rest.flatMap(([,entry])=>[...entry.raw]),color:cols[4],values:dayList.map(day=>rest.reduce((a,[,entry])=>a+(entry.days[day]||0),0))});
     if (ser.length){ columns(sd1, ser, {fmt:fmtTok, tip:(i,si)=>dayList[i]+' · '+ser[si].name+'\n'+ser[si].models.reduce((n,m)=>n+(dayRows(dayList[i]).models[m]?.traces||0),0)+' traces · '+fmtTok(ser[si].values[i]), click:(i,si)=>openDay(dayList[i],ser[si].models), xlabel:i=>dayList[i].slice(5)}); d1.append(legend(ser.map(s=>[s.color,s.name]))); }
     columns(sd2, [{color:'var(--c-model)', values:dayList.map(d=>costByDay[d]||0)}], {fmt:fmtUsd, tip:i=>`${dayList[i]}\n${fmtUsd(costByDay[dayList[i]]||0)} · ${dayRows(dayList[i]).traces} traces`, click:i=>openDay(dayList[i]), xlabel:i=>dayList[i].slice(5)});
     const grid=S.prompt_grid||Array.from({length:7},()=>Array(24).fill(0)); let hmax=1;

@@ -333,7 +333,11 @@ func (m *TUI) steerOverlayView(width, height int) string {
 		status = "  loading active runs & orchestrators…"
 	}
 	b.WriteString(badge.Render("steer BOH") + dimStyle.Render(status) + "\n")
-	b.WriteString("filter › " + s.query + "▏\n")
+	caret := "▏"
+	if m.opts.Color {
+		caret = lipgloss.NewStyle().Foreground(accent).Render(caret)
+	}
+	b.WriteString("filter › " + s.query + caret + "\n")
 	rows := max(3, height-4)
 	start := 0
 	if s.cursor >= rows {

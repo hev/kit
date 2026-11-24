@@ -1,0 +1,464 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/daemon"
+	"github.com/hev/kit/internal/layerenv"
+)
+
+const fakeKitKey = "hk_secret_do_not_print_7f3a"
+
+// fakeKit is a kit sign-in service and API. The browser half is played by
+// browse, which follows the login URL the way a signed-in user would.
+type fakeKit struct {
+	t         *testing.T
+	srv       *httptest.Server
+	mu        sync.Mutex
+	challenge string
+	exchanges int
+	whoamis   int
+	verifier  string
+	logouts   []string
+	whoamiOK  bool
+	logoutErr int
+	invite    string
+	mintKey   string
+}
+
+func newFakeKit(t *testing.T) *fakeKit {
+	f := &fakeKit{t: t, whoamiOK: true, mintKey: fakeKitKey}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /cli/exchange", func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Code, Verifier, Hostname string }
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.exchanges++
+		f.verifier = body.Verifier
+		sum := sha256.Sum256([]byte(body.Verifier))
+		if body.Code != "code-1" || base64.RawURLEncoding.EncodeToString(sum[:]) != f.challenge || body.Hostname == "" {
+			http.Error(w, "bad exchange", 400)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"api": f.srv.URL, "key": f.mintKey, "key_id": "key_42",
+			"team":   map[string]string{"id": "team_1", "slug": "acme"},
+			"author": map[string]string{"id": "user_9", "name": "Ada"},
+		})
+	})
+	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.whoamis++
+		ok := f.whoamiOK
+		wantKey := f.mintKey
+		f.mu.Unlock()
+		if !ok || r.Header.Get("Authorization") != "Bearer "+wantKey {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"key_id": "key_42", "hostname": "box",
+			"team": map[string]string{"id": "team_1", "slug": "acme"}, "author": map[string]string{"id": "user_9", "name": "Ada"}})
+	})
+	mux.HandleFunc("POST /cli/logout", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.logouts = append(f.logouts, r.Header.Get("Authorization"))
+		code := f.logoutErr
+		f.mu.Unlock()
+		if code != 0 {
+			http.Error(w, "nope", code)
+		}
+	})
+	f.srv = httptest.NewServer(mux)
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func (f *fakeKit) set(change func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	change()
+}
+
+// browse returns a fake browser that answers the loopback callback with state.
+func (f *fakeKit) browse(state func(sent string) string) func(string) {
+	return f.browseWith(state, "code=code-1")
+}
+
+// browseWith answers the callback with the given result parameters.
+func (f *fakeKit) browseWith(state func(sent string) string, result string) func(string) {
+	return func(raw string) {
+		u, err := url.Parse(raw)
+		if err != nil || !strings.HasPrefix(raw, f.srv.URL+"/cli/login?") {
+			f.t.Errorf("login URL %q", raw)
+			return
+		}
+		q := u.Query()
+		f.mu.Lock()
+		f.challenge = q.Get("challenge")
+		f.invite = q.Get("code")
+		f.mu.Unlock()
+		cb := "http://127.0.0.1:" + q.Get("port") + "/callback?" + result + "&state=" + url.QueryEscape(state(q.Get("state")))
+		resp, err := http.Get(cb)
+		if err == nil {
+			resp.Body.Close()
+		}
+	}
+}
+
+func kitTestHome(t *testing.T) string {
+	onOS(t, "linux")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path := filepath.Join(home, ".hev", "config.toml")
+	t.Setenv("HEV_CONFIG", path)
+	t.Setenv(kitServiceEnv, "")
+	for _, name := range layerenv.Names() {
+		t.Setenv(name, "")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prior := "[layer]\nendpoint = 'http://127.0.0.1:8080'\napi_key = 'local-key'\nnamespace = 'mine'\n"
+	if err := os.WriteFile(path, []byte(prior), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func readTOML(t *testing.T, path string) map[string]any {
+	doc := map[string]any{}
+	if _, err := toml.DecodeFile(path, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+func TestKitLoginRejectsStateMismatch(t *testing.T) {
+	path := kitTestHome(t)
+	f := newFakeKit(t)
+	old, oldTimeout := openBrowser, loginTimeout
+	t.Cleanup(func() { openBrowser, loginTimeout = old, oldTimeout })
+	loginTimeout = 2 * time.Second
+	openBrowser = f.browse(func(string) string { return "forged-state" })
+	err := runLogin(context.Background(), &bytes.Buffer{}, f.srv.URL, "")
+	if err == nil || !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "hev login --code CODE") {
+		t.Fatalf("forged state accepted, or no invite hint on timeout: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.exchanges != 0 {
+		t.Fatal("code exchanged after a state mismatch")
+	}
+	if doc := readTOML(t, path); doc["kit"] != nil || doc["layer"] == nil {
+		t.Fatalf("config changed: %v", doc)
+	}
+}
+
+func TestKitLoginStatusLogout(t *testing.T) {
+	path := kitTestHome(t)
+	f := newFakeKit(t)
+	old := openBrowser
+	t.Cleanup(func() { openBrowser = old })
+	openBrowser = f.browse(func(sent string) string { return sent })
+	t.Setenv(kitServiceEnv, f.srv.URL) // the service comes from the environment
+
+	var out bytes.Buffer
+	if err := runLogin(context.Background(), &out, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	exchanges, verifier := f.exchanges, f.verifier
+	f.mu.Unlock()
+	if exchanges != 1 || verifier == "" {
+		t.Fatal("PKCE verifier not sent")
+	}
+	if strings.Contains(out.String(), fakeKitKey) || strings.Contains(out.String(), "hk_") {
+		t.Fatalf("login printed the key: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "queue rows for the Club Kit API") {
+		t.Fatalf("login did not say where capture goes: %s", out.String())
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode %v %v", info.Mode(), err)
+	}
+	doc := readTOML(t, path)
+	kit, _ := doc["kit"].(map[string]any)
+	want := map[string]string{"service": f.srv.URL, "api": f.srv.URL, "key": fakeKitKey, "key_id": "key_42", "team_id": "team_1", "team_slug": "acme", "author_id": "user_9", "author_name": "Ada"}
+	for k, v := range want {
+		if kit[k] != v {
+			t.Fatalf("[kit] %s = %v, want %v", k, kit[k], v)
+		}
+	}
+	if doc["layer"] != nil {
+		t.Fatal("[layer] still selected after sign-in")
+	}
+	if prior, _ := doc["kit_prior"].(map[string]any); prior["api_key"] != "local-key" {
+		t.Fatalf("prior target not kept: %v", doc["kit_prior"])
+	}
+	if err := runLogin(context.Background(), &bytes.Buffer{}, "", ""); err == nil {
+		t.Fatal("second login over an existing one")
+	}
+
+	out.Reset()
+	if err := runLoginStatus(context.Background(), &out); err != nil || !strings.Contains(out.String(), "acme as Ada") || strings.Contains(out.String(), fakeKitKey) {
+		t.Fatalf("status: %v %q", err, out.String())
+	}
+	f.set(func() { f.whoamiOK = false })
+	err = runLoginStatus(context.Background(), &out)
+	if err == nil || !strings.Contains(err.Error(), "rejected") || strings.Contains(err.Error(), fakeKitKey) {
+		t.Fatalf("whoami 401: %v", err)
+	}
+
+	f.set(func() { f.logoutErr = 503 })
+	if err := runLogout(context.Background(), &out, false); err == nil {
+		t.Fatal("logout cleared the key though revocation failed")
+	}
+	if readTOML(t, path)["kit_prior"] == nil {
+		t.Fatal("failed logout restored the target")
+	}
+	f.set(func() { f.logoutErr = 0 })
+	out.Reset()
+	if err := runLogout(context.Background(), &out, false); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	got := f.logouts[len(f.logouts)-1]
+	f.mu.Unlock()
+	if got != "Bearer "+fakeKitKey {
+		t.Fatalf("logout bearer %q", got)
+	}
+	doc = readTOML(t, path)
+	layer, _ := doc["layer"].(map[string]any)
+	if layer["api_key"] != "local-key" || layer["namespace"] != "mine" || doc["kit_prior"] != nil {
+		t.Fatalf("prior target not restored: %v", doc)
+	}
+	if kit, _ := doc["kit"].(map[string]any); kit["key"] != nil || kit["service"] != f.srv.URL {
+		t.Fatalf("[kit] after logout: %v", kit)
+	}
+	if strings.Contains(out.String(), fakeKitKey) {
+		t.Fatal("logout printed the key")
+	}
+	if err := runLoginStatus(context.Background(), &out); err == nil || !strings.Contains(err.Error(), "not signed in") {
+		t.Fatalf("status after logout: %v", err)
+	}
+}
+
+func TestKitLoginServicePrecedence(t *testing.T) {
+	kitTestHome(t)
+	doc := map[string]any{}
+	if got := resolveKitService("", doc); got != defaultKitService {
+		t.Fatalf("default service = %s", got)
+	}
+	doc["kit"] = map[string]any{"service": "https://configured.example"}
+	if got := resolveKitService("", doc); got != "https://configured.example" {
+		t.Fatalf("configured service = %s", got)
+	}
+	t.Setenv(kitServiceEnv, "https://environment.example")
+	if got := resolveKitService("", doc); got != "https://environment.example" {
+		t.Fatalf("environment service = %s", got)
+	}
+	if got := resolveKitService("https://flag.example", doc); got != "https://flag.example" {
+		t.Fatalf("explicit service = %s", got)
+	}
+}
+
+func TestLoginCallbackRejectsWrongState(t *testing.T) {
+	codes := make(chan loginResult, 1)
+	h := loginCallback("expected", codes)
+	for _, path := range []string{"/callback?state=wrong&code=secret", "/callback?state=wrong&error=invite_required", "/callback?state=expected", "/callback?state=expected&error=Not+A+Code", "/else?state=expected&code=secret"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != 400 {
+			t.Fatalf("%s: %d", path, w.Code)
+		}
+	}
+	select {
+	case <-codes:
+		t.Fatal("invalid callback delivered code")
+	default:
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/callback?state=expected&code=valid", nil))
+	if w.Code != 200 || (<-codes).code != "valid" {
+		t.Fatal("valid callback rejected")
+	}
+}
+
+func TestKitServiceURLBoundary(t *testing.T) {
+	for _, raw := range []string{"http://example.com", "https://u:p@example.com", "https://example.com?key=x", "file:///tmp/x"} {
+		if validKitURL(raw) {
+			t.Fatalf("accepted %s", raw)
+		}
+	}
+	for _, raw := range []string{"https://example.com", "http://127.0.0.1:8787"} {
+		if !validKitURL(raw) {
+			t.Fatalf("rejected %s", raw)
+		}
+	}
+}
+
+func TestKitLoginPassesInviteCode(t *testing.T) {
+	kitTestHome(t)
+	f := newFakeKit(t)
+	old := openBrowser
+	t.Cleanup(func() { openBrowser = old })
+	openBrowser = f.browse(func(sent string) string { return sent })
+	if err := runLogin(context.Background(), &bytes.Buffer{}, f.srv.URL, "INV-123"); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.invite != "INV-123" {
+		t.Fatalf("invite code on /cli/login = %q", f.invite)
+	}
+}
+
+func TestKitLoginHintsWhenInviteRequired(t *testing.T) {
+	path := kitTestHome(t)
+	f := newFakeKit(t)
+	old := openBrowser
+	t.Cleanup(func() { openBrowser = old })
+	openBrowser = f.browseWith(func(sent string) string { return sent }, "error="+inviteRequired)
+	err := runLogin(context.Background(), &bytes.Buffer{}, f.srv.URL, "")
+	if err == nil || strings.Contains(err.Error(), "\n") || !strings.Contains(err.Error(), "hev login --code CODE") {
+		t.Fatalf("no one-line invite hint: %v", err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.exchanges != 0 || f.invite != "" {
+		t.Fatalf("exchanges=%d invite=%q", f.exchanges, f.invite)
+	}
+	if readTOML(t, path)["kit"] != nil {
+		t.Fatal("refused sign-in wrote [kit]")
+	}
+}
+
+func TestKitConfigShowHidesKey(t *testing.T) {
+	path := kitTestHome(t)
+	doc := readTOML(t, path)
+	if err := daemon.WriteKitConfig(doc, daemon.KitConfig{Key: fakeKitKey, TeamID: "team_1"}); err != nil {
+		t.Fatal(err)
+	}
+	previous := configShowCmd.OutOrStdout()
+	var out bytes.Buffer
+	configShowCmd.SetOut(&out)
+	t.Cleanup(func() { configShowCmd.SetOut(previous) })
+	if err := configShowCmd.RunE(configShowCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), fakeKitKey) || !strings.Contains(out.String(), "HEVLAYER_NAMESPACE") {
+		t.Fatal("config show exposed the Club Kit key or lost the effective settings")
+	}
+}
+
+func TestKitLoginMintedHevKeyParityAndRefusals(t *testing.T) {
+	hevPayload := strings.Repeat("a1B2", 8)
+	hevKey := "hev_" + hevPayload
+	skOrKey := "sk-or-v1-" + strings.Repeat("deadbeef", 8)
+
+	// Permitted side: /cli/exchange mints a unified hev_<32base62> key.
+	// login writes [kit].key, login status succeeds via /v1/whoami, logout revokes it,
+	// and stdout/errors never contain hev_ secret material.
+	t.Run("minted-hev-key-roundtrip", func(t *testing.T) {
+		path := kitTestHome(t)
+		f := newFakeKit(t)
+		f.set(func() { f.mintKey = hevKey })
+		old := openBrowser
+		t.Cleanup(func() { openBrowser = old })
+		openBrowser = f.browse(func(sent string) string { return sent })
+
+		var out bytes.Buffer
+		if err := runLogin(context.Background(), &out, f.srv.URL, ""); err != nil {
+			t.Fatalf("runLogin with minted hev_ key: %v", err)
+		}
+		if strings.Contains(out.String(), hevKey) || strings.Contains(out.String(), hevPayload) || strings.Contains(out.String(), "hev_") {
+			t.Fatalf("login output leaked hev_ material: %q", out.String())
+		}
+		doc := readTOML(t, path)
+		kit, _ := doc["kit"].(map[string]any)
+		if kit["key"] != hevKey {
+			t.Fatalf("[kit].key = %v, want minted hev_ key", kit["key"])
+		}
+
+		out.Reset()
+		if err := runLoginStatus(context.Background(), &out); err != nil {
+			t.Fatalf("runLoginStatus: %v", err)
+		}
+		if !strings.Contains(out.String(), "acme as Ada") || strings.Contains(out.String(), hevKey) || strings.Contains(out.String(), hevPayload) || strings.Contains(out.String(), "hev_") {
+			t.Fatalf("login status output = %q", out.String())
+		}
+
+		out.Reset()
+		if err := runLogout(context.Background(), &out, false); err != nil {
+			t.Fatalf("runLogout: %v", err)
+		}
+		if strings.Contains(out.String(), hevKey) || strings.Contains(out.String(), hevPayload) || strings.Contains(out.String(), "hev_") {
+			t.Fatalf("logout output leaked hev_ material: %q", out.String())
+		}
+		f.mu.Lock()
+		gotLogout := f.logouts[len(f.logouts)-1]
+		f.mu.Unlock()
+		if gotLogout != "Bearer "+hevKey {
+			t.Fatalf("logout Authorization = %q, want Bearer <hevKey>", gotLogout)
+		}
+	})
+
+	// Refused side: malformed, bare-prefix, short, or raw provider credentials from /cli/exchange
+	// must fail closed without calling /v1/whoami, writing [kit], or leaking the token.
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{"bare-hev", "hev_"},
+		{"short-hev", "hev_short"},
+		{"illegal-char-hev", "hev_" + strings.Repeat("a1B2", 6) + "_bad"},
+		{"bare-hk", "hk_"},
+		{"short-hk", "hk_short"},
+		{"openrouter-key", skOrKey},
+		{"op-ref", "op://vault/kit/key"},
+	} {
+		t.Run("refuse/"+tc.name, func(t *testing.T) {
+			path := kitTestHome(t)
+			f := newFakeKit(t)
+			f.set(func() { f.mintKey = tc.key })
+			old := openBrowser
+			t.Cleanup(func() { openBrowser = old })
+			openBrowser = f.browse(func(sent string) string { return sent })
+
+			var out bytes.Buffer
+			err := runLogin(context.Background(), &out, f.srv.URL, "")
+			if err == nil {
+				t.Fatalf("expected refusal for exchanged key %q", tc.key)
+			}
+			if len(tc.key) > 8 && (strings.Contains(err.Error(), tc.key) || strings.Contains(out.String(), tc.key)) {
+				t.Fatalf("refusal leaked key %q: err=%v out=%q", tc.key, err, out.String())
+			}
+			f.mu.Lock()
+			whoamis := f.whoamis
+			f.mu.Unlock()
+			if whoamis != 0 {
+				t.Fatalf("called /v1/whoami %d times after invalid exchange key", whoamis)
+			}
+			if doc := readTOML(t, path); doc["kit"] != nil {
+				t.Fatalf("invalid exchange wrote [kit] config: %v", doc["kit"])
+			}
+		})
+	}
+}

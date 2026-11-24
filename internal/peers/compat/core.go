@@ -228,6 +228,38 @@ func (p *P) tmuxFields(lines func(string) []string, fields []string, args ...str
 	return rows
 }
 
+// ReadTmuxFields decodes native tmux field output using the same separator
+// and quoted fallback as the CLI. read must run tmux in UTF-8 mode.
+func ReadTmuxFields(fields []string, read func(string) (string, error)) ([][]string, error) {
+	out, err := read(strings.Join(fields, sep))
+	if err != nil {
+		return nil, err
+	}
+	rows := [][]string{}
+	if strings.Contains(out, sep) || strings.TrimSpace(out) == "" {
+		for _, line := range splitNL(out) {
+			if line != "" {
+				rows = append(rows, strings.Split(line, sep))
+			}
+		}
+		return rows, nil
+	}
+	quoted := make([]string, len(fields))
+	for i, field := range fields {
+		quoted[i] = strings.ReplaceAll(field, "#{", "#{q:")
+	}
+	out, err = read(strings.Join(quoted, sep))
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range splitNL(out) {
+		if line != "" {
+			rows = append(rows, decodeTmuxQ(line))
+		}
+	}
+	return rows, nil
+}
+
 // decodeTmuxQ splits one line of tmux 3.4 output for a #{q:...} format into
 // fields. q escapes backslash and shell specials with a backslash; the output
 // encoding then turns control bytes (the separator among them) into \ooo and
