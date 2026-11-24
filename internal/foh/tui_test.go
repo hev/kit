@@ -326,11 +326,42 @@ func TestTUIInputWrapAndSinglePromptCaret(t *testing.T) {
 	if strings.Count(view, "›") != 1 {
 		t.Fatalf("expected single top caret, got:\n%s", view)
 	}
-	// Long sentence must word-wrap and grow height automatically.
-	m.input.SetValue("this is a long sentence with multiple words that should soft wrap across lines")
+	// Long sentence typed char-by-char must soft-wrap without scrolling line 1 off the top
+	// or exceeding the terminal width.
+	m.input.Reset()
 	m.syncInputHeight()
+	sentence := "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
+	for _, r := range sentence {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
 	if m.input.Height() < 2 {
-		t.Fatalf("wrapped height = %d, want >= 2", m.input.Height())
+		t.Fatalf("typed wrapped height = %d, want >= 2", m.input.Height())
+	}
+	typedView := ansi.Strip(m.input.View())
+	if !strings.Contains(typedView, "alpha") || !strings.Contains(typedView, "lambda") {
+		t.Fatalf("wrapped input hid earlier or later text:\n%s", typedView)
+	}
+	for _, line := range strings.Split(typedView, "\n") {
+		if w := ansi.StringWidth(line); w > 38 {
+			t.Fatalf("input line width %d exceeds inner width 38: %q", w, line)
+		}
+	}
+	// Long user messages in the transcript scroll window must wrap instead of clipping.
+	userRendered := ansi.Strip(m.renderEntry(&entry{kind: entryUser, text: sentence}, 38, false))
+	if !strings.Contains(userRendered, "alpha") || !strings.Contains(userRendered, "mu") || !strings.Contains(userRendered, "\n") {
+		t.Fatalf("entryUser did not wrap:\n%s", userRendered)
+	}
+	for _, line := range strings.Split(userRendered, "\n") {
+		if w := ansi.StringWidth(line); w > 38 {
+			t.Fatalf("entryUser line width %d exceeds 38: %q", w, line)
+		}
+	}
+	// Piped/chained bash hev commands must still be detected as styled hev cards.
+	if tool, action, ok := detectBashHevCommand(`{"command":"hev orchestrate show kit-edge --host oven | sed -n '1,5p'"}`); !ok || tool != "hev orchestrate" || !strings.Contains(action, "show kit-edge") {
+		t.Fatalf("piped bash hev = (%q, %q, %v)", tool, action, ok)
+	}
+	if tool, _, ok := detectBashHevCommand(`{"command":"hev orchestrate show a --host oven; hev orchestrate show b --host oven"}`); !ok || tool != "hev orchestrate" {
+		t.Fatalf("chained bash hev = (%q, %v)", tool, ok)
 	}
 }
 
@@ -506,5 +537,30 @@ func TestTUIFooterDoesNotDuplicateMainShimmer(t *testing.T) {
 	}
 	if !strings.Contains(footerEmpty, "Enter steers") {
 		t.Fatalf("empty-chrome busy footer missing steer hint: %q", footerEmpty)
+	}
+}
+
+func TestTUIEscCancelsBusyTurnWithoutQuittingIdle(t *testing.T) {
+	m, _ := newTestTUI(t, &scripted{})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	// Idle: Esc must not quit.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.quitting || cmd != nil {
+		t.Fatalf("idle Esc should not quit: quitting=%v cmd=%v", m.quitting, cmd)
+	}
+	// Busy: Esc cancels active turn and clears queued auto-turns.
+	cancelled := false
+	m.setBusy(true)
+	m.cancel = func() { cancelled = true }
+	m.pendingAuto = []string{"queued"}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !cancelled {
+		t.Fatal("busy Esc did not call cancel")
+	}
+	if len(m.pendingAuto) != 0 {
+		t.Fatalf("busy Esc left pendingAuto = %v", m.pendingAuto)
+	}
+	if m.quitting {
+		t.Fatal("busy Esc should not quit the TUI")
 	}
 }

@@ -51,8 +51,8 @@ func osGlyph(goos string, color bool) string {
 }
 
 var (
-	chromeOnline  = lipgloss.NewStyle().Foreground(accent)
-	chromeOffline = lipgloss.NewStyle().Foreground(brandMuted)
+	chromeOnline  = lipgloss.NewStyle().Foreground(hlMint)
+	chromeOffline = lipgloss.NewStyle().Foreground(hlAmber)
 	chromeName    = lipgloss.NewStyle().Foreground(brandInkSoft)
 	chromeMuted   = lipgloss.NewStyle().Foreground(brandMuted)
 	ruleStyle     = lipgloss.NewStyle().Foreground(brandRule)

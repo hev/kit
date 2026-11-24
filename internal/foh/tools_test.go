@@ -41,6 +41,9 @@ func TestHevToolArgvAndCards(t *testing.T) {
 		{"hev_peers", `{"action":"ls"}`, "peers ls --json", ""},
 		{"hev_peers", `{"action":"read","target":"oven/d-x","lines":20}`, "peers read oven/d-x -n 20", ""},
 		{"hev_peers", `{"action":"send","target":"macbook/foh","message":"hello there"}`, "peers send macbook/foh -", "hello there"},
+		{"hev_steer", `{"action":"send","target":"o-edge","host":"oven","level":"urgent","message":"hold"}`, "steer o-edge hold --host oven --level urgent", ""},
+		{"hev_steer", `{"action":"ls","target":"o-edge","host":"oven"}`, "steer ls o-edge --host oven", ""},
+		{"hev_steer", `{"action":"show","id":"st-123","host":"oven"}`, "steer show st-123 --host oven", ""},
 		{"hev_board", `{"action":"search","query":"flaky test"}`, "board search flaky test", ""},
 		{"hev_board", `{"action":"read","id":"570"}`, "board read 570", ""},
 		{"hev_board", `{"action":"post","board":"kit","title":"T","body":"B"}`, "board post --board kit --title T", "B"},
@@ -100,6 +103,18 @@ func TestHevDispatchSend(t *testing.T) {
 		res := ts.Run(context.Background(), call("1", "hev_dispatch", args))
 		if !res.IsError || len(calls) != 0 || res.Card == nil || res.Card.OK {
 			t.Errorf("%s accepted: %+v", args, res)
+		}
+	}
+	for _, args := range []string{
+		`{"action":"send","target":"o-edge"}`,
+		`{"action":"send","message":"hi"}`,
+		`{"action":"show"}`,
+		`{"action":"nope"}`,
+	} {
+		calls = nil
+		res := ts.Run(context.Background(), call("1", "hev_steer", args))
+		if !res.IsError || len(calls) != 0 || res.Card == nil || res.Card.OK {
+			t.Errorf("hev_steer %s accepted: %+v", args, res)
 		}
 	}
 }

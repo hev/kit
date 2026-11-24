@@ -172,7 +172,7 @@ func NewTUI(opts TUIOptions) *TUI {
 	// Keep the input clean and unboxed; horizontal rules frame it in View().
 	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	in.BlurredStyle.CursorLine = lipgloss.NewStyle()
-	in.FocusedStyle.Prompt = lipgloss.NewStyle().Bold(true).Foreground(accent)
+	in.FocusedStyle.Prompt = lipgloss.NewStyle().Bold(true).Foreground(hlLavender)
 	in.BlurredStyle.Prompt = dimStyle
 	if opts.Color {
 		in.Cursor.Style = lipgloss.NewStyle().Foreground(accent)
@@ -217,6 +217,8 @@ func wrappedVisualLines(line string, width int) int {
 	return n
 }
 
+const maxInputHeight = 8
+
 func (m *TUI) syncInputHeight() {
 	lines := strings.Split(m.input.Value(), "\n")
 	w := max(10, m.input.Width())
@@ -227,8 +229,17 @@ func (m *TUI) syncInputHeight() {
 	if li := m.input.LineInfo(); li.Height > visual {
 		visual = li.Height
 	}
-	h := max(1, min(8, visual))
+	h := max(1, min(maxInputHeight, visual))
 	m.input.SetHeight(h)
+}
+
+// prepareInputGrowth temporarily raises the textarea viewport height to
+// maxInputHeight before an edit so bubbles/textarea's repositionView() does not
+// scroll earlier visual lines off the top while the box is still growing.
+func (m *TUI) prepareInputGrowth() {
+	if m.input.Height() < maxInputHeight {
+		m.input.SetHeight(maxInputHeight)
+	}
 }
 
 func (m *TUI) loadCatalog() tea.Cmd {
@@ -674,12 +685,21 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyCtrlC:
 		if m.busy && m.cancel != nil {
+			m.pendingAuto = nil
 			m.cancel()
 			m.system("turn cancelled")
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
+	case msg.Type == tea.KeyEsc:
+		if m.busy && m.cancel != nil {
+			m.pendingAuto = nil
+			m.cancel()
+			m.system("turn cancelled")
+			return m, nil
+		}
+		return m, nil
 	case msg.Type == tea.KeyCtrlO:
 		m.expandCards = !m.expandCards
 		return m, nil
@@ -715,6 +735,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Alt && msg.String() == "alt+m":
 		return m, m.openPicker()
 	case msg.String() == "shift+enter" || msg.String() == "alt+enter" || (msg.Alt && msg.Type == tea.KeyEnter) || msg.Type == tea.KeyCtrlJ:
+		m.prepareInputGrowth()
 		m.input.InsertString("\n")
 		m.syncInputHeight()
 		return m, nil
@@ -765,6 +786,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	m.prepareInputGrowth()
 	m.input, cmd = m.input.Update(msg)
 	m.cmdCursor, m.cmdStart = 0, 0
 	m.syncInputHeight()
@@ -1378,7 +1400,7 @@ func (m *TUI) resumePickerView(width, height int) string {
 		title := ansi.Truncate(s.Title, titleMax, "…")
 		line := fmt.Sprintf("%s %s %-10s %s", hBadge, age, dir, title)
 		if i == r.cursor {
-			cur = lipgloss.NewStyle().Foreground(accent).Render("› ")
+			cur = lipgloss.NewStyle().Foreground(hlLavender).Render("› ")
 			line = lipgloss.NewStyle().Bold(true).Render(line)
 		}
 		b.WriteString(cur + line + "\n")
@@ -1580,9 +1602,8 @@ func (m *TUI) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- view ---
 
-// Hevmind dark palette (hevmind.com/brand):
-// Eight tokens. Burnt orange #E25822 is the only color; everything else is
-// paper, ink, and the gray between them.
+// Dark TUI palette: brand orange-red (accent) is reserved primarily for
+// cursors and focus markers; other UI roles use distinct highlight colors.
 var (
 	brandPaper     = lipgloss.Color("#111111") // --paper (dark)
 	brandPaperWarm = lipgloss.Color("#1A1A18") // --paper-warm (dark)
@@ -1590,14 +1611,21 @@ var (
 	brandInkSoft   = lipgloss.Color("#D8D5CC") // --ink-soft (dark secondary text)
 	brandMuted     = lipgloss.Color("#6B6B66") // --muted (tertiary text)
 	signal         = lipgloss.Color("#E25822") // --signal (burnt orange)
-	accent         = lipgloss.Color("#FF6B33") // --signal-text (brightens on dark)
+	accent         = lipgloss.Color("#FF6B33") // --signal-text (cursors & active prompt)
 	brandRule      = lipgloss.Color("#2A2A28") // --rule (dark dividers)
+
+	hlCyan     = lipgloss.Color("#7DC4E4") // tool badges & active shimmer
+	hlMint     = lipgloss.Color("#59C9A5") // online status
+	hlAmber    = lipgloss.Color("#F3AE35") // offline/warning & favorites star
+	hlRose     = lipgloss.Color("#F38BA8") // errors
+	hlLavender = lipgloss.Color("#B4BEFE") // header/overlay badge text
+	hlBadgeBg  = lipgloss.Color("#262B38") // subtle slate pill background
 
 	userStyle = lipgloss.NewStyle().Bold(true).Foreground(brandInk)
 	sysStyle  = lipgloss.NewStyle().Foreground(brandInkSoft).Italic(true)
-	errStyle  = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	errStyle  = lipgloss.NewStyle().Foreground(hlRose).Bold(true)
 	dimStyle  = lipgloss.NewStyle().Foreground(brandMuted)
-	badge     = lipgloss.NewStyle().Foreground(brandInk).Background(signal).Bold(true).Padding(0, 1)
+	badge     = lipgloss.NewStyle().Foreground(hlLavender).Background(hlBadgeBg).Bold(true).Padding(0, 1)
 )
 
 func (m *TUI) splash() string {
@@ -1651,7 +1679,7 @@ func (m *TUI) renderCard(c *Card, width int, running bool) string {
 		title += " " + hevCmdStyle.Render(c.Action)
 	}
 	if running {
-		return title + "  " + renderShimmer("running…", m.frame, m.opts.Color)
+		return ansi.Truncate(title+"  "+renderShimmer("running…", m.frame, m.opts.Color), max(10, width), "…")
 	}
 	header := title
 	if c.Summary != "" {
@@ -1663,16 +1691,22 @@ func (m *TUI) renderCard(c *Card, width int, running bool) string {
 	}
 	body := strings.TrimSpace(c.Body)
 	if body == "" {
-		return header
+		return ansi.Truncate(header, max(10, width), "…")
 	}
 	bl := strings.Split(body, "\n")
 	// Collapsed by default on success: single sleek line with Ctrl+O hint.
 	if !m.expandCards && c.OK {
 		if len(bl) > 1 {
-			return header + dimStyle.Render(fmt.Sprintf("  (%d lines · Ctrl+O)", len(bl)))
+			suffix := dimStyle.Render(fmt.Sprintf("  (%d lines · Ctrl+O)", len(bl)))
+			sw := ansi.StringWidth(suffix)
+			if avail := width - sw; avail > 12 {
+				return ansi.Truncate(header, avail, "…") + suffix
+			}
+			return ansi.Truncate(header+suffix, max(10, width), "…")
 		}
-		return header
+		return ansi.Truncate(header, max(10, width), "…")
 	}
+	header = ansi.Truncate(header, max(10, width), "…")
 	// Expanded (Ctrl+O) or error: compact indented lines with a subtle left bar, no box outline.
 	bar := "  "
 	if m.opts.Color {
@@ -1695,10 +1729,32 @@ func (m *TUI) renderCard(c *Card, width int, running bool) string {
 
 const streamMarkdownInterval = 75 * time.Millisecond
 
+func wrapPrefixed(prefix, contIndent, text string, width int) string {
+	avail := max(10, width-ansi.StringWidth(prefix))
+	var out []string
+	first := true
+	for _, para := range strings.Split(text, "\n") {
+		wrapped := ansi.Hardwrap(ansi.Wordwrap(para, avail, ""), avail, true)
+		for _, line := range strings.Split(wrapped, "\n") {
+			if first {
+				out = append(out, prefix+line)
+				first = false
+			} else {
+				out = append(out, contIndent+line)
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 	switch e.kind {
 	case entryUser:
-		return userStyle.Render("you › ") + e.text
+		prefix := "you › "
+		if m.opts.Color {
+			prefix = userStyle.Render(prefix)
+		}
+		return wrapPrefixed(prefix, "      ", e.text, width)
 	case entryAssistant:
 		if e.cacheRender != "" && e.cacheWidth == width && e.cacheColor == m.opts.Color {
 			if e.cacheText == e.text {
@@ -1719,11 +1775,19 @@ func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 		if e.running {
 			return renderShimmer(e.text, m.frame, m.opts.Color)
 		}
-		line := e.text
+		toolName, toolArgs, _ := strings.Cut(e.text, " ")
+		head := "· " + toolName
 		if m.opts.Color {
-			line = styleHevCommands(line)
+			head = hevBadgeStyle.Render(hevToolEmoji(toolName, true) + " " + toolName)
 		}
-		out := dimStyle.Render("· ") + line + "\n"
+		if toolArgs != "" {
+			argText := ansi.Truncate(toolArgs, max(10, width-ansi.StringWidth(head)-1), "…")
+			if m.opts.Color {
+				argText = styleHevCommands(argText)
+			}
+			head += " " + argText
+		}
+		out := head + "\n"
 		if e.detail != "" {
 			dl := strings.Split(strings.TrimRight(e.detail, "\n"), "\n")
 			for i, l := range dl {
@@ -1738,13 +1802,20 @@ func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 	case entryCard:
 		return m.renderCard(e.card, width, e.running)
 	case entrySystem:
-		s := sysStyle.Render(e.text)
+		s := wrapPrefixed("", "", e.text, width)
+		if m.opts.Color {
+			s = sysStyle.Render(s)
+		}
 		if e.detail != "" {
-			s += "\n" + dimStyle.Render(e.detail)
+			s += "\n" + dimStyle.Render(wrapPrefixed("", "", e.detail, width))
 		}
 		return s
 	case entryError:
-		return errStyle.Render("✗ " + e.text)
+		prefix := "✗ "
+		if m.opts.Color {
+			return errStyle.Render(wrapPrefixed(prefix, "  ", e.text, width))
+		}
+		return wrapPrefixed(prefix, "  ", e.text, width)
 	}
 	return ""
 }
@@ -1775,7 +1846,7 @@ func (m *TUI) pickerView(height int) string {
 		model := p.filtered[i]
 		star := "  "
 		if m.opts.Favorites.Has(model.ID) {
-			star = lipgloss.NewStyle().Foreground(accent).Render("★ ")
+			star = lipgloss.NewStyle().Foreground(hlAmber).Render("★ ")
 		}
 		cur := "  "
 		line := fmt.Sprintf("%-44s %6s  %s", ansi.Truncate(model.ID, 44, "…"), model.ContextLabel(), model.Badge())
@@ -1783,7 +1854,7 @@ func (m *TUI) pickerView(height int) string {
 			line += "  (active)"
 		}
 		if i == p.cursor {
-			cur = lipgloss.NewStyle().Foreground(accent).Render("› ")
+			cur = lipgloss.NewStyle().Foreground(hlLavender).Render("› ")
 			line = lipgloss.NewStyle().Bold(true).Render(line)
 		}
 		b.WriteString(cur + star + line + "\n")
@@ -1894,7 +1965,7 @@ func (m *TUI) statusChromeBar(width int) string {
 	}
 	if left == "" {
 		if m.busy {
-			left = dimStyle.Render("Enter steers · Ctrl+C cancels")
+			left = dimStyle.Render("Enter steers · Esc cancels")
 		} else {
 			left = dimStyle.Render("/dispatch · Ctrl+M model · Shift+Enter newline · /help")
 		}

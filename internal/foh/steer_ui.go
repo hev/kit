@@ -354,7 +354,7 @@ func (m *TUI) steerOverlayView(width, height int) string {
 			r.State,
 			ansi.Truncate(r.Name, nameMax, "…"))
 		if i == s.cursor {
-			cur = lipgloss.NewStyle().Foreground(accent).Render("› ")
+			cur = lipgloss.NewStyle().Foreground(hlLavender).Render("› ")
 			line = lipgloss.NewStyle().Bold(true).Render(line)
 		}
 		b.WriteString(cur + line + "\n")

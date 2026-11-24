@@ -13,7 +13,7 @@ import (
 
 var (
 	hevCmdStyle   = lipgloss.NewStyle().Bold(true).Foreground(brandInk)
-	hevBadgeStyle = lipgloss.NewStyle().Bold(true).Foreground(accent)
+	hevBadgeStyle = lipgloss.NewStyle().Bold(true).Foreground(hlCyan)
 
 	// hevCmdRe matches plain-text `hev <subcommand>...` tokens inside rendered
 	// Markdown or tool lines so hev CLI invocations share one consistent style.
@@ -109,7 +109,7 @@ var (
 		"figuring out what we actually need…",
 		"don't bother me…",
 		"getting coffee…",
-		"getting to the top…",
+		"summiting…",
 		"bonking…",
 		"hopefully not bonking…",
 		"locked in…",
@@ -119,21 +119,36 @@ var (
 		"checkout hevmind.com…",
 		"normal people don't do this…",
 		// Alpine / ski / climb additions
+		"waxing my skis…",
+		"dialing my din…",
+		"scoping the line…",
+		"bleeding brakes…",
+		"checking the snow report…",
+		"digging a pit…",
+		"breaking trail…",
 		"skinning up the ridge…",
 		"reading the snowpack…",
-		"clipping the chains…",
+		"chaining up…",
 		"sending the pitch…",
 		"checking the beta…",
 		"shaving grams off the pack…",
-		"waxing the bases…",
 		"dropping into the chute…",
 		"finding the fall line…",
 		"chalking up…",
-		"dialing the DIN…",
 		"traversing the bowl…",
 		"brewing at basecamp…",
-		"spotting the line…",
 		"earning the turns…",
+		// Bob Marley & misc lyrics
+		"one love…",
+		"forever loving jah…",
+		"feel it in the one drop…",
+		"here I am a stone…",
+		"don't be a coconut…",
+		"I just wanted to be one of the strokes…",
+		"wearing tracky bottoms tucked in socks…",
+		"a scary gargoyle on a tower…",
+		"the digital won't let me go…",
+		"fire coming out a monkeys head…",
 	}
 )
 
@@ -149,7 +164,7 @@ func renderShimmer(text string, frame int, color bool) string {
 		sp := asciiFrames[frame%len(asciiFrames)]
 		return sp + " " + text
 	}
-	sp := lipgloss.NewStyle().Foreground(accent).Bold(true).Render(brailleFrames[frame%len(brailleFrames)])
+	sp := lipgloss.NewStyle().Foreground(lipgloss.Color("#FBE476")).Bold(true).Render(brailleFrames[frame%len(brailleFrames)])
 	runes := []rune(text)
 	n := len(runes)
 	if n == 0 {
@@ -169,15 +184,15 @@ func renderShimmer(text string, frame int, color bool) string {
 		var r, g, bl uint8
 		switch {
 		case dist == 0:
-			r, g, bl = 250, 250, 245 // brand --ink (#FAFAF5)
+			r, g, bl = 255, 250, 220 // bright highlight
 		case dist == 1:
-			r, g, bl = 255, 107, 51 // brand --signal-text (#FF6B33)
+			r, g, bl = 251, 228, 118 // gold (#fbe476)
 		case dist == 2:
-			r, g, bl = 226, 88, 34 // brand --signal (#E25822)
+			r, g, bl = 235, 87, 104 // coral (#eb5768)
 		case dist == 3:
-			r, g, bl = 216, 213, 204 // brand --ink-soft (#D8D5CC)
+			r, g, bl = 81, 134, 165 // steel (#5186a5)
 		default:
-			r, g, bl = 107, 107, 102 // brand --muted (#6B6B66)
+			r, g, bl = 138, 138, 138 // dim (#8a8a8a)
 		}
 		fmt.Fprintf(&b, "\x1b[38;2;%d;%d;%dm%c", r, g, bl, ch)
 	}
