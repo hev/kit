@@ -39,6 +39,9 @@ func (p *P) sendTo(target string, rows []*Row, header, message, sender string, f
 	if pane.Agent == "pi" && (pane.Dispatch != "" || pane.Headless || !p.inboxOn(pane.Session)) {
 		return nil, "", refuse("%s runs PI; peers requires a registered inbox session and never types into PI (including --force)", target)
 	}
+	if pane.Native != nil || (pane.Agent == "hev" && pane.Dispatch == "" && !pane.Headless) {
+		return nil, "", refuse("%s runs hev kit; peers delivers through its native inbox and never types into the pane (including --force)", target)
+	}
 	if !participates(pane.Role) {
 		return nil, "", refuse("recipient is offline")
 	}

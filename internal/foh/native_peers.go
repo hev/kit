@@ -41,8 +41,8 @@ type nativePeerTick struct {
 // Child tools inherit the address so peers can attribute their sends.
 func (m *TUI) RegisterNativePeer(ctx context.Context) (func(), error) {
 	noop := func() {}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	store := nativeinbox.Default()
+	if store == (nativeinbox.Store{}) {
 		return noop, fmt.Errorf("native peer home unavailable")
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -50,7 +50,6 @@ func (m *TUI) RegisterNativePeer(ctx context.Context) (func(), error) {
 	git := exec.CommandContext(ctx, "git", "-C", m.opts.Cwd, "branch", "--show-current")
 	git.WaitDelay = 250 * time.Millisecond
 	branch, _ := git.Output()
-	store := nativeinbox.AtHome(home)
 	owner, err := store.Register(m.opts.Cwd, strings.TrimSpace(string(branch)), os.Getenv("TMUX_PANE"))
 	if err != nil {
 		return noop, err

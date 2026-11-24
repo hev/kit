@@ -11,6 +11,13 @@ import (
 	"github.com/hev/kit/internal/peers/nativeinbox"
 )
 
+func (p *P) nativeStore() nativeinbox.Store {
+	if p.stateDir != "" {
+		return nativeinbox.AtStateDir(p.stateDir)
+	}
+	return nativeinbox.AtHome(p.home)
+}
+
 func nativeRow(peer nativeinbox.Presence) *Row {
 	return &Row{Native: &peer, ID: peer.Name, Session: peer.Name, PID: peer.PID,
 		AgentPID: peer.PID, Cwd: peer.Cwd, Agent: peer.Agent, Role: peer.Role,
@@ -18,7 +25,7 @@ func nativeRow(peer nativeinbox.Presence) *Row {
 }
 
 func (p *P) withNative(rows []*Row) []*Row {
-	peers, _ := nativeinbox.AtHome(p.home).List()
+	peers, _ := p.nativeStore().List()
 	for _, peer := range peers {
 		ancestors := p.ps().ancestors(peer.PID)
 		row := nativeRow(peer)
@@ -26,6 +33,12 @@ func (p *P) withNative(rows []*Row) []*Row {
 		for i, pane := range rows {
 			if pane.AgentPID == peer.PID || pane.Managed == nil && pane.ID == peer.TmuxPane && intIn(ancestors, pane.PID) {
 				row.Attached = pane.Attached
+				if pane.Session != "" {
+					row.Session = pane.Session
+					row.ID = pane.ID
+					row.Window = pane.Window
+					row.Pane = pane.Pane
+				}
 				rows[i] = row
 				replaced = true
 				break
@@ -62,7 +75,7 @@ func (p *P) nativeSender() (who, bool) {
 	if explicit := os.Getenv("PEERS_FROM"); explicit != "" && explicit != from {
 		return who{}, false
 	}
-	peer, err := nativeinbox.AtHome(p.home).Lookup(from)
+	peer, err := p.nativeStore().Lookup(from)
 	if err != nil || !p.allowsNative(peer) {
 		return who{}, false
 	}
@@ -76,17 +89,42 @@ func (p *P) allowsNative(peer nativeinbox.Presence) bool {
 
 var nativeOrigin = regexp.MustCompile(`^[A-Za-z0-9._:%$/-]{1,160}$`)
 
+func (p *P) lookupNativeByTmux(store nativeinbox.Store, target string) (nativeinbox.Presence, bool) {
+	peers, err := store.List()
+	if err != nil || len(peers) == 0 {
+		return nativeinbox.Presence{}, false
+	}
+	hasTmux := false
+	for _, peer := range peers {
+		if peer.TmuxPane != "" {
+			hasTmux = true
+			break
+		}
+	}
+	if !hasTmux {
+		return nativeinbox.Presence{}, false
+	}
+	row, err := find(target, p.panes(false))
+	if err != nil || row == nil || row.Native == nil {
+		return nativeinbox.Presence{}, false
+	}
+	return *row.Native, true
+}
+
 func (p *P) sendNative(address, input string, interrupt bool, metadata *Obj, replyTo string) bool {
 	host, target := splitHost(address)
 	if host != "" && host != p.selfLabel() && host != p.hostLabel {
 		return false
 	}
-	store := nativeinbox.AtHome(p.home)
+	store := p.nativeStore()
 	peer, err := store.Lookup(target)
 	if os.IsNotExist(err) {
-		return false
-	}
-	if err != nil {
+		var ok bool
+		peer, ok = p.lookupNativeByTmux(store, target)
+		if !ok {
+			return false
+		}
+	} else if err != nil {
 		p.die(err.Error())
 	}
 	if !p.allowsNative(peer) {
@@ -105,7 +143,7 @@ func (p *P) sendNative(address, input string, interrupt bool, metadata *Obj, rep
 			sender.Address = "local"
 		}
 	}
-	if localPeer && sender.Address == target {
+	if localPeer && sender.Address == peer.Name {
 		p.die("that's your own native peer")
 	}
 	id := metadata.Str("id")
