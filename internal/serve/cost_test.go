@@ -3,6 +3,7 @@ package serve
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/hev/kit/internal/trace"
 )
@@ -48,9 +49,13 @@ func TestBuildAgentsCountsEachRequestOnce(t *testing.T) {
 
 func TestSessionReportsRatesKnown(t *testing.T) {
 	turn := func(model string) []trace.Turn {
-		return []trace.Turn{{SessionID: "s", TurnUUID: "t", RequestID: "r", TS: "2026-11-19T10:00:01Z", Role: "assistant", Harness: "agy", Model: model, Usage: trace.Usage{Input: 1000}, Blocks: []trace.Block{{Type: "text", Text: "x"}}}}
+		return []trace.Turn{{SessionID: "s", TurnUUID: "t", RequestID: "r", TS: "2026-11-21T10:00:01Z", Role: "assistant", Harness: "agy", Model: model, Usage: trace.Usage{Input: 1000}, Blocks: []trace.Block{{Type: "text", Text: "x"}}}}
 	}
-	for model, want := range map[string]bool{"gemini-4-neon-medium": true, "mystery-model": false} {
+	for model, want := range map[string]bool{
+		"gemini-4-neon-medium":          true,
+		"gemini-4-hydrogen-tiered-high": true,
+		"mystery-model":                 false,
+	} {
 		turns := turn(model)
 		s := trace.Sessions(turns, nil, "")[0]
 		if got := buildSession(s, trace.Blocks(turns))["rates_known"]; got != want {
@@ -60,5 +65,27 @@ func TestSessionReportsRatesKnown(t *testing.T) {
 	// A stored row that predates the field decodes as known, as it claimed.
 	if !(trace.SessionRow{}).RatesKnown() {
 		t.Fatal("legacy row reported unknown")
+	}
+}
+
+func TestDisplayRatesUsesPricesTOMLByDate(t *testing.T) {
+	nov := displayRates(time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC))
+	if got, ok := nov["gemini-4-neon"]; !ok || got != [4]float64{3, 15, 3, 0.15} {
+		t.Fatalf("gemini-4-neon=%v ok=%v", got, ok)
+	}
+	if got, ok := nov["gpt-6.2-sol"]; !ok || got != [4]float64{2, 10, 2.5, 0.1} {
+		t.Fatalf("gpt-6.2-sol=%v ok=%v", got, ok)
+	}
+	// Never falls back to the legacy $15/$75 mock rates.
+	if got, ok := nov["claude-opus-5"]; !ok || got != [4]float64{5, 25, 6.25, 0.5} {
+		t.Fatalf("claude-opus-5=%v ok=%v", got, ok)
+	}
+	// Respects effective dates: carbon's Dec 1 increase does not apply in November.
+	if got := nov["gemini-4-carbon"]; got != [4]float64{2, 10, 2, 0.1} {
+		t.Fatalf("nov gemini-4-carbon=%v", got)
+	}
+	dec := displayRates(time.Date(2026, 12, 2, 12, 0, 0, 0, time.UTC))
+	if got := dec["gemini-4-carbon"]; got != [4]float64{4, 20, 4, 0.2} {
+		t.Fatalf("dec gemini-4-carbon=%v", got)
 	}
 }

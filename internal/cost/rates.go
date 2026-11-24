@@ -53,14 +53,15 @@ func validateRates(rates []Rate) error {
 
 var (
 	dateSuffix   = regexp.MustCompile(`-\d{8}$`)
-	effortSuffix = regexp.MustCompile(`-(none|minimal|low|medium|high|xhigh|max)$`)
+	effortSuffix = regexp.MustCompile(`-(none|minimal|low|medium|high|xhigh|max|tiered)$`)
 )
 
 // NormalizeModel reduces a transcript model ID to the rate-table family it
-// bills as: no provider prefix, context tag, snapshot date or effort level.
-// "anthropic/claude-haiku-4-5-20251001" and "gemini-4-neon-medium" become
-// "claude-haiku-4-5" and "gemini-4-neon". Version digits are kept, so
-// "claude-opus-5-5" never matches "claude-opus-5".
+// bills as: no provider prefix, context tag, snapshot date, tier tag or effort
+// level. "anthropic/claude-haiku-4-5-20251001", "gemini-4-neon-medium" and
+// "gemini-4-hydrogen-tiered-high" become "claude-haiku-4-5", "gemini-4-neon"
+// and "gemini-4-hydrogen". Version digits are kept, so "claude-opus-5-5" never
+// matches "claude-opus-5".
 func NormalizeModel(model string) string {
 	m := strings.ToLower(strings.TrimSpace(model))
 	if i := strings.LastIndex(m, "/"); i >= 0 {

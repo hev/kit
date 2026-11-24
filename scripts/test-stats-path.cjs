@@ -28,12 +28,23 @@ for(const [alias,days] of [['07d',7],['+7d',7],['030d',30],['+30d',30],['090d',9
  getJSON:async url=>{calls.push(url);if(fail)throw Error('fixture unavailable');return url.startsWith('/api/stats')?structuredClone(snapshot):{sessions:[{id:'s'}],stats:structuredClone(snapshot),facets:{},timing:{queries:3,layer_ms:1}};},
  show(view){shown.push(view);},$(selector){if(!nodes.has(selector))nodes.set(selector,new Element());return nodes.get(selector);},el(tag,attrs,...children){const node=new Element();if(attrs?.html)node.innerHTML=attrs.html;node.append(...children);return node;},tile(...args){tiles.push(args);return new Element();},spark(){return new Element();},esc:String,fmtDate:String,fmtN:String,fmtUsd:String,fmtTok:String,fmtMs:String,timingLabel(){return '';},shortModel:String,
  requestAnimationFrame(fn){fn();},document:{createElementNS(){return new Element();}},columns(svg,series,opts){charts.push({series,opts});},legend(){return new Element();},setFilter(){},saveFilters(){},rangeBar(){},customOpen:false};
- ctx.STATS_REUSE_MS=30000;vm.createContext(ctx);vm.runInContext(extract('const fmtHours =','const fmtUsd =')+'\n'+reuse+loader+'\n'+renderer,ctx);
+ ctx.STATS_REUSE_MS=30000;vm.createContext(ctx);vm.runInContext(extract('const fmtHours =','const fmtUsd =')+'\n'+extract('const modelFamily =','const tip =')+'\n'+reuse+loader+'\n'+renderer,ctx);
  await ctx.refreshArchive();
  assert.equal(ctx.statsReusable(),true);ctx.DATA.statsReceivedAt=Date.now()-31000;assert.equal(ctx.statsReusable(),false);ctx.DATA.statsReceivedAt=Date.now();
  assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/stats\?/);assert.match(calls[0],/poor=false/);assert.equal(ctx.DATA.corpus.length,0);assert.equal(ctx.archivePending,false);
  Object.defineProperty(ctx.DATA,'corpus',{get(){throw Error('Stats accessed session corpus');},configurable:true});
  ctx.statsView();assert.equal(charts.length,2);assert.match(charts[0].opts.tip(0,0),/1 traces/);assert.match(charts[1].opts.tip(0),/1 traces/);
+ // Effort/tier variants fold into one family series while preserving raw IDs for drill-down.
+ charts.length=0;
+ ctx.DATA.stats={...structuredClone(snapshot),traces:3,tokens:350,daily:[{day:'2026-11-24',spend:1,traces:3,models:{'gemini-4-neon-medium':{tokens:200,traces:2},'gemini-4-neon-high':{tokens:100,traces:1},'gemini-4-hydrogen-tiered-high':{tokens:50,traces:1}}}]};
+ ctx.statsView();
+ assert.equal(charts[0].series.length,2);
+ assert.equal(charts[0].series[0].name,'gemini-4-neon');
+ assert.deepEqual(Array.from(charts[0].series[0].models).sort(),['gemini-4-neon-high','gemini-4-neon-medium']);
+ assert.deepEqual(Array.from(charts[0].series[0].values),[300]);
+ assert.match(charts[0].opts.tip(0,0),/3 traces/);
+ assert.equal(charts[0].series[1].name,'gemini-4-hydrogen');
+ ctx.DATA.stats=structuredClone(snapshot);
  Object.defineProperty(ctx.DATA,'corpus',{value:[],writable:true,configurable:true});
  calls=[];ctx.currentView='v-traces';await ctx.refreshArchive('traces');assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/sessions\?/);assert.match(calls[0],/include_stats=true/);assert.equal(ctx.DATA.stats.traces,1);
  let release, navigationSignal;const ordinary=ctx.getJSON;ctx.getJSON=(url,signal)=>url.startsWith('/api/stats')?new Promise(resolve=>{navigationSignal=signal;release=()=>resolve(structuredClone(snapshot));}):ordinary(url,signal);
