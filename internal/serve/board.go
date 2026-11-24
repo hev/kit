@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 // The Board tab reads the team board through the board's own JSON API
@@ -66,7 +68,7 @@ func LocalBoard(api http.Handler, mode string) *Board {
 }
 
 // RemoteBoard reads from a board server over HTTP (board.url): the shared
-// board a Field Kit or Pro Kit team runs. Every call is bounded by timeout.
+// board a team runs. Every call is bounded by timeout.
 func RemoteBoard(base string, timeout time.Duration) (*Board, error) {
 	u, err := url.Parse(strings.TrimRight(base, "/"))
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" {
@@ -95,6 +97,24 @@ func RemoteBoard(base string, timeout time.Duration) (*Board, error) {
 		}
 		return &boardReply{status: resp.StatusCode, ctype: resp.Header.Get("Content-Type"), body: body}, nil
 	}}, nil
+}
+
+// HostedBoard reads the signed-in team’s board through the Club Kit API.
+func HostedBoard(client *kitapi.Client) *Board {
+	return &Board{mode: "remote", get: func(ctx context.Context, path string, q url.Values) (*boardReply, error) {
+		if !strings.HasPrefix(path, "/api/") {
+			return &boardReply{status: http.StatusNotFound}, nil
+		}
+		raw, err := client.DoRaw(ctx, http.MethodGet, "/v1/board"+strings.TrimPrefix(path, "/api"), q, nil)
+		var remote *kitapi.Error
+		if errors.As(err, &remote) {
+			return &boardReply{status: remote.Status}, nil
+		}
+		if err != nil || len(raw) > maxBoardBody {
+			return nil, errBoardUnavailable
+		}
+		return &boardReply{status: http.StatusOK, ctype: "application/json", body: raw}, nil
+	}}
 }
 
 // UnavailableBoard keeps the Board tab and says the board could not be

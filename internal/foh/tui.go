@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +23,7 @@ type CatalogLoader func(ctx context.Context) ([]Model, CatalogSource, error)
 // TUIOptions configures the meta-harness TUI.
 type TUIOptions struct {
 	Agent          *Agent
+	HevCommands    []HevSlashCommand
 	Catalog        CatalogLoader
 	CatalogContext context.Context
 	Favorites      *Favorites
@@ -50,7 +53,21 @@ type entry struct {
 	card    *Card
 	callID  string
 	running bool
+
+	cacheText   string
+	cacheWidth  int
+	cacheColor  bool
+	cacheRender string
+	cacheAt     time.Time
 }
+
+type escAbsorbMode int
+
+const (
+	escNone escAbsorbMode = iota
+	escOSC
+	escCSI
+)
 
 // TUI is the Bubble Tea model for hev kit.
 type TUI struct {
@@ -65,9 +82,20 @@ type TUI struct {
 	frame       int
 	scroll      int
 	cmdCursor   int
+	cmdStart    int
+	hevRunning  int
+	hevContext  []Message
 	cancel      context.CancelFunc
 	events      chan Event
 	expandCards bool
+
+	splashCache string
+	splashWidth int
+	splashColor bool
+	splashModel string
+
+	escMode  escAbsorbMode
+	escUntil time.Time
 
 	chrome         ChromeSnapshot
 	watched        []watchedRun
@@ -117,6 +145,10 @@ type picker struct {
 }
 
 type agentEventMsg struct{ ev Event }
+type agentEventsMsg struct {
+	evs  []Event
+	done bool
+}
 type agentDoneMsg struct{ err error }
 type shimmerTickMsg struct{}
 type catalogMsg struct {
@@ -129,7 +161,12 @@ type catalogMsg struct {
 func NewTUI(opts TUIOptions) *TUI {
 	in := textarea.New()
 	in.Placeholder = "Ask hev kit…  (Shift+Enter newline · /help)"
-	in.Prompt = "› "
+	in.SetPromptFunc(2, func(lineIdx int) string {
+		if lineIdx == 0 {
+			return "› "
+		}
+		return "  "
+	})
 	in.ShowLineNumbers = false
 	in.CharLimit = 32 << 10
 	in.SetHeight(1)
@@ -137,8 +174,11 @@ func NewTUI(opts TUIOptions) *TUI {
 	// Keep the input clean and unboxed; horizontal rules frame it in View().
 	in.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	in.BlurredStyle.CursorLine = lipgloss.NewStyle()
-	in.FocusedStyle.Prompt = userStyle
+	in.FocusedStyle.Prompt = lipgloss.NewStyle().Bold(true).Foreground(accent)
 	in.BlurredStyle.Prompt = dimStyle
+	if opts.Color {
+		in.Cursor.Style = lipgloss.NewStyle().Foreground(accent)
+	}
 	in.KeyMap.InsertNewline.SetEnabled(false)
 	in.Focus()
 	if opts.Favorites == nil {
@@ -166,17 +206,28 @@ func (m *TUI) scheduleChrome() tea.Cmd {
 	return tea.Tick(chromeTick(), func(time.Time) tea.Msg { return chromeTickMsg{} })
 }
 
+func wrappedVisualLines(line string, width int) int {
+	if width <= 0 || line == "" {
+		return 1
+	}
+	wrapped := ansi.Wordwrap(line, width, "")
+	hard := ansi.Hardwrap(wrapped, width, true)
+	n := strings.Count(hard, "\n") + 1
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
 func (m *TUI) syncInputHeight() {
 	lines := strings.Split(m.input.Value(), "\n")
 	w := max(10, m.input.Width())
 	visual := 0
 	for _, l := range lines {
-		n := len([]rune(l))
-		if n == 0 {
-			visual++
-			continue
-		}
-		visual += (n + w - 1) / w
+		visual += wrappedVisualLines(l, w)
+	}
+	if li := m.input.LineInfo(); li.Height > visual {
+		visual = li.Height
 	}
 	h := max(1, min(8, visual))
 	m.input.SetHeight(h)
@@ -211,13 +262,33 @@ func shimmerTick() tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return shimmerTickMsg{} })
 }
 
+const maxEventBatch = 64
+
 func waitEvent(ch <-chan Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
 			return agentDoneMsg{}
 		}
-		return agentEventMsg{ev}
+		evs := []Event{ev}
+		done := false
+		for i := 1; i < maxEventBatch; i++ {
+			select {
+			case next, ok := <-ch:
+				if !ok {
+					done = true
+					return agentEventsMsg{evs: evs, done: done}
+				}
+				if next.Kind == EventText && evs[len(evs)-1].Kind == EventText {
+					evs[len(evs)-1].Text += next.Text
+					continue
+				}
+				evs = append(evs, next)
+			default:
+				return agentEventsMsg{evs: evs}
+			}
+		}
+		return agentEventsMsg{evs: evs, done: done}
 	}
 }
 
@@ -228,7 +299,7 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.receivePeers(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.input.SetWidth(max(10, msg.Width-4))
+		m.input.SetWidth(max(10, msg.Width-2))
 		m.syncInputHeight()
 		return m, nil
 	case chromeMsg:
@@ -371,6 +442,18 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.scheduleSteerPoll()
 		}
 		return m, nil
+	case hevSlashDoneMsg:
+		if msg.background {
+			m.hevRunning--
+		}
+		m.finishHevSlash(msg)
+		return m, nil
+	case hevSlashTickMsg:
+		if m.hevRunning == 0 {
+			return m, nil
+		}
+		m.frame++
+		return m, hevSlashTick()
 	case cardSummaryMsg:
 		for i := len(m.entries) - 1; i >= 0; i-- {
 			if m.entries[i].callID == msg.callID && m.entries[i].kind == entryCard && m.entries[i].card != nil {
@@ -418,22 +501,24 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, waitEvent(m.events))
 		return m, tea.Batch(cmds...)
+	case agentEventsMsg:
+		var cmds []tea.Cmd
+		for _, ev := range msg.evs {
+			if wcmd := m.applyEvent(ev); wcmd != nil {
+				cmds = append(cmds, wcmd)
+			}
+		}
+		if msg.done {
+			doneCmd := m.finishAgentTurn()
+			if doneCmd != nil {
+				cmds = append(cmds, doneCmd)
+			}
+		} else if m.events != nil {
+			cmds = append(cmds, waitEvent(m.events))
+		}
+		return m, tea.Batch(cmds...)
 	case agentDoneMsg:
-		m.setBusy(false)
-		m.events = nil
-		if m.cancel != nil {
-			m.cancel()
-			m.cancel = nil
-		}
-		if cmd := m.finishPeerSteer(); cmd != nil {
-			return m, cmd
-		}
-		if len(m.pendingAuto) > 0 {
-			next := m.pendingAuto[0]
-			m.pendingAuto = m.pendingAuto[1:]
-			return m, m.startAutoTurn(next)
-		}
-		return m, nil
+		return m, m.finishAgentTurn()
 	case tea.MouseMsg:
 		if m.picker != nil {
 			return m, nil
@@ -465,6 +550,142 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *TUI) finishAgentTurn() tea.Cmd {
+	m.setBusy(false)
+	m.events = nil
+	m.opts.Agent.append(m.hevContext...)
+	m.hevContext = nil
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+	if cmd := m.finishPeerSteer(); cmd != nil {
+		return cmd
+	}
+	if len(m.pendingAuto) > 0 {
+		next := m.pendingAuto[0]
+		m.pendingAuto = m.pendingAuto[1:]
+		return m.startAutoTurn(next)
+	}
+	return nil
+}
+
+var (
+	// Terminal response/escape fragments that Bubble Tea v1 can split out of
+	// SGR mouse tracking, OSC color queries, CSI device attributes, CPR, or
+	// focus reports and deliver as plain KeyRunes.
+	sgrMouseNoiseRe = regexp.MustCompile(`^(?:\[?<)?\d+;\d+;\d+[Mm](?:\[?<\d+;\d+;\d+[Mm])*$`)
+	oscRGBNoiseRe   = regexp.MustCompile(`rgb:[0-9a-fA-F]{2,4}/[0-9a-fA-F]{2,4}/[0-9a-fA-F]{2,4}`)
+	csiNoiseRe      = regexp.MustCompile(`^(?:\[\?[0-9;]+[a-zA-Z]|\[[0-9;]+[RuMm]|\[[IO])$`)
+)
+
+const escAbsorbWindow = 100 * time.Millisecond
+
+// absorbTerminalNoise drops leaked terminal escape/report sequences (OSC color
+// reports, split SGR mouse wheel events, CSI DA/CPR/focus reports, and stray
+// unbound Alt+key introducers) before they can be inserted into the textarea.
+func (m *TUI) absorbTerminalNoise(msg tea.KeyMsg, now time.Time) bool {
+	if msg.Paste {
+		m.escMode = escNone
+		return false
+	}
+	// Handle active split-escape absorption (ESC ] ... or ESC [ ...).
+	if m.escMode != escNone {
+		if now.After(m.escUntil) {
+			m.escMode = escNone
+		} else {
+			switch m.escMode {
+			case escOSC:
+				if msg.Type == tea.KeyCtrlG || msg.Type == tea.KeyEsc {
+					m.escMode = escNone
+					return true
+				}
+				if msg.Alt && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == '\\' {
+					m.escMode = escNone
+					return true
+				}
+				if msg.Type == tea.KeyRunes && isOSCBody(msg.Runes) {
+					m.escUntil = now.Add(escAbsorbWindow)
+					return true
+				}
+				m.escMode = escNone
+			case escCSI:
+				if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+					allParam := true
+					finalFound := false
+					for i, r := range msg.Runes {
+						if isCSIParam(r) {
+							continue
+						}
+						if i == len(msg.Runes)-1 && r >= '@' && r <= '~' {
+							finalFound = true
+							allParam = false
+							continue
+						}
+						allParam = false
+						finalFound = false
+						break
+					}
+					if allParam {
+						m.escUntil = now.Add(escAbsorbWindow)
+						return true
+					}
+					if finalFound {
+						m.escMode = escNone
+						return true
+					}
+				}
+				m.escMode = escNone
+			}
+		}
+	}
+	if msg.Alt && msg.Type == tea.KeyRunes {
+		if len(msg.Runes) == 1 {
+			switch msg.Runes[0] {
+			case ']':
+				m.escMode = escOSC
+				m.escUntil = now.Add(escAbsorbWindow)
+				return true
+			case '[':
+				m.escMode = escCSI
+				m.escUntil = now.Add(escAbsorbWindow)
+				return true
+			case 'b', 'f', 'd', 'c', 'l', 'u', '<', '>':
+				// Known bubbles/textarea Alt editing bindings.
+				return false
+			default:
+				// Stray unbound Alt+<rune> (e.g. ESC \ or ESC O): textarea's
+				// default branch would otherwise insert the raw rune.
+				return true
+			}
+		}
+		return true
+	}
+	if msg.Type == tea.KeyRunes && len(msg.Runes) >= 2 {
+		s := string(msg.Runes)
+		if sgrMouseNoiseRe.MatchString(s) || oscRGBNoiseRe.MatchString(s) || csiNoiseRe.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
+func isOSCBody(rs []rune) bool {
+	if len(rs) == 0 {
+		return false
+	}
+	for _, r := range rs {
+		if r < 0x21 || r > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func isCSIParam(r rune) bool {
+	return (r >= '0' && r <= '9') || r == ';' || r == ':' || r == '?' || r == '<' || r == '>' || r == '=' || r == '!' || r == '"'
+}
+
 func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Type == tea.KeyCtrlC:
@@ -489,11 +710,11 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case msg.Type == tea.KeyUp && len(m.matchingCommands()) > 0:
 		matches := m.matchingCommands()
-		m.cmdCursor = (m.cmdCursor - 1 + len(matches)) % len(matches)
+		m.moveCommandCursor(-1, len(matches))
 		return m, nil
 	case msg.Type == tea.KeyDown && len(m.matchingCommands()) > 0:
 		matches := m.matchingCommands()
-		m.cmdCursor = (m.cmdCursor + 1) % len(matches)
+		m.moveCommandCursor(1, len(matches))
 		return m, nil
 	case msg.Type == tea.KeyTab && len(m.matchingCommands()) > 0:
 		matches := m.matchingCommands()
@@ -504,7 +725,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.input.SetValue(fill)
 		m.input.CursorEnd()
-		m.cmdCursor = 0
+		m.cmdCursor, m.cmdStart = 0, 0
 		m.syncInputHeight()
 		return m, nil
 	case msg.Alt && msg.String() == "alt+m":
@@ -514,7 +735,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncInputHeight()
 		return m, nil
 	case msg.Type == tea.KeyEnter: // also Ctrl+M: terminals send the same byte
-		text := strings.TrimSpace(m.input.Value())
+		text := strings.TrimLeftFunc(m.input.Value(), unicode.IsSpace)
 		if text == "" {
 			return m, m.openPicker()
 		}
@@ -524,12 +745,13 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			text = sel.Name
 		}
 		m.input.Reset()
-		m.cmdCursor = 0
+		m.cmdCursor, m.cmdStart = 0, 0
 		m.scroll = 0
 		m.syncInputHeight()
 		if strings.HasPrefix(text, "/") || strings.HasPrefix(text, ":") {
 			return m, m.command(text)
 		}
+		text = strings.TrimSpace(text)
 		// Incoming peer messages pasted by `peers send`: always show in the
 		// lower status bar; background (agent-only) by default, or interrupt
 		// the main user thread when tagged [interrupt] / [urgent].
@@ -555,9 +777,12 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.startTurn(text)
 	}
+	if m.absorbTerminalNoise(msg, time.Now()) {
+		return m, nil
+	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	m.cmdCursor = 0
+	m.cmdCursor, m.cmdStart = 0, 0
 	m.syncInputHeight()
 	return m, cmd
 }
@@ -597,6 +822,7 @@ type slashCmd struct {
 	Name     string
 	Summary  string
 	TakesArg bool
+	Group    string
 }
 
 var slashCommands = []slashCmd{
@@ -612,17 +838,47 @@ var slashCommands = []slashCmd{
 	{Name: "/quit", Summary: "exit hev kit"},
 }
 
+const commandPaletteRows = 8
+
+func (m *TUI) moveCommandCursor(delta, count int) {
+	m.cmdCursor = (m.cmdCursor + delta + count) % count
+	if m.cmdCursor < m.cmdStart {
+		m.cmdStart = m.cmdCursor
+	} else if m.cmdCursor >= m.cmdStart+commandPaletteRows {
+		m.cmdStart = m.cmdCursor - commandPaletteRows + 1
+	}
+}
+
+func (m *TUI) paletteCommands() []slashCmd {
+	commands := append([]slashCmd(nil), slashCommands...)
+	seen := make(map[string]bool, len(commands)+len(m.opts.HevCommands))
+	for _, command := range commands {
+		seen[command.Name] = true
+	}
+	for _, group := range []string{"Cluster:", "Other:"} {
+		for _, command := range m.opts.HevCommands {
+			name := "/" + command.Name
+			if seen[name] || (group == "Cluster:") != (command.Group == "cluster") {
+				continue
+			}
+			seen[name] = true
+			commands = append(commands, slashCmd{Name: name, Summary: command.Summary, TakesArg: command.TakesArg, Group: group})
+		}
+	}
+	return commands
+}
+
 // matchingCommands returns command suggestions when the input is typing a
 // slash or vim-style colon command (starts with "/" or ":" and has no whitespace yet).
 func (m *TUI) matchingCommands() []slashCmd {
 	raw := m.input.Value()
-	if (!strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, ":")) || strings.ContainsAny(raw, " \t\n") {
+	if (!strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, ":")) || strings.IndexFunc(raw, unicode.IsSpace) >= 0 {
 		return nil
 	}
 	prefixChar := raw[:1]
 	q := strings.ToLower(strings.TrimPrefix(raw, prefixChar))
 	if q == "" {
-		return slashCommands
+		return m.paletteCommands()
 	}
 	// Vim quit shortcuts (:q, :q!, :wq) resolve directly to /quit.
 	if prefixChar == ":" && (q == "q" || q == "q!" || q == "wq" || q == "qa" || q == "qa!") {
@@ -632,16 +888,18 @@ func (m *TUI) matchingCommands() []slashCmd {
 			}
 		}
 	}
-	var prefix, fuzzy []slashCmd
-	for _, sc := range slashCommands {
+	var exact, prefix, fuzzy []slashCmd
+	for _, sc := range m.paletteCommands() {
 		bare := strings.TrimPrefix(sc.Name, "/")
-		if strings.HasPrefix(bare, q) {
+		if bare == q {
+			exact = append(exact, sc)
+		} else if strings.HasPrefix(bare, q) {
 			prefix = append(prefix, sc)
 		} else if fuzzyScore(q, bare) >= 0 {
 			fuzzy = append(fuzzy, sc)
 		}
 	}
-	return append(prefix, fuzzy...)
+	return append(append(exact, prefix...), fuzzy...)
 }
 
 func (m *TUI) renderCommandSuggestions(width int) string {
@@ -650,23 +908,35 @@ func (m *TUI) renderCommandSuggestions(width int) string {
 		return ""
 	}
 	cur := min(m.cmdCursor, len(matches)-1)
+	start := min(m.cmdStart, cur)
+	start = max(start, cur-commandPaletteRows+1)
+	end := min(start+commandPaletteRows, len(matches))
 	var lines []string
-	for i, sc := range matches {
+	group := ""
+	for i := start; i < end; i++ {
+		sc := matches[i]
 		name := fmt.Sprintf("%-12s", sc.Name)
 		desc := sc.Summary
+		if sc.Group != group && sc.Group != "" {
+			desc = sc.Group + " " + desc
+		}
+		group = sc.Group
+		row := "  " + name + " " + desc
 		if i == cur {
-			if m.opts.Color {
-				lines = append(lines, hevBadgeStyle.Render("› ")+hevCmdStyle.Render(name)+" "+chromeName.Render(desc))
+			row = "› " + name + " " + desc
+		}
+		row = ansi.Truncate(row, max(1, width-2), "…")
+		if m.opts.Color {
+			if i == cur {
+				row = hevCmdStyle.Render(row)
 			} else {
-				lines = append(lines, "› "+name+" "+desc)
-			}
-		} else {
-			if m.opts.Color {
-				lines = append(lines, "  "+chromeName.Render(name)+" "+dimStyle.Render(desc))
-			} else {
-				lines = append(lines, "  "+name+" "+desc)
+				row = dimStyle.Render(row)
 			}
 		}
+		lines = append(lines, row)
+	}
+	if hidden := len(matches) - (end - start); hidden > 0 {
+		lines = append(lines, dimStyle.Render(ansi.Truncate(fmt.Sprintf("… %d more · type to filter", hidden), max(1, width-2), "…")))
 	}
 	return lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(lines, "\n"))
 }
@@ -677,11 +947,15 @@ const helpText = `Enter send (steers while a turn runs) · Shift+Enter newline �
 /resume [query]           resume a local session from hev, claude, codex, agy or pi
 /model [slug]             pick or switch model       /prompt  show composed system prompt
 /reload                   recompose the prompt       /clear   new thread       /help  this help
-/quit                     exit                       Ctrl+O   expand hev cards  Ctrl+C cancel / quit`
+/quit                     exit                       Ctrl+O   expand hev cards  Ctrl+C cancel / quit
+Type / to browse hev CLI commands. Use ↑/↓ to select and Tab to complete.`
 
 func (m *TUI) command(text string) tea.Cmd {
-	name, arg, _ := strings.Cut(text, " ")
-	arg = strings.TrimSpace(arg)
+	name, rawArg := text, ""
+	if i := strings.IndexFunc(text, unicode.IsSpace); i >= 0 {
+		name, rawArg = text[:i], text[i:]
+	}
+	arg := strings.TrimSpace(rawArg)
 	if strings.HasPrefix(name, ":") {
 		name = "/" + strings.TrimPrefix(name, ":")
 	}
@@ -782,6 +1056,11 @@ func (m *TUI) command(text string) tea.Cmd {
 		}
 		return tea.Quit
 	default:
+		for _, command := range m.opts.HevCommands {
+			if name == "/"+command.Name {
+				return m.runHevSlash(command, rawArg)
+			}
+		}
 		m.system("unknown command " + name + " (try /help)")
 	}
 	return nil
@@ -1094,7 +1373,11 @@ func (m *TUI) resumePickerView(width, height int) string {
 		status = "  scanning local harness traces…"
 	}
 	b.WriteString(badge.Render("resume session") + dimStyle.Render(status) + "\n")
-	b.WriteString("filter › " + r.query + "▏\n")
+	caret := "▏"
+	if m.opts.Color {
+		caret = lipgloss.NewStyle().Foreground(accent).Render(caret)
+	}
+	b.WriteString("filter › " + r.query + caret + "\n")
 	rows := max(3, height-4)
 	start := 0
 	if r.cursor >= rows {
@@ -1313,20 +1596,31 @@ func (m *TUI) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- view ---
 
+// Hevmind dark palette (hevmind.com/brand):
+// Eight tokens. Burnt orange #E25822 is the only color; everything else is
+// paper, ink, and the gray between them.
 var (
-	accent    = lipgloss.Color("#eb5768")
-	gold      = lipgloss.Color("#fbe476")
-	steel     = lipgloss.Color("#5186a5")
-	dim       = lipgloss.Color("#8a8a8a")
-	userStyle = lipgloss.NewStyle().Bold(true).Foreground(gold)
-	sysStyle  = lipgloss.NewStyle().Foreground(steel).Italic(true)
+	brandPaper     = lipgloss.Color("#111111") // --paper (dark)
+	brandPaperWarm = lipgloss.Color("#1A1A18") // --paper-warm (dark)
+	brandInk       = lipgloss.Color("#FAFAF5") // --ink (dark primary text)
+	brandInkSoft   = lipgloss.Color("#D8D5CC") // --ink-soft (dark secondary text)
+	brandMuted     = lipgloss.Color("#6B6B66") // --muted (tertiary text)
+	signal         = lipgloss.Color("#E25822") // --signal (burnt orange)
+	accent         = lipgloss.Color("#FF6B33") // --signal-text (brightens on dark)
+	brandRule      = lipgloss.Color("#2A2A28") // --rule (dark dividers)
+
+	userStyle = lipgloss.NewStyle().Bold(true).Foreground(brandInk)
+	sysStyle  = lipgloss.NewStyle().Foreground(brandInkSoft).Italic(true)
 	errStyle  = lipgloss.NewStyle().Foreground(accent).Bold(true)
-	dimStyle  = lipgloss.NewStyle().Foreground(dim)
-	cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1)
-	badge     = lipgloss.NewStyle().Foreground(lipgloss.Color("#000000")).Background(gold).Bold(true).Padding(0, 1)
+	dimStyle  = lipgloss.NewStyle().Foreground(brandMuted)
+	badge     = lipgloss.NewStyle().Foreground(brandInk).Background(signal).Bold(true).Padding(0, 1)
 )
 
 func (m *TUI) splash() string {
+	model := m.opts.Agent.Model()
+	if m.splashCache != "" && m.splashWidth == m.width && m.splashColor == m.opts.Color && m.splashModel == model {
+		return m.splashCache
+	}
 	mascot := RenderMascot(m.width, m.opts.Color)
 	ws := m.opts.Workspace
 	if ws == "" {
@@ -1338,12 +1632,16 @@ func (m *TUI) splash() string {
 		"",
 		"cwd        " + m.opts.Cwd,
 		"workspace  " + ws,
-		"model      " + userStyle.Render(m.opts.Agent.Model()) + dimStyle.Render(" via "+m.opts.Agent.ProviderFor(m.opts.Agent.Model())),
+		"model      " + userStyle.Render(model) + dimStyle.Render(" via "+m.opts.Agent.ProviderFor(model)),
 		"",
 		dimStyle.Render("Ctrl+M model picker · /prompt · /help"),
 		dimStyle.Render("hev kit runs without permissions. It's your responsibility to secure your compute."),
 	}, "\n"))
-	return lipgloss.JoinHorizontal(lipgloss.Top, mascot, "   ", info)
+	m.splashCache = lipgloss.JoinHorizontal(lipgloss.Top, mascot, "   ", info)
+	m.splashWidth = m.width
+	m.splashColor = m.opts.Color
+	m.splashModel = model
+	return m.splashCache
 }
 
 func (m *TUI) headerBar() string {
@@ -1357,44 +1655,82 @@ func (m *TUI) headerBar() string {
 
 func (m *TUI) renderCard(c *Card, width int, running bool) string {
 	icon := hevToolEmoji(c.Tool, m.opts.Color)
+	if m.opts.Color && c.Tool == "hev_dispatch" && c.Action == "done" {
+		if c.OK {
+			icon = "✅"
+		} else {
+			icon = "❌"
+		}
+	}
 	title := hevBadgeStyle.Render(icon + " " + strings.ReplaceAll(c.Tool, "_", " "))
 	if c.Action != "" {
 		title += " " + hevCmdStyle.Render(c.Action)
 	}
-	lines := []string{title}
 	if running {
-		lines = append(lines, renderShimmer("running…", m.frame, m.opts.Color))
-	} else if c.Summary != "" {
-		lines = append(lines, c.Summary)
+		return title + "  " + renderShimmer("running…", m.frame, m.opts.Color)
 	}
-	if body := strings.TrimSpace(c.Body); body != "" {
-		bl := strings.Split(body, "\n")
-		// Keep completed cards compact (summary + Ctrl+O hint); show full body on Ctrl+O or error.
-		if !m.expandCards && c.OK && len(bl) > 3 {
-			lines = append(lines, dimStyle.Render(fmt.Sprintf("… %d line(s) · Ctrl+O to expand", len(bl))))
+	header := title
+	if c.Summary != "" {
+		if !c.OK {
+			header += "  " + errStyle.Render(c.Summary)
 		} else {
-			limit := 6
-			if m.expandCards {
-				limit = 40
-			}
-			for i, l := range bl {
-				if i == limit {
-					lines = append(lines, dimStyle.Render(fmt.Sprintf("… %d more line(s) · Ctrl+O", len(bl)-limit)))
-					break
-				}
-				lines = append(lines, dimStyle.Render(ansi.Truncate(l, max(10, width-6), "…")))
-			}
+			header += dimStyle.Render(" · ") + c.Summary
 		}
 	}
-	return cardStyle.Width(max(20, width-2)).Render(strings.Join(lines, "\n"))
+	body := strings.TrimSpace(c.Body)
+	if body == "" {
+		return header
+	}
+	bl := strings.Split(body, "\n")
+	// Collapsed by default on success: single sleek line with Ctrl+O hint.
+	if !m.expandCards && c.OK {
+		if len(bl) > 1 {
+			return header + dimStyle.Render(fmt.Sprintf("  (%d lines · Ctrl+O)", len(bl)))
+		}
+		return header
+	}
+	// Expanded (Ctrl+O) or error: compact indented lines with a subtle left bar, no box outline.
+	bar := "  "
+	if m.opts.Color {
+		bar = dimStyle.Render("  │ ")
+	}
+	lines := []string{header}
+	limit := 6
+	if m.expandCards {
+		limit = 40
+	}
+	for i, l := range bl {
+		if i == limit {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("  … %d more line(s) · Ctrl+O", len(bl)-limit)))
+			break
+		}
+		lines = append(lines, bar+dimStyle.Render(ansi.Truncate(l, max(10, width-6), "…")))
+	}
+	return strings.Join(lines, "\n")
 }
 
-func (m *TUI) renderEntry(e entry, width int) string {
+const streamMarkdownInterval = 75 * time.Millisecond
+
+func (m *TUI) renderEntry(e *entry, width int, streaming bool) string {
 	switch e.kind {
 	case entryUser:
 		return userStyle.Render("you › ") + e.text
 	case entryAssistant:
-		return renderMarkdown(e.text, width, m.opts.Color)
+		if e.cacheRender != "" && e.cacheWidth == width && e.cacheColor == m.opts.Color {
+			if e.cacheText == e.text {
+				return e.cacheRender
+			}
+			if streaming && time.Since(e.cacheAt) < streamMarkdownInterval {
+				return e.cacheRender
+			}
+		}
+		rendered := renderMarkdown(e.text, width, m.opts.Color)
+		e.cacheText = e.text
+		e.cacheWidth = width
+		e.cacheColor = m.opts.Color
+		e.cacheRender = rendered
+		e.cacheAt = time.Now()
+		return rendered
 	case entryTool:
 		if e.running {
 			return renderShimmer(e.text, m.frame, m.opts.Color)
@@ -1441,7 +1777,11 @@ func (m *TUI) pickerView(height int) string {
 		src = string(SourceStarter)
 	}
 	b.WriteString(badge.Render("model picker") + dimStyle.Render(fmt.Sprintf("  %d models · %s · focus %s", len(p.filtered), src, focus)) + "\n")
-	b.WriteString("search › " + p.query + "▏\n")
+	caret := "▏"
+	if m.opts.Color {
+		caret = lipgloss.NewStyle().Foreground(accent).Render(caret)
+	}
+	b.WriteString("search › " + p.query + caret + "\n")
 	rows := max(3, height-4)
 	start := 0
 	if p.cursor >= rows {
@@ -1451,7 +1791,7 @@ func (m *TUI) pickerView(height int) string {
 		model := p.filtered[i]
 		star := "  "
 		if m.opts.Favorites.Has(model.ID) {
-			star = lipgloss.NewStyle().Foreground(gold).Render("★ ")
+			star = lipgloss.NewStyle().Foreground(accent).Render("★ ")
 		}
 		cur := "  "
 		line := fmt.Sprintf("%-44s %6s  %s", ansi.Truncate(model.ID, 44, "…"), model.ContextLabel(), model.Badge())
@@ -1479,6 +1819,68 @@ func (m *TUI) horizontalRule(width int) string {
 	return ruleStyle.Render(line)
 }
 
+// applyBackgroundGrid paints a subtle Hevmind architectural dot grid (--rule #2A2A28)
+// into the empty canvas of the viewport (blank rows and open space to the right of
+// short lines, leaving a quiet margin around text). Disabled when color is off.
+func applyBackgroundGrid(lines []string, width int) []string {
+	const (
+		colStep = 8
+		rowStep = 4
+		colOff  = 4
+		rowOff  = 2
+		margin  = 3
+	)
+	if width < colStep+2 {
+		return lines
+	}
+	dot := ruleStyle.Render("·")
+	out := make([]string, len(lines))
+	for y, line := range lines {
+		if y%rowStep != rowOff {
+			out[y] = line
+			continue
+		}
+		plain := strings.TrimRight(ansi.Strip(line), " ")
+		if plain == "" {
+			var b strings.Builder
+			pos := 0
+			for x := colOff; x < width-1; x += colStep {
+				b.WriteString(strings.Repeat(" ", x-pos))
+				b.WriteString(dot)
+				pos = x + 1
+			}
+			out[y] = b.String()
+			continue
+		}
+		lw := lipgloss.Width(line)
+		startCol := lw + margin
+		// Advance to the next grid column >= startCol.
+		first := colOff
+		if startCol > first {
+			rem := (startCol - first) % colStep
+			if rem == 0 {
+				first = startCol
+			} else {
+				first = startCol + (colStep - rem)
+			}
+		}
+		if first >= width-1 {
+			out[y] = line
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(line)
+		pos := lw
+		for x := first; x < width-1; x += colStep {
+			b.WriteString(strings.Repeat(" ", x-pos))
+			b.WriteString(dot)
+			pos = x + 1
+		}
+		out[y] = b.String()
+	}
+	return out
+}
+
 func (m *TUI) activeVerb() string {
 	if m.thinkVerb != "" {
 		return m.thinkVerb
@@ -1494,23 +1896,22 @@ func (m *TUI) statusChromeBar(width int) string {
 	if !m.opts.Color {
 		right = model + " · " + prov
 	}
-	var left string
-	if m.busy {
-		left = renderShimmer(m.activeVerb(), m.frame, m.opts.Color) + dimStyle.Render("  Enter steers · Ctrl+C cancels")
-	} else {
-		left = renderChrome(m.chrome, m.opts.Color)
-		if len(m.watched) > 0 {
-			wb := fmt.Sprintf("◉ watching %d", len(m.watched))
-			if m.opts.Color {
-				wb = userStyle.Render(wb)
-			}
-			if left != "" {
-				left = wb + "  " + left
-			} else {
-				left = wb
-			}
+	left := renderChrome(m.chrome, m.opts.Color)
+	if len(m.watched) > 0 {
+		wb := fmt.Sprintf("◉ watching %d", len(m.watched))
+		if m.opts.Color {
+			wb = userStyle.Render(wb)
 		}
-		if left == "" {
+		if left != "" {
+			left = wb + "  " + left
+		} else {
+			left = wb
+		}
+	}
+	if left == "" {
+		if m.busy {
+			left = dimStyle.Render("Enter steers · Ctrl+C cancels")
+		} else {
 			left = dimStyle.Render("/dispatch · Ctrl+M model · Shift+Enter newline · /help")
 		}
 	}
@@ -1578,19 +1979,46 @@ func (m *TUI) View() string {
 		body := lipgloss.NewStyle().Padding(0, 1).Render(m.steerOverlayView(innerWidth, room))
 		return header + "\n\n" + body + "\n" + footer
 	}
-	parts := []string{m.splash()}
+	var transcript strings.Builder
+	transcript.WriteString(m.splash())
 	hasRunningTool := false
-	for _, e := range m.entries {
+	prevCompact := false
+	for i := range m.entries {
+		e := &m.entries[i]
 		if e.running {
 			hasRunningTool = true
 		}
-		parts = append(parts, m.renderEntry(e, innerWidth))
+		streaming := m.busy && i == len(m.entries)-1
+		rendered := m.renderEntry(e, innerWidth, streaming)
+		if rendered == "" {
+			continue
+		}
+		compact := e.kind == entryTool || e.kind == entryCard || e.kind == entrySystem
+		if prevCompact && compact {
+			transcript.WriteByte('\n')
+		} else {
+			transcript.WriteString("\n\n")
+		}
+		transcript.WriteString(rendered)
+		prevCompact = compact
 	}
 	if m.busy && !hasRunningTool {
-		parts = append(parts, renderShimmer(m.activeVerb(), m.frame, m.opts.Color))
+		if prevCompact {
+			transcript.WriteByte('\n')
+		} else {
+			transcript.WriteString("\n\n")
+		}
+		transcript.WriteString(renderShimmer(m.activeVerb(), m.frame, m.opts.Color))
 	}
-	padded := lipgloss.NewStyle().Padding(0, 1).Render(strings.Join(parts, "\n\n"))
-	lines := strings.Split(padded, "\n")
+	rawLines := strings.Split(transcript.String(), "\n")
+	lines := make([]string, len(rawLines))
+	for i, l := range rawLines {
+		if l == "" {
+			lines[i] = ""
+		} else {
+			lines[i] = " " + l
+		}
+	}
 	room := max(3, m.height-lipgloss.Height(footer)-1)
 	maxScroll := max(0, len(lines)-room)
 	scroll := min(m.scroll, maxScroll)
@@ -1602,6 +2030,9 @@ func (m *TUI) View() string {
 	// Pad short transcripts with blank lines so the input box stays anchored at the bottom.
 	for len(lines) < room {
 		lines = append(lines, "")
+	}
+	if m.opts.Color {
+		lines = applyBackgroundGrid(lines, width)
 	}
 	if scroll > 0 {
 		badgeText := fmt.Sprintf(" ↑ scrolled %d line(s) · PgDn/End for live ", scroll)

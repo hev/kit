@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	tracearchive "github.com/hev/kit/internal/archive"
+
+	"html"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/blob"
+	"github.com/hev/kit/internal/cost"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
 )
@@ -29,7 +32,10 @@ var pageTemplate string
 // archive.Evals) and uses them when present.
 type Reader = tracearchive.Reader
 
+type Link struct{ Label, Href string }
+
 type Server struct {
+	links         []Link
 	reviewEnabled bool
 	reader        Reader
 	// images is this host's blob store for transcript images; nil shows
@@ -121,6 +127,8 @@ func imageViews(images trace.Images, host string, local func(string) bool) []map
 }
 
 // WithReviewEnabled exposes the navigation link for configured hosted wrappers.
+func (s *Server) WithLinks(links []Link) *Server { s.links = append([]Link(nil), links...); return s }
+
 func (s *Server) WithReviewEnabled(enabled bool) *Server { s.reviewEnabled = enabled; return s }
 
 // Warm fills the picker archive in the background, so the first filter a
@@ -140,7 +148,7 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/board/{path...}": (*Server).boardAPI,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, board: s.board, tabs: s.tabs}
+			request := &Server{links: s.links, reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, board: s.board, tabs: s.tabs}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithContext(r.Context()).WithTiming(timing)
@@ -447,11 +455,17 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
-	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30, "storage": s.storage(), "board": s.boardPage()})
+	now := time.Now().UTC()
+	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": displayRates(now), "generated": now.Format(time.RFC3339), "days": 30, "storage": s.storage(), "board": s.boardPage()})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
 	link := ""
 	if s.reviewEnabled {
 		link = `<a href="/review">label review</a>`
+	}
+	for _, extra := range s.links {
+		if strings.HasPrefix(extra.Href, "/") && !strings.HasPrefix(extra.Href, "//") && !strings.Contains(extra.Href, "\\") {
+			link += `<a href="` + html.EscapeString(extra.Href) + `">` + html.EscapeString(extra.Label) + `</a>`
+		}
 	}
 	body = strings.Replace(body, "<!--__REVIEW_LINK__-->", link, 1)
 	body = strings.Replace(body, "<!--__TABS__-->", s.tabsHTML(), 1)
@@ -479,7 +493,7 @@ func corpus(rows []trace.SessionRow) []map[string]any {
 		usage := map[string]int64{"input": r.InputTokens, "output": r.OutputTokens, "cache_read": r.CacheReadTokens, "cache_write": r.CacheCreationTokens}
 		out = append(out, map[string]any{"id": r.SessionID, "summary": strings.TrimSpace(r.Summary), "first_prompt_short": r.FirstPromptShort,
 			"skills": nonNil(r.Skills), "tool_counts": r.ToolCounts, "summary_backfilled": r.SummaryBackfilled && strings.TrimSpace(r.Summary) != "", "summary_reason": r.MissingSummaryReason(), "harness": r.Harness, "model": r.Model, "repo_url": r.RepoURL, "project": project,
-			"branch": r.Branch, "host": r.Host, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
+			"branch": r.Branch, "host": r.Host, "author_id": r.AuthorID, "author_name": r.AuthorName, "start": r.Start, "end": r.End, "wall_ms": r.WallMS, "api_ms": r.APIMS,
 			"prompts": r.PromptCount, "total_tokens": r.TotalTokens, "tools": r.ToolCount, "requests": r.RequestCount,
 			"usage_by_model": map[string]any{r.Model: usage}, "cost": r.Cost, "has_subagents": r.HasSubagents})
 	}
@@ -508,9 +522,26 @@ func writeError(w http.ResponseWriter, err error, status int) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-var rates = map[string][4]float64{
-	"claude-sonnet-5": {3, 15, 6, .3}, "claude-opus-5": {15, 75, 30, 1.5}, "claude-fable-5": {15, 75, 30, 1.5},
-	"claude-fable-5-1": {15, 75, 30, 1.5}, "claude-haiku-4-5-20251001": {1, 5, 2, .1},
+// displayRates returns the active list rates from embedded prices.toml as of
+// now (input, output, cache write, cache read per million tokens).
+func displayRates(now time.Time) map[string][4]float64 {
+	all, err := cost.DefaultRates()
+	if err != nil {
+		return map[string][4]float64{}
+	}
+	today := now.UTC().Format("2006-01-02")
+	seen := map[string]bool{}
+	out := map[string][4]float64{}
+	for _, r := range all {
+		if seen[r.Model] {
+			continue
+		}
+		seen[r.Model] = true
+		if active, _ := cost.LookupRate(all, r.Model, today); active != nil {
+			out[r.Model] = [4]float64{active.Input, active.Output, active.Creation, active.Cached}
+		}
+	}
+	return out
 }
 
 func emptySession() map[string]any { return buildSession(trace.SessionRow{}, nil) }
@@ -659,7 +690,7 @@ func buildSessionImages(s trace.SessionRow, rows []trace.BlockRow, local func(st
 		}
 	}
 	allUsage := map[string]int64{"input": s.InputTokens, "output": s.OutputTokens, "cache_read": s.CacheReadTokens, "cache_write": s.CacheCreationTokens}
-	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": s.RatesKnown(), "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
+	return map[string]any{"id": s.SessionID, "title": strings.TrimSpace(s.Summary), "summary": strings.TrimSpace(s.Summary), "summary_reason": s.MissingSummaryReason(), "first_prompt": s.FirstPrompt, "prompt_ts": nonNil(s.PromptTS), "skill_loads": nonNil(skillLoads), "skills": nonNil(s.Skills), "tool_names": nonNil(s.ToolNames), "project": projectName(s.RepoURL), "repo_url": s.RepoURL, "branch": s.Branch, "harness": s.Harness, "model": s.Model, "host": s.Host, "author_id": s.AuthorID, "author_name": s.AuthorName, "size": 0, "start": s.Start, "end": s.End, "wall_ms": s.WallMS, "model_ms": s.APIMS, "tool_ms": sumToolMS(rows), "idle_ms": s.IdleMS, "agent_ms": int64(0), "usage": allUsage, "agent_usage": map[string]int64{}, "cost": s.Cost, "rates_known": s.RatesKnown(), "n_requests": s.RequestCount, "n_tools": s.ToolCount, "n_prompts": s.PromptCount, "n_edits": countEdits(rows), "turn_map": turnMap, "turns": nonNil(turnOut), "requests": nonNil(requestsOut), "agents": nonNil(agents), "commits": []any{}, "serial_reads": []any{}, "tool_table": nonNil(toolTable(rows)), "model_table": nonNil(modelTable(s))}
 }
 
 func buildAgents(groups map[string][]trace.BlockRow, host string, local func(string) bool) []map[string]any {

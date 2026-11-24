@@ -22,6 +22,18 @@ import (
 // Version identifies the scrubbing policy for upgrade migration bookkeeping.
 const Version = "gitleaks-8.24.3-kit-4"
 
+// Hosted keys have a long opaque suffix. Preserve short hk_ identifiers.
+var kitKey = regexp.MustCompile(`\bhk_[A-Za-z0-9_-]{16,}`)
+
+// HideKitKeys removes hosted credentials from diagnostics. A known key is
+// removed even if an older service issued one with a shorter suffix.
+func HideKitKeys(text, known string) string {
+	if known != "" {
+		text = strings.ReplaceAll(text, known, "[redacted]")
+	}
+	return kitKey.ReplaceAllString(text, "[redacted]")
+}
+
 type Counts map[string]int
 
 func (c Counts) Add(other Counts) {
@@ -95,6 +107,7 @@ func New(salt []byte) (*Scrubber, error) {
 		{id: "layer-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{24,})(?:$|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})`), group: 1, advanceGroup: true},
 		{id: "layer-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2})((?:hev|hvl)_[A-Za-z0-9]{32})(?:$|[^A-Za-z0-9])`), group: 1, advanceGroup: true},
 		{id: "kit-key", re: regexp.MustCompile(`(?:^|[^A-Za-z0-9_]|%[0-9A-Fa-f]{2})(hk_[A-Za-z0-9_-]{24,})`), group: 1},
+		{id: "kit-key", re: kitKey},
 		{id: "turbopuffer", re: regexp.MustCompile(`\btpuf_[A-Za-z0-9_-]{16,}`)},
 		{id: "jwt", re: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)},
 		{id: "high-entropy-assignment", re: regexp.MustCompile(`\b[A-Za-z_][A-Za-z0-9_]*\s*=\s*["']?([A-Za-z0-9_+/=.-]{20,})`), group: 1, entropy: 3.5},

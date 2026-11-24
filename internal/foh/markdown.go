@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	hevCmdStyle   = lipgloss.NewStyle().Bold(true).Foreground(gold)
+	hevCmdStyle   = lipgloss.NewStyle().Bold(true).Foreground(brandInk)
 	hevBadgeStyle = lipgloss.NewStyle().Bold(true).Foreground(accent)
 
 	// hevCmdRe matches plain-text `hev <subcommand>...` tokens inside rendered
@@ -149,7 +149,7 @@ func renderShimmer(text string, frame int, color bool) string {
 		sp := asciiFrames[frame%len(asciiFrames)]
 		return sp + " " + text
 	}
-	sp := lipgloss.NewStyle().Foreground(gold).Bold(true).Render(brailleFrames[frame%len(brailleFrames)])
+	sp := lipgloss.NewStyle().Foreground(accent).Bold(true).Render(brailleFrames[frame%len(brailleFrames)])
 	runes := []rune(text)
 	n := len(runes)
 	if n == 0 {
@@ -169,15 +169,15 @@ func renderShimmer(text string, frame int, color bool) string {
 		var r, g, bl uint8
 		switch {
 		case dist == 0:
-			r, g, bl = 255, 250, 220 // bright highlight
+			r, g, bl = 250, 250, 245 // brand --ink (#FAFAF5)
 		case dist == 1:
-			r, g, bl = 251, 228, 118 // gold (#fbe476)
+			r, g, bl = 255, 107, 51 // brand --signal-text (#FF6B33)
 		case dist == 2:
-			r, g, bl = 235, 87, 104 // accent (#eb5768)
+			r, g, bl = 226, 88, 34 // brand --signal (#E25822)
 		case dist == 3:
-			r, g, bl = 81, 134, 165 // steel (#5186a5)
+			r, g, bl = 216, 213, 204 // brand --ink-soft (#D8D5CC)
 		default:
-			r, g, bl = 138, 138, 138 // dim (#8a8a8a)
+			r, g, bl = 107, 107, 102 // brand --muted (#6B6B66)
 		}
 		fmt.Fprintf(&b, "\x1b[38;2;%d;%d;%dm%c", r, g, bl, ch)
 	}

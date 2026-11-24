@@ -19,7 +19,7 @@ func hevToolEmoji(tool string, color bool) string {
 	case "hev_dispatch", "hev dispatch":
 		return "🚀"
 	case "hev_steer", "hev steer":
-		return "⎈"
+		return "🕹"
 	case "hev_peers", "hev peers":
 		return "💬"
 	case "hev_board", "hev board":
@@ -42,6 +42,16 @@ func hevToolEmoji(tool string, color bool) string {
 		return "⏰"
 	case "hev service":
 		return "⚡"
+	case "hev review":
+		return "🔎"
+	case "hev watch":
+		return "👁"
+	case "hev up", "hev d":
+		return "▶"
+	case "hev down", "hev stop":
+		return "■"
+	case "hev version":
+		return "ℹ"
 	default:
 		if strings.HasPrefix(tool, "hev") {
 			return "🔧"
@@ -89,8 +99,9 @@ func pickSummaryModel(p Provider, activeModel, configured string) string {
 		if r.Has(ProviderCodexSub) {
 			return "codex/gpt-5.3-codex"
 		}
+		return activeModel
 	}
-	return activeModel
+	return ""
 }
 
 // summarizeCardAsync asks a small/fast model in the background for a 1-line

@@ -162,6 +162,9 @@ func (e *Engine) incarnation() string {
 	return e.Host
 }
 func command(ctx context.Context, name string, in io.Reader, args ...string) (string, error) {
+	if name == "tmux" {
+		args = append([]string{"-u"}, args...)
+	}
 	c := exec.CommandContext(ctx, name, args...)
 	c.Stdin = in
 	c.Env = os.Environ()
@@ -243,7 +246,10 @@ func engineHarness(cmd string) string {
 func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 	peers := []Peer{}
 	if runtime.GOOS != "windows" {
-		raw, err := e.tmux(ctx, "list-panes", "-a", "-F", "#{session_name}\t#{pane_id}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_title}\t#{@peers-inbox}")
+		fields := []string{"#{session_name}", "#{pane_id}", "#{pane_pid}", "#{pane_current_command}", "#{pane_current_path}", "#{pane_title}", "#{@peers-inbox}"}
+		panes, err := compat.ReadTmuxFields(fields, func(format string) (string, error) {
+			return e.tmux(ctx, "list-panes", "-a", "-F", format)
+		})
 		if err != nil && !errors.Is(err, exec.ErrNotFound) && !strings.Contains(err.Error(), "no server") && !strings.Contains(err.Error(), "No such file") && !strings.Contains(err.Error(), "no sessions") {
 			return nil, err
 		}
@@ -262,8 +268,7 @@ func (e *Engine) list(ctx context.Context, all bool) ([]Peer, error) {
 			ppid, _ := strconv.Atoi(f[1])
 			procs = append(procs, proc{pid, ppid, strings.Join(f[2:], " ")})
 		}
-		for _, line := range strings.Split(strings.TrimSuffix(raw, "\n"), "\n") {
-			f := strings.Split(line, "\t")
+		for _, f := range panes {
 			if len(f) != 7 {
 				continue
 			}

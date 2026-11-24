@@ -101,4 +101,21 @@ func TestGrokStartContextSkills(t *testing.T) {
 	if c := row.StartContext; c == nil || c.Skills != 2 || len(c.Instructions) != 1 || c.Instructions[0].Path != "AGENTS.md" {
 		t.Fatalf("Grok context: %+v", c)
 	}
+	t.Run("distinct spelling", func(t *testing.T) {
+		f, err := os.OpenFile(filepath.Join(repo, "Agents.md"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if os.IsExist(err) {
+			t.Skip("filesystem aliases the two spellings")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		row := trace.SessionRow{Harness: "grok", Workdir: repo}
+		sessionStartContext(&row, home, nil)
+		if c := row.StartContext; len(c.Instructions) != 2 || c.Instructions[1].Path != "Agents.md" {
+			t.Fatalf("distinct instruction file was lost: %+v", c)
+		}
+	})
 }

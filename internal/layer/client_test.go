@@ -415,3 +415,19 @@ func TestSearchPhrasingsFusesEveryLegInOneRequest(t *testing.T) {
 		t.Error("more than MaxPhrasings phrasings should be refused")
 	}
 }
+
+func TestTeamSessionAuthorComesFromMachineIdentity(t *testing.T) {
+	cl, got := capture(t, `{"rows_upserted":1}`)
+	cl.AuthorID, cl.AuthorName = "member-1", "Member One"
+	rows := []trace.SessionRow{{ID: "session", AuthorID: "untrusted", AuthorName: "Other"}}
+	if _, err := cl.WriteSessions(rows); err != nil {
+		t.Fatal(err)
+	}
+	row := (*got)["upsert_rows"].([]any)[0].(map[string]any)
+	if row["author_id"] != "member-1" || row["author_name"] != "Member One" {
+		t.Fatalf("author: %v", row)
+	}
+	if rows[0].AuthorID != "untrusted" {
+		t.Fatal("caller rows mutated")
+	}
+}
