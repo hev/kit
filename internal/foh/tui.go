@@ -1580,9 +1580,8 @@ func (m *TUI) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // --- view ---
 
-// Hevmind dark palette (hevmind.com/brand):
-// Eight tokens. Burnt orange #E25822 is the only color; everything else is
-// paper, ink, and the gray between them.
+// Dark TUI palette: brand orange-red (accent) is reserved primarily for
+// cursors and focus markers; other UI roles use distinct highlight colors.
 var (
 	brandPaper     = lipgloss.Color("#111111") // --paper (dark)
 	brandPaperWarm = lipgloss.Color("#1A1A18") // --paper-warm (dark)
@@ -1590,14 +1589,21 @@ var (
 	brandInkSoft   = lipgloss.Color("#D8D5CC") // --ink-soft (dark secondary text)
 	brandMuted     = lipgloss.Color("#6B6B66") // --muted (tertiary text)
 	signal         = lipgloss.Color("#E25822") // --signal (burnt orange)
-	accent         = lipgloss.Color("#FF6B33") // --signal-text (brightens on dark)
+	accent         = lipgloss.Color("#FF6B33") // --signal-text (cursors & active prompt)
 	brandRule      = lipgloss.Color("#2A2A28") // --rule (dark dividers)
+
+	hlCyan     = lipgloss.Color("#7DC4E4") // tool badges & active shimmer
+	hlMint     = lipgloss.Color("#59C9A5") // online status
+	hlAmber    = lipgloss.Color("#F3AE35") // offline/warning & favorites star
+	hlRose     = lipgloss.Color("#F38BA8") // errors
+	hlLavender = lipgloss.Color("#B4BEFE") // header/overlay badge text
+	hlBadgeBg  = lipgloss.Color("#262B38") // subtle slate pill background
 
 	userStyle = lipgloss.NewStyle().Bold(true).Foreground(brandInk)
 	sysStyle  = lipgloss.NewStyle().Foreground(brandInkSoft).Italic(true)
-	errStyle  = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	errStyle  = lipgloss.NewStyle().Foreground(hlRose).Bold(true)
 	dimStyle  = lipgloss.NewStyle().Foreground(brandMuted)
-	badge     = lipgloss.NewStyle().Foreground(brandInk).Background(signal).Bold(true).Padding(0, 1)
+	badge     = lipgloss.NewStyle().Foreground(hlLavender).Background(hlBadgeBg).Bold(true).Padding(0, 1)
 )
 
 func (m *TUI) splash() string {
@@ -1775,7 +1781,7 @@ func (m *TUI) pickerView(height int) string {
 		model := p.filtered[i]
 		star := "  "
 		if m.opts.Favorites.Has(model.ID) {
-			star = lipgloss.NewStyle().Foreground(accent).Render("★ ")
+			star = lipgloss.NewStyle().Foreground(hlAmber).Render("★ ")
 		}
 		cur := "  "
 		line := fmt.Sprintf("%-44s %6s  %s", ansi.Truncate(model.ID, 44, "…"), model.ContextLabel(), model.Badge())
