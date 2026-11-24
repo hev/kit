@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -163,7 +164,7 @@ func ExecuteLocal(ctx context.Context, req Request) (Reply, error) {
 		if err != nil {
 			return Reply{}, ErrUnavailable
 		}
-		return Reply{Receipt: object(receipt)}, nil
+		return Reply{Receipt: steerReceipt(receipt)}, nil
 	}
 	if req.Action == "clean" {
 		return Reply{}, nil
@@ -233,6 +234,33 @@ func object(v any) map[string]any {
 	var result map[string]any
 	_ = json.Unmarshal(raw, &result)
 	return result
+}
+
+// steerReceipt projects the native store's rework detail and numeric counters
+// to the v1 wire types without changing the CLI or the persisted receipt.
+func steerReceipt(receipt steer.Message) map[string]any {
+	out := object(receipt)
+	if receipt.Redirected != "" {
+		out["redirected"] = receipt.Redirected == "rework"
+	}
+	for key, mark := range map[string]*steer.Mark{
+		"injected":  receipt.Injected,
+		"acked":     receipt.Acked,
+		"escalated": receipt.Escalated,
+	} {
+		if mark == nil {
+			continue
+		}
+		fields := object(mark)
+		if mark.Turn != 0 {
+			fields["turn"] = strconv.Itoa(mark.Turn)
+		}
+		if mark.ToolCall != 0 {
+			fields["tool_call"] = strconv.Itoa(mark.ToolCall)
+		}
+		out[key] = fields
+	}
+	return out
 }
 
 func summary(row dispatch.Row) map[string]any {
