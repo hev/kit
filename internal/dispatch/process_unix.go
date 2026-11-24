@@ -148,12 +148,20 @@ func launch(dir, name string) error {
 }
 func lockRoot() (func(), error) { return lockDirectory(Root()) }
 
+func tryLockRoot() (func(), error) {
+	return lockDirectoryFlags(Root(), syscall.LOCK_EX|syscall.LOCK_NB)
+}
+
 func lockDirectory(dir string) (func(), error) {
+	return lockDirectoryFlags(dir, syscall.LOCK_EX)
+}
+
+func lockDirectoryFlags(dir string, flags int) (func(), error) {
 	f, e := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
 		return nil, e
 	}
-	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX); e != nil {
+	if e = syscall.Flock(int(f.Fd()), flags); e != nil {
 		f.Close()
 		return nil, e
 	}

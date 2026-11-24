@@ -44,7 +44,8 @@ type Config struct {
 	// run or orchestrator name and state wherever they are delivered.
 	Client bool
 	// Slack is nil when [notify.slack] is absent.
-	Slack *Slack
+	Slack         *Slack
+	Orchestrators []OrchestratorTarget
 	// Path is the file read.
 	Path string
 }
@@ -67,14 +68,16 @@ func LoadConfig(path string) (Config, error) {
 	}
 	var f struct {
 		Notify struct {
-			Client bool   `toml:"client"`
-			Slack  *Slack `toml:"slack"`
+			Client        bool                 `toml:"client"`
+			Slack         *Slack               `toml:"slack"`
+			Orchestrators []OrchestratorTarget `toml:"orchestrators"`
 		} `toml:"notify"`
 	}
 	if _, err := toml.DecodeFile(path, &f); err != nil {
 		return c, fmt.Errorf("config %s: %w", path, err)
 	}
 	c.Client = f.Notify.Client
+	c.Orchestrators = f.Notify.Orchestrators
 	if s := f.Notify.Slack; s != nil {
 		if err := s.validate(); err != nil {
 			return c, fmt.Errorf("config %s [notify.slack]: %w", path, err)

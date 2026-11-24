@@ -3,8 +3,6 @@ package dispatch
 import (
 	"bytes"
 	"fmt"
-	"github.com/hev/kit/internal/harness"
-	"github.com/hev/kit/internal/hostlabel"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hev/kit/internal/attention"
+	"github.com/hev/kit/internal/harness"
+	"github.com/hev/kit/internal/hooks"
+	"github.com/hev/kit/internal/hostlabel"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,13 +52,14 @@ type OrchestratorSpec struct {
 	Handoff struct {
 		RotateAfter int `yaml:"rotate_after,omitempty" json:"rotate_after"`
 	} `yaml:"handoff,omitempty" json:"handoff"`
-	Idle        string             `yaml:"idle,omitempty" json:"idle"`
-	Source      OrchestratorSource `yaml:"source,omitempty" json:"source"`
-	Agent       string             `yaml:"agent,omitempty" json:"agent"`
-	PauseFile   string             `yaml:"pause_file,omitempty" json:"pause_file,omitempty"`
-	NamePattern string             `yaml:"name_pattern,omitempty" json:"name_pattern,omitempty"`
-	AllowNested bool               `yaml:"allow_nested,omitempty" json:"allow_nested"`
-	Brief       string             `yaml:"-" json:"brief"`
+	Idle        string                  `yaml:"idle,omitempty" json:"idle"`
+	Source      OrchestratorSource      `yaml:"source,omitempty" json:"source"`
+	Agent       string                  `yaml:"agent,omitempty" json:"agent"`
+	PauseFile   string                  `yaml:"pause_file,omitempty" json:"pause_file,omitempty"`
+	NamePattern string                  `yaml:"name_pattern,omitempty" json:"name_pattern,omitempty"`
+	AllowNested bool                    `yaml:"allow_nested,omitempty" json:"allow_nested"`
+	Brief       string                  `yaml:"-" json:"brief"`
+	Subscribe   *attention.Subscription `yaml:"subscribe,omitempty" json:"subscribe,omitempty"`
 }
 
 type RunScope struct {
@@ -135,10 +138,27 @@ func ParseOrchestrator(text string) (OrchestratorSpec, error) {
 	if e := d.Decode(&extra); e != io.EOF {
 		return s, fmt.Errorf("one frontmatter document required")
 	}
+	if s.Subscribe == nil {
+		// yaml.v3 decodes both an absent key and an explicit null to nil.
+		var fields struct {
+			Subscribe yaml.Node `yaml:"subscribe"`
+		}
+		if e := yaml.Unmarshal([]byte(front), &fields); e != nil {
+			return s, e
+		}
+		if fields.Subscribe.Kind != 0 {
+			return s, fmt.Errorf("subscribe.events must be non-empty")
+		}
+	}
 	s.Brief = strings.TrimSpace(body)
 	return s, s.Validate()
 }
 func (s OrchestratorSpec) Validate() error {
+	if sub := s.Subscribe; sub != nil {
+		if err := validateEventSubscription(*sub); err != nil {
+			return fmt.Errorf("subscribe.%w", err)
+		}
+	}
 	if err := s.Fallbacks.validate(); err != nil {
 		return err
 	}
@@ -261,6 +281,28 @@ func (s OrchestratorSpec) Validate() error {
 	for _, r := range s.Manages.Repos {
 		if strings.TrimSpace(r) == "" {
 			return fmt.Errorf("empty repo scope")
+		}
+	}
+	return nil
+}
+
+func validateEventSubscription(sub attention.Subscription) error {
+	if len(sub.Events) == 0 {
+		return fmt.Errorf("events must be non-empty")
+	}
+	for _, event := range sub.Events {
+		if !hooks.ValidLifecycleEvent(event) {
+			return fmt.Errorf("events must contain only done, ready or needs-you")
+		}
+	}
+	for _, source := range sub.Sources {
+		if !attention.ValidSource(source) {
+			return fmt.Errorf("sources contains an unknown attention source")
+		}
+	}
+	for _, host := range sub.Hosts {
+		if !ValidLabel(host) {
+			return fmt.Errorf("hosts contains an invalid host label")
 		}
 	}
 	return nil

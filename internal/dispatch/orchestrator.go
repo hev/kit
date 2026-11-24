@@ -936,6 +936,11 @@ func sayOrchestrator(name, message string) error {
 		return e
 	}
 	defer unlock()
+	return appendOrchestratorInbox(name, message)
+}
+
+// appendOrchestratorInbox requires the root lock.
+func appendOrchestratorInbox(name, message string) error {
 	st, e := orchestratorState(name)
 	if e != nil {
 		return e

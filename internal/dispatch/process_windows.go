@@ -127,15 +127,24 @@ func launchSupervisor(dir, name string) error {
 }
 func lockRoot() (func(), error) { return lockDirectory(Root()) }
 
-func lockDirectory(dir string) (func(), error) {
+func tryLockRoot() (func(), error) { return tryLockDirectory(Root()) }
+
+func tryLockDirectory(dir string) (func(), error) {
 	p := filepath.Join(dir, ".lockdir")
+	if err := os.Mkdir(p, 0700); err != nil {
+		return nil, err
+	}
+	return func() { _ = os.Remove(p) }, nil
+}
+
+func lockDirectory(dir string) (func(), error) {
 	for i := 0; i < 300; i++ {
-		if e := os.Mkdir(p, 0700); e == nil {
-			return func() { _ = os.Remove(p) }, nil
+		if unlock, e := tryLockDirectory(dir); e == nil {
+			return unlock, nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return nil, fmt.Errorf("admission lock busy; inspect %s", p)
+	return nil, fmt.Errorf("admission lock busy; inspect %s", filepath.Join(dir, ".lockdir"))
 }
 
 // A job retains the complete descendant tree even after its root exits.

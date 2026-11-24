@@ -63,7 +63,8 @@ type Record struct {
 	StateDir string    `json:"state_dir,omitempty"`
 	Created  time.Time `json:"created"`
 	// Hooks is when handlers ran; they run at most once per notice.
-	Hooks time.Time `json:"hooks,omitzero"`
+	Hooks          time.Time `json:"hooks,omitzero"`
+	ForwardPending bool      `json:"forward_pending,omitempty"`
 	// Slack is nil when this host has no [notify.slack] or its kinds do not
 	// include the notice's; SlackSkip then says which.
 	Slack     *Delivery `json:"slack,omitempty"`
@@ -93,9 +94,16 @@ type Emitter struct {
 	Post      Poster
 	Token     func(ctx context.Context, ref string) (string, error)
 	// Hooks runs run-lifecycle handlers; nil uses hev-hook-NAME on PATH.
-	Hooks func(ctx context.Context, event string, payload []byte)
-	Now   func() time.Time
+	Hooks   func(ctx context.Context, event string, payload []byte)
+	Now     func() time.Time
+	Forward func(context.Context, EventSummary, Config)
 }
+
+// DefaultForward is installed by dispatch during initialization so producers
+// in packages such as cron and services share the same subscription delivery.
+var DefaultForward func(context.Context, EventSummary, Config)
+
+const forwardBudget = 2 * time.Second
 
 // Default is an emitter for this host's config.
 func Default() *Emitter {
@@ -105,7 +113,7 @@ func Default() *Emitter {
 		return &Emitter{Root: filepath.Join(os.TempDir(), "hev-attention-test-"+fmt.Sprint(os.Getpid())), Hooks: func(context.Context, string, []byte) {}}
 	}
 	cfg, err := LoadConfig(ConfigPath())
-	return &Emitter{Root: Root(), Config: cfg, ConfigErr: err}
+	return &Emitter{Root: Root(), Config: cfg, ConfigErr: err, Forward: DefaultForward}
 }
 
 func (e *Emitter) now() time.Time {
@@ -197,6 +205,7 @@ func (e *Emitter) emit(ctx context.Context, n Notice, stateDir string, post bool
 	if n.ID == "" || !ValidKind(n.Event) {
 		return fmt.Errorf("attention: notice needs an ID and a kind")
 	}
+	forward := e.forwardEnabled()
 	path := e.recordPath(n.ID)
 	unlock, err := e.lock()
 	if err != nil {
@@ -212,6 +221,7 @@ func (e *Emitter) emit(ctx context.Context, n Notice, stateDir string, post bool
 	// Every recorded notice says who it is for, and so does its hook event.
 	n = n.attributed()
 	rec := Record{Notice: n, StateDir: stateDir, Created: e.now(), Hooks: e.now()}
+	rec.ForwardPending = forward && !post
 	switch s := e.Config.Slack; {
 	case s == nil:
 		rec.SlackSkip = "not configured"
@@ -226,11 +236,44 @@ func (e *Emitter) emit(ctx context.Context, n Notice, stateDir string, post bool
 		return err
 	}
 	e.runHooks(ctx, n)
+	if forward && post {
+		forwardCtx, cancel := context.WithTimeout(ctx, forwardBudget)
+		e.forward(forwardCtx, n)
+		cancel()
+	}
 	writeStatus(stateDir, rec)
 	if !post {
 		return nil
 	}
 	return e.deliver(ctx, path)
+}
+
+func (e *Emitter) forwardEnabled() bool {
+	if e.Forward == nil || e.ConfigErr != nil || hooks.Disabled(os.Getenv("HEV_HOOKS")) {
+		return false
+	}
+	cfg, _ := hooks.LoadConfig(ConfigPath())
+	return cfg.Enabled
+}
+
+func (e *Emitter) forward(ctx context.Context, n Notice) {
+	e.Forward(ctx, EventSummary{Event: n.Event, Source: n.Source, Host: n.Host, Name: n.Name, State: n.State}, e.Config)
+}
+
+// claimForward clears the pending bit before attempting delivery. As with
+// lifecycle hooks, an interrupted attempt is never replayed.
+func (e *Emitter) claimForward(path string) (Notice, bool) {
+	unlock, err := e.lock()
+	if err != nil {
+		return Notice{}, false
+	}
+	defer unlock()
+	var r Record
+	if readJSON(path, &r) != nil || !r.ForwardPending {
+		return Notice{}, false
+	}
+	r.ForwardPending = false
+	return r.Notice, writeJSON(path, r) == nil
 }
 
 // Flush retries every queued post that is due. It returns how many it
@@ -241,6 +284,9 @@ func (e *Emitter) Flush(ctx context.Context) int {
 		return 0
 	}
 	delivered := 0
+	forward := e.forwardEnabled()
+	forwardCtx, cancel := context.WithTimeout(ctx, forwardBudget)
+	defer cancel()
 	for _, ent := range entries {
 		if ent.IsDir() || filepath.Ext(ent.Name()) != ".json" {
 			continue
@@ -250,7 +296,15 @@ func (e *Emitter) Flush(ctx context.Context) int {
 		}
 		path := filepath.Join(e.Root, "outbox", ent.Name())
 		var r Record
-		if readJSON(path, &r) != nil || r.Slack == nil || r.Slack.Status != StatusQueued {
+		if readJSON(path, &r) != nil {
+			continue
+		}
+		if r.ForwardPending && forward && forwardCtx.Err() == nil {
+			if n, ok := e.claimForward(path); ok {
+				e.forward(forwardCtx, n)
+			}
+		}
+		if r.Slack == nil || r.Slack.Status != StatusQueued {
 			continue
 		}
 		if e.deliver(ctx, path) == nil {
@@ -639,7 +693,7 @@ func Queue(n Notice, stateDir string) error {
 // Flush retries this host's due posts under a deadline.
 func Flush(ctx context.Context) int {
 	e := Default()
-	if e.Config.Slack == nil {
+	if e.Config.Slack == nil && e.Forward == nil {
 		return 0
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
