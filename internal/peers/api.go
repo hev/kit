@@ -178,7 +178,7 @@ func (e *Engine) apiPresence(ctx context.Context, p Peer, id string) Message {
 		"inbox": p.Inbox, "last_seen": time.Now().UTC(), "stale": false}
 	if p.Run {
 		m["dispatch"] = p.Session
-	} else if role, err := e.tmux(ctx, "show-options", "-qv", "-t", "="+p.Session, "@peers-role"); err == nil {
+	} else if role, err := e.tmux(ctx, "show-options", "-qv", "-t", "="+p.Session+":", "@peers-role"); err == nil {
 		switch strings.TrimSpace(role) {
 		case "foh", "boh", "offline":
 			m["role"] = strings.TrimSpace(role)
