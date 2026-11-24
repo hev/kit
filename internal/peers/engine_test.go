@@ -198,6 +198,19 @@ func TestInboxOnlyStableDelivery(t *testing.T) {
 	}
 }
 
+func TestEngineGrokProcessFingerprint(t *testing.T) {
+	for cmd, want := range map[string]string{
+		"/opt/node_modules/@xai-official/grok/bin/grok":                    "grok",
+		"/usr/local/bin/grok --output-format streaming-json --single=work": "grok",
+		"/usr/bin/grok --pattern apache":                                   "",
+		"node /opt/other/grok/bin/grok":                                    "",
+	} {
+		if got := engineHarness(cmd); got != want {
+			t.Errorf("engineHarness(%q) = %q, want %q", cmd, got, want)
+		}
+	}
+}
+
 func TestAgyScreenStateMatchesCompat(t *testing.T) {
 	for _, tt := range agyScreens {
 		if got := screenState(tt.agent, tt.screen); got != tt.want {

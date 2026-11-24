@@ -570,7 +570,7 @@ func init() {
 	queryCmd.Flags().StringVar(&queryWorkdir, "workdir", "", "only chunks from this working directory")
 	queryCmd.Flags().StringVar(&queryHost, "host", "", "only chunks captured on this machine")
 	_ = queryCmd.Flags().MarkHidden("host")
-	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code, codex, dot, pi, opencode or agy)")
+	queryCmd.Flags().StringVar(&queryHarness, "harness", "", "only chunks from this harness (claude_code, codex, dot, pi, opencode, agy or grok)")
 	queryCmd.Flags().StringVar(&querySince, "since", "", "only chunks from within this window (e.g. 2h, 7d)")
 	queryCmd.Flags().StringArrayVar(&queryAlso, "also", nil, "another phrasing of the same question (repeatable, up to 8 in all); fused on hev layer, OR on files")
 	queryCmd.Flags().BoolVar(&queryRegex, "regex", false, "file archive: take the query as one Go regular expression")

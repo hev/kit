@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/hev/kit/schemas/review-notes.schema.json",
   "title": "Dispatch review notes",
-  "description": "review-notes.json, written by a dispatched run beside report.md. It is hunk's agent-context sidecar, version 1 (https://hunk.dev/docs/agents/agent-context-and-stml/), so `hunk diff --agent-context review-notes.json` loads it unchanged. Kit adds the optional top-level head. Unknown fields are allowed, as hunk allows them. Range order (end >= start) is checked by kit and hunk; JSON Schema cannot express it.",
+  "description": "review-notes.json, written by a dispatched run beside report.md. The optional head identifies the reviewed commit. Unknown fields are allowed for compatibility. Kit checks that each range ends at or after its start. JSON Schema cannot express it.",
   "type": "object",
   "properties": {
     "version": {
@@ -75,7 +75,7 @@
         },
         "markup": {
           "type": "string",
-          "description": "Experimental STML body; hunk ignores it without --experimental."
+          "description": "Optional markup carried by existing sidecars."
         },
         "id": {
           "type": "string"

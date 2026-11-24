@@ -238,7 +238,7 @@ func TestSyncRepairsUnstampedBaseDispatchSkill(t *testing.T) {
 	home := t.TempDir()
 	dest := filepath.Join(home, ".claude", "skills", "hev-dispatch")
 	os.MkdirAll(dest, 0o755)
-	old, err := os.ReadFile("testdata/hev-dispatch-unstamped.md")
+	old, err := os.ReadFile("../../skills/testdata/hev-dispatch-unstamped.md")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -120,9 +120,15 @@ creates a worktree, starts the agent, and records its result. It works without
 the capture daemon. Follow work with `hev dispatch logs`, inspect it with
 `hev dispatch show`, and send instructions with `hev dispatch say`. Replace an order with
 `hev dispatch amend` while keeping its name, branch, and PR.
-Review a run's branch with `hev review`, which opens it in
-[hunk](https://hunk.dev) with the worker's and reviewers' anchored notes, and
-send your own notes back with `hev review send`; see [review](https://hevkit.com/docs/review).
+Run a Codex review with `hev review run BRANCH`, `hev review run BASE..HEAD`,
+or `hev review run RUN --host HOST`. Use `hev review put` to record a review
+manually, for example
+`hev review put --repo kit --head "$(git rev-parse HEAD)" --verdict comment -m "Review summary"`.
+Use `hev review add` and `hev review resolve` to track findings, and
+`hev review ls`, `hev review show`, or `hev review search "retry deadlock" --repo kit --open`
+to retrieve them. `--json` gives scripts the stored review and finding fields.
+Reviews live in `~/.hev/reviews`. Set `[reviews] dir` in `~/.hev/config.toml`
+or override it with `HEV_REVIEWS_DIR`.
 An order can name a context recipe (`context: PATH`); dispatch builds an
 explicit, reproducible context bundle at launch, gives it to the worker, and
 records its digest on the run. `hev context` assesses, builds, compares and

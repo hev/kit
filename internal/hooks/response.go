@@ -75,6 +75,9 @@ func Render(name, event string, r Response) []byte {
 	if capability == nil {
 		return nil
 	}
+	if name == harness.Grok {
+		return renderGrok(event, r)
+	}
 	out := map[string]any{}
 	specific := map[string]any{}
 	switch r.Decision {
@@ -120,6 +123,35 @@ func Render(name, event string, r Response) []byte {
 	}
 	if r.SystemMessage != "" {
 		out["systemMessage"] = r.SystemMessage
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(out)
+	return append(b, '\n')
+}
+
+func renderGrok(event string, response Response) []byte {
+	out := map[string]any{}
+	switch event {
+	case "pre-tool":
+		if response.Decision == Block || response.Decision == Halt {
+			out["decision"], out["reason"] = "deny", response.Reason
+		}
+	case "prompt-submit":
+		if response.Decision == Block || response.Decision == Halt {
+			out["decision"], out["reason"] = "block", response.Reason
+		}
+	case "post-tool":
+		if response.Decision == Block {
+			out["decision"], out["reason"] = "block", response.Reason
+		}
+		if response.Context != "" {
+			out["hookSpecificOutput"] = map[string]string{"hookEventName": "PostToolUse", "additionalContext": response.Context}
+		}
+	}
+	if response.Decision == Halt && (event == "pre-tool" || event == "post-tool") {
+		out["continue"], out["stopReason"] = false, response.Reason
 	}
 	if len(out) == 0 {
 		return nil

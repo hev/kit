@@ -678,7 +678,11 @@ func valueOrEnv(value, envName, fallback string) string {
 func resolveGHUser() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gh", "config", "get", "-h", "github.com", "user").Output()
+	cmd := exec.CommandContext(ctx, "gh", "config", "get", "-h", "github.com", "user")
+	// Keep this background lookup read-only. gh telemetry can spawn a
+	// detached child that inherits HOME and writes after gh has exited.
+	cmd.Env = append(cmd.Environ(), "GH_TELEMETRY=disabled", "GH_NO_UPDATE_NOTIFIER=1")
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

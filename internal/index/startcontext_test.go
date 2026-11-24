@@ -75,3 +75,30 @@ func TestDerivedStartContext(t *testing.T) {
 		t.Fatalf("installed: %v", names)
 	}
 }
+
+func TestGrokStartContextSkills(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range []struct{ root, file, content string }{
+		{home, ".grok/skills/personal/SKILL.md", "---\nname: personal\ndescription: Personal skill\n---\n"},
+		{repo, ".grok/skills/project/SKILL.md", "---\nname: project\ndescription: Project skill\n---\n"},
+		{repo, ".codex/skills/foreign/SKILL.md", "---\nname: foreign\ndescription: Foreign skill\n---\n"},
+		{repo, "AGENTS.md", "Example instructions\n"},
+	} {
+		path := filepath.Join(entry.root, entry.file)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(entry.content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row := trace.SessionRow{Harness: "grok", Workdir: repo}
+	sessionStartContext(&row, home, nil)
+	if c := row.StartContext; c == nil || c.Skills != 2 || len(c.Instructions) != 1 || c.Instructions[0].Path != "AGENTS.md" {
+		t.Fatalf("Grok context: %+v", c)
+	}
+}

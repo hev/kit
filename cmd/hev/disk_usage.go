@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/evidence"
+	"github.com/hev/kit/internal/reviews"
 )
 
 // Disk usage bounds: `hev s` must stay fast on a host with a large archive.
@@ -32,6 +33,7 @@ var diskSurfaces = []struct {
 	{"peers", []string{"peers"}},
 	{"hooks", []string{"hooks"}},
 	{"evidence", []string{"evidence"}},
+	{"reviews", []string{"reviews"}},
 }
 
 // diskUsage is the per-surface byte count of ~/.hev.
@@ -45,11 +47,10 @@ type diskUsage struct {
 	Partial bool `json:"partial,omitempty"`
 }
 
-// measureDiskUsage walks home/.hev once (and the evidence folder, when it
-// is configured outside ~/.hev), attributing each regular file to the
+// measureDiskUsage walks home/.hev once (and configured evidence and review folders outside ~/.hev), attributing each regular file to the
 // surface of its top-level folder. Symlinks are not followed. The walk stops
 // at diskUsageMaxEntries entries or diskUsageBudget.
-func measureDiskUsage(home, evidenceRoot string) diskUsage {
+func measureDiskUsage(home, evidenceRoot, reviewsRoot string) diskUsage {
 	root := filepath.Join(home, ".hev")
 	u := diskUsage{Root: root, Surfaces: map[string]int64{}}
 	owner := map[string]string{}
@@ -59,12 +60,25 @@ func measureDiskUsage(home, evidenceRoot string) diskUsage {
 			owner[d] = s.name
 		}
 	}
-	// A configured evidence folder inside ~/.hev but not at ~/.hev/evidence
-	// still counts as evidence.
-	evRel := ""
-	if evidenceRoot != "" {
-		if rel, err := filepath.Rel(root, evidenceRoot); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
-			evRel = filepath.ToSlash(rel)
+	type override struct {
+		name, root, inside string
+		outside            bool
+	}
+	overrides := []override{{name: "evidence", root: evidenceRoot}, {name: "reviews", root: reviewsRoot}}
+	for i := range overrides {
+		o := &overrides[i]
+		if o.root == "" {
+			continue
+		}
+		absolute, err := filepath.Abs(o.root)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(root, absolute)
+		if err != nil || !filepath.IsLocal(rel) {
+			o.outside = true
+		} else if rel != "." {
+			o.inside = filepath.ToSlash(rel)
 		}
 	}
 	deadline := time.Now().Add(diskUsageBudget)
@@ -96,27 +110,33 @@ func measureDiskUsage(home, evidenceRoot string) diskUsage {
 	}
 	walk(root, func(rel string, n int64) {
 		u.Total += n
-		if evRel != "" && (rel == evRel || strings.HasPrefix(rel, evRel+"/")) {
-			u.Surfaces["evidence"] += n
+		var match override
+		for _, o := range overrides {
+			if o.inside != "" && strings.HasPrefix(rel, o.inside+"/") && len(o.inside) > len(match.inside) {
+				match = o
+			}
+		}
+		if match.name != "" {
+			u.Surfaces[match.name] += n
 			return
 		}
 		top, _, _ := strings.Cut(rel, "/")
 		if name, ok := owner[top]; ok && top != rel {
-			if name == "evidence" && evidenceRoot != "" && evRel != "evidence" {
-				// ~/.hev/evidence is not the configured folder.
-				u.Other += n
-				return
+			for _, o := range overrides {
+				if o.name == name && o.root != "" && o.inside != top {
+					u.Other += n
+					return
+				}
 			}
 			u.Surfaces[name] += n
 			return
 		}
 		u.Other += n
 	})
-	if evidenceRoot != "" && evRel == "" && !u.Partial {
-		if rel, err := filepath.Rel(root, evidenceRoot); err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-			// Outside ~/.hev: count it, and add it to the total.
-			walk(evidenceRoot, func(_ string, n int64) {
-				u.Surfaces["evidence"] += n
+	for _, o := range overrides {
+		if o.outside && !u.Partial {
+			walk(o.root, func(_ string, n int64) {
+				u.Surfaces[o.name] += n
 				u.Total += n
 			})
 		}
@@ -154,5 +174,5 @@ func printDiskUsage(w io.Writer) {
 	if err != nil {
 		return
 	}
-	writeDiskUsage(w, measureDiskUsage(home, evidence.Root()))
+	writeDiskUsage(w, measureDiskUsage(home, evidence.Root(), reviews.Root()))
 }
