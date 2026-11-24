@@ -217,6 +217,8 @@ func wrappedVisualLines(line string, width int) int {
 	return n
 }
 
+const maxInputHeight = 8
+
 func (m *TUI) syncInputHeight() {
 	lines := strings.Split(m.input.Value(), "\n")
 	w := max(10, m.input.Width())
@@ -227,8 +229,17 @@ func (m *TUI) syncInputHeight() {
 	if li := m.input.LineInfo(); li.Height > visual {
 		visual = li.Height
 	}
-	h := max(1, min(8, visual))
+	h := max(1, min(maxInputHeight, visual))
 	m.input.SetHeight(h)
+}
+
+// prepareInputGrowth temporarily raises the textarea viewport height to
+// maxInputHeight before an edit so bubbles/textarea's repositionView() does not
+// scroll earlier visual lines off the top while the box is still growing.
+func (m *TUI) prepareInputGrowth() {
+	if m.input.Height() < maxInputHeight {
+		m.input.SetHeight(maxInputHeight)
+	}
 }
 
 func (m *TUI) loadCatalog() tea.Cmd {
@@ -715,6 +726,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Alt && msg.String() == "alt+m":
 		return m, m.openPicker()
 	case msg.String() == "shift+enter" || msg.String() == "alt+enter" || (msg.Alt && msg.Type == tea.KeyEnter) || msg.Type == tea.KeyCtrlJ:
+		m.prepareInputGrowth()
 		m.input.InsertString("\n")
 		m.syncInputHeight()
 		return m, nil
@@ -765,6 +777,7 @@ func (m *TUI) updateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	m.prepareInputGrowth()
 	m.input, cmd = m.input.Update(msg)
 	m.cmdCursor, m.cmdStart = 0, 0
 	m.syncInputHeight()

@@ -326,11 +326,25 @@ func TestTUIInputWrapAndSinglePromptCaret(t *testing.T) {
 	if strings.Count(view, "›") != 1 {
 		t.Fatalf("expected single top caret, got:\n%s", view)
 	}
-	// Long sentence must word-wrap and grow height automatically.
-	m.input.SetValue("this is a long sentence with multiple words that should soft wrap across lines")
+	// Long sentence typed char-by-char must soft-wrap without scrolling line 1 off the top
+	// or exceeding the terminal width.
+	m.input.Reset()
 	m.syncInputHeight()
+	sentence := "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
+	for _, r := range sentence {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
 	if m.input.Height() < 2 {
-		t.Fatalf("wrapped height = %d, want >= 2", m.input.Height())
+		t.Fatalf("typed wrapped height = %d, want >= 2", m.input.Height())
+	}
+	typedView := ansi.Strip(m.input.View())
+	if !strings.Contains(typedView, "alpha") || !strings.Contains(typedView, "lambda") {
+		t.Fatalf("wrapped input hid earlier or later text:\n%s", typedView)
+	}
+	for _, line := range strings.Split(typedView, "\n") {
+		if w := ansi.StringWidth(line); w > 38 {
+			t.Fatalf("input line width %d exceeds inner width 38: %q", w, line)
+		}
 	}
 }
 
