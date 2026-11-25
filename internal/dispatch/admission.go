@@ -13,7 +13,8 @@ import (
 
 // Admission leaves room for other resource kinds without mixing their identities.
 type Admission struct {
-	Repos []string `toml:"repos"`
+	Repos  []string `toml:"repos"`
+	Owners []string `toml:"owners"`
 	// AddFrom lists origin prefixes that teammates granted the repos
 	// capability may clone and admit. Absent or empty: nobody can self-add.
 	AddFrom []string `toml:"add_from"`
@@ -41,12 +42,60 @@ func repoIdentity(remote string) string {
 	return strings.TrimSuffix(path.Clean(remote), ".git")
 }
 
+func (policy Admission) admitAll() bool {
+	return policy.Repos == nil && policy.Owners == nil
+}
+
+func ownerIdentity(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if slash := strings.IndexByte(raw, '/'); slash >= 0 && !strings.Contains(raw, "://") &&
+		(!strings.Contains(raw[:slash], ":") || urlPort.MatchString(raw[strings.LastIndexByte(raw[:slash], ':')+1:slash])) {
+		raw = "https://" + raw
+	}
+	owner, err := parseAddURL(raw, false)
+	if err != nil {
+		return ""
+	}
+	// The .git suffix convention applies only to repository names.
+	identity := owner.Identity
+	if strings.HasSuffix(owner.Clone, ".git") {
+		identity += ".git"
+	}
+	_, ownerPath, _ := strings.Cut(identity, "/")
+	if ownerPath == "" || strings.Contains(ownerPath, "/") {
+		return ""
+	}
+	return identity
+}
+
+func (policy Admission) admitsOwner(origin string) bool {
+	if len(policy.Owners) == 0 {
+		return false
+	}
+	// Validate before identity normalization can collapse traversal or empty segments.
+	candidate, err := parseAddURL(strings.TrimSpace(origin), false)
+	if err != nil {
+		return false
+	}
+	parent, repo, _ := strings.Cut(candidate.Identity, "/")
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return false
+	}
+	for _, entry := range policy.Owners {
+		if ownerIdentity(entry) == parent+"/"+owner {
+			return true
+		}
+	}
+	return false
+}
+
 func admitRepo(policy Admission, repo, label, host string) error {
-	if policy.Repos == nil {
+	if policy.admitAll() {
 		return nil
 	}
 	refusal := fmt.Errorf("repo %q is not admitted on host %q", label, host)
-	if len(policy.Repos) == 0 {
+	if len(policy.Repos) == 0 && len(policy.Owners) == 0 {
 		return refusal
 	}
 	origin, err := command("", "git", "-C", repo, "remote", "get-url", "origin")
@@ -58,6 +107,9 @@ func admitRepo(policy Admission, repo, label, host string) error {
 		if strings.TrimSpace(allowed) != "" && identity == repoIdentity(allowed) {
 			return nil
 		}
+	}
+	if policy.admitsOwner(origin) {
+		return nil
 	}
 	return refusal
 }

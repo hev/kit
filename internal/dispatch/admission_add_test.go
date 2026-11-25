@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -406,5 +407,85 @@ func TestAddRepoHidesCloneOutputFromTeammates(t *testing.T) {
 	// Owners see git's own words.
 	if _, err = AddRepo(context.Background(), "https://github.com/ExampleOrg/widget", RepoCaller{Sender: "local:owner"}); err == nil || !strings.Contains(err.Error(), secret) {
 		t.Fatalf("owner error: %v", err)
+	}
+}
+
+func TestAddRepoWithOwners(t *testing.T) {
+	var calls atomic.Int32
+	fakeCloner(t, &calls)
+	cfg, workspace := repoTestHost(t, `[admission]
+owners = ["github.com/hev", "https://account:token-marker@github.com/hev"]
+add_from = ["https://github.com/hev"]
+`)
+	before, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := RepoCaller{Sender: "alex", Restricted: true, CanAdd: true}
+	ctx := context.Background()
+	covered := "https://github.com/hev/kit.git"
+	for _, tc := range []struct {
+		url    string
+		caller RepoCaller
+		want   string
+	}{
+		{covered, RepoCaller{Sender: "alex", Restricted: true}, "does not include adding repos"},
+		{"git@github.com:hev/kit", caller, "no [admission] add_from prefix"},
+		{"https://account:token-marker@github.com/hev/kit", caller, "credentials"},
+		{filepath.Join(workspace, "local-marker"), caller, "refused repository URL"},
+	} {
+		if _, err := AddRepo(ctx, tc.url, tc.caller); err == nil || !strings.Contains(err.Error(), tc.want) ||
+			strings.Contains(err.Error(), "token-marker") || strings.Contains(err.Error(), "local-marker") {
+			t.Fatalf("expected redacted refusal containing %q, got %v", tc.want, err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("a refused addition cloned a repository")
+	}
+	for range 2 {
+		got, err := AddRepo(ctx, covered, caller)
+		if err != nil || !strings.Contains(got.Message, "admitted via owners") {
+			t.Fatalf("owner-covered add: %+v, %v", got, err)
+		}
+	}
+	if after, err := os.ReadFile(cfg); err != nil || string(after) != string(before) || calls.Load() != 1 {
+		t.Fatalf("owner-covered adds should clone once and preserve config: clones=%d, read=%v", calls.Load(), err)
+	}
+	r, err := ListRepos(caller)
+	if err != nil || r.RepoPolicy.AdmitAll || !r.RepoPolicy.CanAdd || !reflect.DeepEqual(r.RepoPolicy.Owners, []string{"github.com/hev"}) || len(r.RepoPolicy.Repos) != 0 {
+		t.Fatalf("expected restricted owner policy and only valid entries: %+v, %v", r.RepoPolicy, err)
+	}
+	r, err = RemoveRepo(covered, caller)
+	if err != nil || !strings.Contains(r.Message, "no explicit repos entry") {
+		t.Fatalf("remove with only owner coverage: %+v, %v", r, err)
+	}
+
+	if err := CheckAPIOrder(Order{Repo: "kit"}, "buildbox"); err != nil {
+		t.Fatalf("API should accept an owner-covered repo: %v", err)
+	}
+	if err := CheckAPIOrder(Order{Repo: "unknown"}, "buildbox"); err == nil {
+		t.Fatal("API accepted a repo outside the owners policy")
+	}
+
+	// An owner can make an exact exception without replacing the owners policy.
+	owner := RepoCaller{Sender: "local:owner"}
+	exception := "https://gitlab.com/other/widget"
+	if _, err = AddRepo(ctx, exception, owner); err != nil {
+		t.Fatal(err)
+	}
+	if repos := decodedRepos(t, cfg); !reflect.DeepEqual(repos, []string{exception}) {
+		t.Fatalf("unexpected exact entries: %v", repos)
+	}
+	if err := admitTargetRepo(filepath.Join(workspace, "widget"), "widget", "here"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveRepo(exception, owner); err != nil {
+		t.Fatal(err)
+	}
+	if err := admitTargetRepo(filepath.Join(workspace, "widget"), "widget", "here"); err == nil {
+		t.Fatal("removed exception still admitted")
+	}
+	if err := admitTargetRepo(filepath.Join(workspace, "kit"), "kit", "here"); err != nil {
+		t.Fatal(err)
 	}
 }
