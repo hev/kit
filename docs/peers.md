@@ -20,6 +20,57 @@ hev peers inbox --pending --json
 hev peers beacon                 # push snapshots, deliver relayed messages
 ```
 
+## Waking an idle Claude session
+
+A held inbox item normally reaches a Claude front-of-house session only on the
+next prompt, through the UserPromptSubmit `inbox-hook`. A pane paste is refused
+while a draft or permission prompt is open. `hev peers inbox --wait` closes that
+gap as a Claude Code `Stop`/`StopFailure` hook with `asyncRewake`:
+
+```sh
+hev peers inbox --wait [--timeout D]   # D: 90s, 8h, or bare seconds; none waits forever
+```
+
+It resolves the bound session the way consumption does: from
+`PEERS_INBOX_TOKEN` under `peers runtime`, else from the pane. Then it blocks,
+statting the inbox files every 250 ms without spending tokens, until the session
+has an unread, unacknowledged item. It prints the items to stderr with consume
+and ACK instructions and exits 2, which Claude delivers to the idle model as hook
+feedback. It exits 0 on timeout, when the session's inbox is off, and when a
+newer waiter replaces it. Claude starts a hook on every Stop without
+deduplicating, so only the newest waiter per session stays armed
+(`SESSION.jsonl.waiter`).
+
+Waking writes no consumption or ACK receipt. The item stays unread until the
+model consumes it and replays through `inbox --pending` and the prompt hook
+until `inbox ack`. Each item wakes the session at most once per recipient
+incarnation (`SESSION.jsonl.woken.jsonl`), so an item the model leaves
+unconsumed waits for the next prompt instead of rewaking it after every turn.
+Already consumed or acknowledged items never wake it. A dispatch notice
+(`--inbox-only`, native engine) lands in the same inbox and wakes it the same
+way. `inbox --wait` always runs in this implementation: `HEV_PEERS_BACKEND` and
+`HEV_PEERS_ENGINE=native` do not apply to it, because the reference would read
+it as a consuming `inbox`.
+
+Install the hook in Claude Code settings (user or project `settings.json`, or
+`claude --settings`). The `--timeout` must end before Claude's hook timeout,
+in seconds: Claude drops the exit 2 of a hook it kills at the timeout.
+
+```json
+{
+  "hooks": {
+    "Stop": [{"hooks": [{"type": "command", "command": "hev peers inbox --wait --timeout 7h50m", "asyncRewake": true, "timeout": 28800}]}],
+    "StopFailure": [{"hooks": [{"type": "command", "command": "hev peers inbox --wait --timeout 7h50m", "asyncRewake": true, "timeout": 28800}]}]
+  }
+}
+```
+
+The `hev-peers` skill carries the same snippet; `hev skills sync` installs the
+skill, not the hook, and no hev command edits `~/.claude/settings.json`. Codex
+and PI have no asyncRewake hook. They keep the prompt hook and pane paste
+delivery. The idea comes from firstmate's `fm-claude-stop-autoarm.sh`
+(kunchenguid/firstmate, MIT); this is a separate Go implementation.
+
 The rest of this page documents the native engine from #165. It is no longer
 the CLI. It now serves dispatch notifications (`HEV_PEERS_ENGINE=native`),
 `--inbox-only` sends, the `hev dispatch rpc` peers action, the hevd HTTP

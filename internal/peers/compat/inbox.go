@@ -46,7 +46,7 @@ func (p *P) cmdInbox(args []string) {
 			break
 		}
 	}
-	inspect := []string{"--peek", "--count", "--all", "--current-all"}
+	inspect := []string{"--peek", "--count", "--all", "--current-all", "--wait"}
 	if session != "" && strings.Contains(session, "/") {
 		host, target := splitHost(session)
 		if host != "" {
@@ -110,6 +110,14 @@ func (p *P) cmdInbox(args []string) {
 			p.die(noSender)
 		}
 		session = mine.Session
+		if contains(args, "--wait") {
+			p.inboxWait(session, p.paneIncarnation(mine), args)
+			return
+		}
+	}
+	if contains(args, "--wait") {
+		p.inboxWait(session, p.incarnation(session, "", false), args)
+		return
 	}
 	if len(args) > 0 && args[0] == "hold" { // a message that reached the session some other way
 		sender := "unknown"
