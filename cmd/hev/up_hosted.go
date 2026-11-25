@@ -37,12 +37,15 @@ func runHostedUp(ctx context.Context, out io.Writer, home string, cfg *daemon.Co
 	if namespace == "" {
 		namespace = "hev-traces"
 	}
-	if err := checkInviteKey(ctx, endpoint, key, namespace); err != nil {
-		return err
-	}
 	path := daemon.DefaultConfigPath()
 	file, err := loadInitConfig(path)
 	if err != nil {
+		return err
+	}
+	if file.hasBootstrap {
+		return errLayerBootstrapManaged
+	}
+	if err := checkInviteKey(ctx, endpoint, key, namespace); err != nil {
 		return err
 	}
 	target := initLayerConfig{Endpoint: endpoint, APIKey: key, Namespace: namespace, Store: "hosted"}

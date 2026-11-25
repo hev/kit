@@ -133,6 +133,28 @@ func ResolveMode(cfg *Config) (storagemode.Resolution, error) {
 }
 
 func openTarget(cfg *Config, namespace string, open func(root, namespace string) (*filearchive.Store, error)) (Target, error) {
+	if cfg.Kit.SignedIn() {
+		return openResolvedTarget(cfg, namespace, open, storagemode.Resolution{}, "")
+	}
+	res, err := ResolveMode(cfg)
+	if err != nil {
+		return Target{}, err
+	}
+	key := cfg.LayerAPIKey
+	if strings.TrimSpace(key) == layerenv.PlaceholderKey {
+		key = ""
+	}
+	if res.Mode == storagemode.Layer && key == "" {
+		if key, err = LayerKey(); err != nil {
+			reasons, _ := LayerIntent(cfg)
+			reasons = append([]string{res.Source + " is set"}, reasons...)
+			return Target{}, &storagemode.NoKeyError{Reasons: reasons, Cause: err, ConfigPath: cfg.ConfigPath}
+		}
+	}
+	return openResolvedTarget(cfg, namespace, open, res, key)
+}
+
+func openResolvedTarget(cfg *Config, namespace string, open func(root, namespace string) (*filearchive.Store, error), res storagemode.Resolution, key string) (Target, error) {
 	if namespace == "" {
 		namespace = cfg.LayerNamespace
 	}
@@ -160,27 +182,12 @@ func openTarget(cfg *Config, namespace string, open func(root, namespace string)
 		kit.AuthorID, kit.AuthorName = cfg.Kit.AuthorID, cfg.Kit.AuthorName
 		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images, Kit: kit, KeySource: "kit"}, nil
 	}
-	res, err := ResolveMode(cfg)
-	if err != nil {
-		return Target{}, err
-	}
 	if res.Mode == storagemode.Filesystem {
 		files, err := open(filearchive.Root(cfg.ArchiveDir), namespace)
 		if err != nil {
 			return Target{}, err
 		}
 		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images}, nil
-	}
-	key := cfg.LayerAPIKey
-	if strings.TrimSpace(key) == layerenv.PlaceholderKey {
-		key = ""
-	}
-	if key == "" {
-		if key, err = LayerKey(); err != nil {
-			reasons, _ := LayerIntent(cfg)
-			reasons = append([]string{res.Source + " is set"}, reasons...)
-			return Target{}, &storagemode.NoKeyError{Reasons: reasons, Cause: err, ConfigPath: cfg.ConfigPath}
-		}
 	}
 	endpoint := cfg.LayerEndpoint
 	if endpoint == "" {

@@ -122,34 +122,29 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cache, clusterSvc, membership, stopSidecars := startSecretSidecars(ctx, logger)
-	defer stopSidecars()
-	licenseCtx, stopLicense := context.WithCancel(ctx)
-	defer stopLicense()
-	go license.Refresh(licenseCtx)
-
-	cfg, err := LoadConfig()
+	cfg, err := loadConfig(true)
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	if cfg.ScanInterval <= 0 {
 		return fmt.Errorf("scan interval must be positive")
 	}
-	var primary Target
-	if len(cfg.captureTargets) == 0 {
-		// Keep the standalone daemon's startup and secret cooldown behavior.
-		primary, err = openLegacyPrimary(ctx, cfg, logger)
-		if err != nil {
-			return err
-		}
-	}
-
 	// A local file lock prevents overlapping writers without opening a port.
 	release, err := platformops.LockPath(filepath.Join(home, ".hev", "daemon.lock"), true)
 	if err != nil {
 		return fmt.Errorf("another daemon is already running: %w", err)
 	}
 	defer release()
+	primary, primaryErr := openPrimary(cfg, logger)
+	if primaryErr != nil && len(cfg.captureTargets) == 0 {
+		return primaryErr
+	}
+	cache, clusterSvc, membership, stopSidecars := startSecretSidecars(ctx, logger)
+	defer stopSidecars()
+	licenseCtx, stopLicense := context.WithCancel(ctx)
+	defer stopLicense()
+	go license.Refresh(licenseCtx)
+
 	// The primary keeps the storage record used by existing CLI readers.
 	defer removeStorageRecord()
 	if primary.Mode != "" {
@@ -197,7 +192,7 @@ func Run(ctx context.Context) error {
 	}
 	defer stopServices()
 	defer startMetrics(ctx, configuredMetrics, cache, clusterSvc, membership, cronRunner, configuredCron, logger)()
-	return runCapture(ctx, cfg, home, primary, cache.ResolveAs, logger)
+	return runCapture(ctx, cfg, home, primary, primaryErr, cache.ResolveAs, logger)
 }
 
 // firstScanGate is nil unless `hev up` manages the stack: a hosted daemon has

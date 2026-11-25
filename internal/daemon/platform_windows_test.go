@@ -4,16 +4,20 @@ package daemon
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hev/kit/internal/platformops"
 )
 
 func TestWindowsDaemonValidatesConfig(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	home := t.TempDir()
+	if err := platformops.SecureDir(home); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
 	path := filepath.Join(home, "config.toml")
@@ -21,7 +25,7 @@ func TestWindowsDaemonValidatesConfig(t *testing.T) {
 	t.Setenv("HEVLAYER_API_KEY", "")
 	t.Setenv("HEVLAYER_NAMESPACE", "")
 	t.Setenv("HEVLAYER_ENDPOINT", "")
-	if err := os.WriteFile(path, []byte("[layer]\nendpoint='http://127.0.0.1:1'\napi_key='test'\nnamespace='test'\n[capture]\nscan_interval='-1s'\n"), 0600); err != nil {
+	if err := platformops.WriteFileAtomic(path, []byte("[layer]\nendpoint='http://127.0.0.1:1'\napi_key='test'\nnamespace='test'\n[capture]\nscan_interval='-1s'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

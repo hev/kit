@@ -60,11 +60,12 @@ func awaitCaptureStatus(t *testing.T, done <-chan error, accept func(Status) boo
 
 func startCaptureFixture(t *testing.T, cfg *Config, home string, resolve captureKeyResolver, logger *slog.Logger) (<-chan error, func()) {
 	t.Helper()
+	primary, primaryErr := openPrimary(cfg, logger)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
 		defer close(done)
-		done <- runCapture(ctx, cfg, home, Target{}, resolve, logger)
+		done <- runCapture(ctx, cfg, home, primary, primaryErr, resolve, logger)
 	}()
 	var once sync.Once
 	stop := func() {

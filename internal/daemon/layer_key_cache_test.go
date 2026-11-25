@@ -2,14 +2,12 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -31,46 +29,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	if os.Getenv("KIT_TEST_HEVD_CHILD") == "1" {
-		// One hevd start: serve the endpoint, then read the Layer key the way
-		// Run does. The supervisor's stop arrives 400ms after hevd says it is
-		// waiting for the reset, not at a fixed time after start: a first
-		// read that took longer than that would be stopped mid-read.
-		ctx, cancel := context.WithCancelCause(context.Background())
-		defer cancel(nil)
-		ctx, done := context.WithTimeout(ctx, time.Minute) // never wait out the real reset
-		defer done()
-		stop, err := secrets.Serve(ctx, secrets.New())
-		if err != nil {
-			os.Exit(4)
-		}
-		var waiting sync.Once
-		logger := slog.New(onRecord{slog.NewTextHandler(io.Discard, nil), func(r slog.Record) {
-			if strings.HasPrefix(r.Message, "Layer key rate limited") {
-				waiting.Do(func() { time.AfterFunc(400*time.Millisecond, func() { cancel(errSupervisorStop) }) })
-			}
-		}})
-		_, err = layerKeyAfterCooldown(ctx, logger)
-		stop()
-		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(ctx), errSupervisorStop) {
-			os.Exit(3) // stayed up waiting for the reset
-		}
-		os.Exit(1)
-	}
 	os.Exit(m.Run())
-}
-
-var errSupervisorStop = errors.New("supervisor stop")
-
-// onRecord passes every record to fn before handling it.
-type onRecord struct {
-	slog.Handler
-	fn func(slog.Record)
-}
-
-func (h onRecord) Handle(ctx context.Context, r slog.Record) error {
-	h.fn(r)
-	return h.Handler.Handle(ctx, r)
 }
 
 func layerKeyEnv(t *testing.T) (fakeop.Fake, string) {
@@ -156,40 +115,6 @@ func TestLayerKeyWithoutDaemonReadsDirectlyAsBefore(t *testing.T) {
 	log, _ := os.ReadFile(filepath.Join(home, "op-reads.log"))
 	if strings.Count(string(log), "kind=read") != 2 || strings.Contains(string(log), fakeop.Value) {
 		t.Fatal("direct reads should be logged once each, without values")
-	}
-}
-
-// hevd whose Layer-key read is rate limited, started and then restarted five
-// times inside the cooldown: one 1Password request in total. Each start stays
-// up serving secrets until stopped instead of exiting into a restart loop.
-func TestHevdRestartsInsideCooldownCostOneRequest(t *testing.T) {
-	f, home := layerKeyEnv(t)
-	reset := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
-	t.Setenv("FAKE_OP_RATE_LIMIT", reset)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 6; i++ {
-		cmd := exec.Command(exe, "-test.run=^$")
-		cmd.Env = append(os.Environ(), "KIT_TEST_HEVD_CHILD=1")
-		var stderr strings.Builder
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 3 {
-			t.Fatalf("start %d: hevd should wait for the reset, got %v", i, err)
-		}
-		if !strings.Contains(stderr.String(), "rate limit; retry after "+reset[:11]) || strings.Contains(stderr.String(), fakeop.Value) {
-			t.Fatalf("start %d: want the rate limit and its reset on stderr", i)
-		}
-	}
-	if calls := f.CallLines(t); len(calls) != 1 {
-		t.Fatalf("six hevd starts inside the cooldown made %d op requests (%q), want 1", len(calls), calls)
-	}
-	b, err := os.ReadFile(filepath.Join(home, "op-cooldown.json"))
-	if err != nil || !strings.Contains(string(b), `"limit":"daily rate limit"`) || !strings.Contains(string(b), reset[:11]) {
-		t.Fatalf("cooldown not persisted beside the read log: %v", err)
 	}
 }
 
