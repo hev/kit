@@ -22,16 +22,17 @@ type CatalogLoader func(ctx context.Context) ([]Model, CatalogSource, error)
 
 // TUIOptions configures the meta-harness TUI.
 type TUIOptions struct {
-	Agent        *Agent
-	HevCommands  []HevSlashCommand
-	Catalog      CatalogLoader
-	Favorites    *Favorites
-	Composer     PromptComposer
-	Version      string
-	Cwd          string
-	Workspace    string
-	SummaryModel string
-	Color        bool
+	Agent          *Agent
+	HevCommands    []HevSlashCommand
+	Catalog        CatalogLoader
+	CatalogContext context.Context
+	Favorites      *Favorites
+	Composer       PromptComposer
+	Version        string
+	Cwd            string
+	Workspace      string
+	SummaryModel   string
+	Color          bool
 }
 
 type entryKind int
@@ -96,22 +97,23 @@ type TUI struct {
 	escMode  escAbsorbMode
 	escUntil time.Time
 
-	chrome        ChromeSnapshot
-	watched       []watchedRun
-	watchedSteers []watchedSteer
-	peerActivity  string
-	peerBusy      bool
-	peerLog       []peerExchange
-	pendingAuto   []string
-	callArgs      map[string]struct{ tool, action, args string }
-	models        []Model
-	catalogSource CatalogSource
-	picker        *picker
-	resumer       *resumePicker
-	peers         *peersOverlay
-	steerer       *steerOverlay
-	quitting      bool
-	nativePeer    *nativePeers
+	chrome         ChromeSnapshot
+	watched        []watchedRun
+	watchedSteers  []watchedSteer
+	peerActivity   string
+	peerBusy       bool
+	peerLog        []peerExchange
+	pendingAuto    []string
+	callArgs       map[string]struct{ tool, action, args string }
+	models         []Model
+	catalogLoading bool
+	catalogSource  CatalogSource
+	picker         *picker
+	resumer        *resumePicker
+	peers          *peersOverlay
+	steerer        *steerOverlay
+	quitting       bool
+	nativePeer     *nativePeers
 }
 
 type resumePicker struct {
@@ -232,12 +234,24 @@ func (m *TUI) syncInputHeight() {
 }
 
 func (m *TUI) loadCatalog() tea.Cmd {
-	if m.opts.Catalog == nil {
+	if m.opts.Catalog == nil || m.catalogLoading {
 		return nil
 	}
+	m.catalogLoading = true
 	load := m.opts.Catalog
+	parent := m.opts.CatalogContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	timeout := 30 * time.Second
+	if m.opts.Agent != nil {
+		if router, ok := m.opts.Agent.Provider.(*Router); ok && router.Has(ProviderScopedInference) {
+			// Scope loads run in parallel, with three bounded stages per scope.
+			timeout = scopeResolveTimeout + scopeVerifyTimeout + catalogTimeout
+		}
+	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(parent, timeout)
 		defer cancel()
 		models, src, err := load(ctx)
 		return catalogMsg{models, src, err}
@@ -332,8 +346,10 @@ func (m *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case catalogMsg:
+		m.catalogLoading = false
 		m.models, m.catalogSource = msg.models, msg.source
 		if m.picker != nil {
+			m.picker.note = ""
 			m.refilter()
 		}
 		return m, nil

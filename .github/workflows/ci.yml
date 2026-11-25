@@ -49,7 +49,11 @@ jobs:
       - name: test
         # The repeated CLI race suite approaches the default 10m package cap
         # before new acceptance coverage; individual cluster deadlines stay 5s.
-        run: go test -race -count=3 -timeout=15m ./...
+        run: go test -race -count=3 -timeout=15m -skip '^TestFOHScopedCredentialRefCLI$' ./...
+
+      - name: Scoped credential CLI acceptance under default policy
+        # The contended workload waits across two actual rolling minutes.
+        run: go test -race -count=1 -timeout=3m ./cmd/hev -run '^TestFOHScopedCredentialRefCLI$'
 
       - name: Watch and intake Cobra routing
         run: go test -count=1 ./cmd/hev -run TestWatchAndIntakeCLICompatibility

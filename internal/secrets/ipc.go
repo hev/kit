@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,8 @@ type request struct {
 	Ping bool `json:",omitempty"`
 	// Caller names the requesting process in the read log only.
 	Caller string `json:",omitempty"`
+	// WaitTicket preserves a single-reference caller's place during retries.
+	WaitTicket string `json:",omitempty"`
 }
 type response struct {
 	Values      map[string]string
@@ -38,8 +41,9 @@ type response struct {
 	// Serves names the provider schemes (never fingerprints) the endpoint
 	// serves, sent with Unavailable so a client can say why it was refused.
 	// A daemon that predates it leaves it empty.
-	Serves []string `json:",omitempty"`
-	Error  string
+	Serves  []string `json:",omitempty"`
+	Error   string
+	RetryAt *time.Time `json:",omitempty"`
 }
 
 func Serve(ctx context.Context, c *Cache) (func(), error) {
@@ -153,10 +157,17 @@ func serveConn(ctx context.Context, c *Cache, conn net.Conn, accounts map[string
 		s.Daemon = true
 		r.Status = &s
 	} else {
+		if len(q.Refs) == 1 && validBudgetTicket(q.WaitTicket) {
+			ctx = context.WithValue(ctx, budgetTicketKey{}, q.WaitTicket)
+		}
 		var err error
 		r.Values, r.Sources, err = c.ResolveSources(ctx, q.Caller, q.Refs)
 		if err != nil {
 			r.Error = err.Error()
+			var throttle *callerThrottle
+			if errors.As(err, &throttle) {
+				r.RetryAt = &throttle.retryAt
+			}
 		}
 	}
 	json.NewEncoder(conn).Encode(r)
@@ -341,6 +352,9 @@ func query(ctx context.Context, q request) (response, error) {
 		return r, unavailableFor(mine, r.Serves, need)
 	}
 	if r.Error != "" {
+		if r.Error == callerThrottleMessage && r.RetryAt != nil {
+			return r, &callerThrottle{retryAt: *r.RetryAt}
+		}
 		return r, errors.New(r.Error)
 	}
 	return r, nil
@@ -371,6 +385,10 @@ type Options struct {
 	// Notice receives the one-line fallback notice when the read goes direct;
 	// nil means os.Stderr. Use io.Discard to silence it deliberately.
 	Notice io.Writer
+	// CallerWait bounds resolution of a single reference, including time
+	// queued for the caller's rolling-minute budget. Other failures return
+	// immediately. Zero keeps the ordinary fail-fast behavior.
+	CallerWait time.Duration
 }
 
 // Via values: how a resolution reached 1Password.
@@ -426,8 +444,7 @@ func ResolveWith(ctx context.Context, refs []Ref, opts Options) (map[string]stri
 func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error) {
 	res := Result{Endpoint: Endpoint()}
 	// The caller expands secret:// through its host's manager, so the daemon
-	// (of any age) only ever receives op:// or azkv:// and the request format
-	// is unchanged.
+	// (of any age) only ever receives op:// or azkv://.
 	refs, err := ExpandRefs(refs)
 	if err != nil {
 		return res, err
@@ -438,11 +455,22 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 	if opts.Caller == "" {
 		opts.Caller = DefaultCaller("hev")
 	}
+	q := request{Refs: refs, Caller: opts.Caller}
+	if opts.CallerWait > 0 {
+		if len(refs) != 1 {
+			return res, errors.New("caller budget wait requires a single credential reference")
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.CallerWait)
+		defer cancel()
+		q.WaitTicket = rand.Text()
+		ctx = context.WithValue(ctx, budgetTicketKey{}, q.WaitTicket)
+	}
 	var r response
 	err = ErrUnavailable
 	reason := "HEV_SECRETS_CACHE=off"
 	if !CacheDisabled() {
-		r, err = query(ctx, request{Refs: refs, Caller: opts.Caller})
+		r, err = query(ctx, q)
 		reason = DescribeUnavailable(err, res.Endpoint)
 	}
 	if errors.Is(err, ErrUnavailable) {
@@ -455,10 +483,29 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		}
 		fmt.Fprintf(w, "%s (%s)\n", fallbackNotice(refs), reason)
 		res.Via = ViaDirect
-		res.Values, res.Sources, err = New().ResolveSources(ctx, opts.Caller+" direct", refs)
-		return res, err
+		for {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
+			res.Values, res.Sources, err = New().ResolveSources(ctx, opts.Caller+" direct", refs)
+			if retry, result := retryCallerBudget(ctx, opts, err); !retry {
+				if result != nil {
+					res.Values, res.Sources = nil, nil
+				}
+				return res, result
+			}
+		}
 	}
 	res.Via = ViaDaemon
+	for {
+		retry, result := retryCallerBudget(ctx, opts, err)
+		if !retry {
+			err = result
+			break
+		}
+		// Once the daemon answers, retries stay on that path.
+		r, err = query(ctx, q)
+	}
 	if err != nil {
 		return res, err
 	}
@@ -467,6 +514,40 @@ func ResolveResult(ctx context.Context, refs []Ref, opts Options) (Result, error
 		res.Sources = map[string]string{}
 	}
 	return res, nil
+}
+
+func validBudgetTicket(ticket string) bool {
+	if len(ticket) < 26 || len(ticket) > 64 {
+		return false
+	}
+	for _, ch := range ticket {
+		if (ch < 'A' || ch > 'Z') && (ch < '2' || ch > '7') {
+			return false
+		}
+	}
+	return true
+}
+
+func retryCallerBudget(ctx context.Context, opts Options, err error) (bool, error) {
+	if opts.CallerWait <= 0 {
+		return false, err
+	}
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	var throttle *callerThrottle
+	var delay time.Duration
+	switch {
+	case errors.As(err, &throttle):
+		delay = max(time.Until(throttle.retryAt), 20*time.Millisecond)
+	case err != nil && err.Error() == callerThrottleMessage:
+		// Older daemons preserve the error but don't send the window's end.
+		delay = time.Minute
+	default:
+		return false, err
+	}
+	err = waitForBudget(ctx, delay)
+	return err == nil, err
 }
 
 // ReadStatus asks the endpoint for its counters and adds the host read log's

@@ -104,7 +104,11 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 			fallback = models[0].ID
 		}
 	}
-	model := cfg.ResolveModel(modelFlag, favorites.IDs, func(id string) bool { return router.Has(foh.ProviderOf(id)) }, fallback)
+	startupFavorites := favorites.IDs
+	if len(cfg.KeyScopes) > 0 {
+		startupFavorites = nil
+	}
+	model := cfg.ResolveModel(modelFlag, startupFavorites, func(id string) bool { return router.Has(foh.ProviderOf(id)) }, fallback)
 	cwd, _ := os.Getwd()
 	workspace := foh.WorkspaceName()
 	host, _ := os.Hostname()
@@ -144,6 +148,7 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	tui := foh.NewTUI(foh.TUIOptions{
 		Agent: agent, HevCommands: hevSlashCommands(rootCmd), Favorites: favorites, Composer: composer, Version: version.String(),
 		Cwd: cwd, Workspace: workspace, SummaryModel: cfg.SummaryModel, Color: color,
+		CatalogContext: ctx,
 		Catalog: func(ctx context.Context) ([]foh.Model, foh.CatalogSource, error) {
 			return router.Models(ctx, false)
 		},
@@ -199,6 +204,13 @@ func hevSlashCommands(root *cobra.Command) []foh.HevSlashCommand {
 // no provider resolves. The returned secrets seed the session and tool
 // scrubbers.
 func fohProviders(ctx context.Context, cfg foh.Config, errOut io.Writer) (*foh.Router, []string, error) {
+	if len(cfg.KeyScopes) > 0 {
+		provider, err := cfg.ScopedInference()
+		if err != nil {
+			return nil, nil, err
+		}
+		return foh.NewRouter(provider), nil, nil
+	}
 	var providers []foh.Provider
 	var secrets []string
 	var implicitLegacyErr error

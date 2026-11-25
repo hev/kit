@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -43,7 +44,17 @@ type ledger struct {
 	LastCaller string          `json:"last_caller,omitempty"`
 	Override   string          `json:"override,omitempty"`
 	Warnings   map[string]bool `json:"warnings"`
+	Waiters    []budgetWaiter  `json:"waiters,omitempty"`
 }
+
+type budgetWaiter struct {
+	Caller  string    `json:"caller"`
+	Ticket  string    `json:"ticket"`
+	Expires time.Time `json:"expires"`
+}
+
+type budgetTicketKey struct{}
+
 type BudgetStatus struct {
 	Daily        int    `json:"daily"`
 	Hourly       int    `json:"hourly"`
@@ -110,15 +121,31 @@ func hostPolicy() (Policy, error) {
 // withLedger locks across processes, reserves before a request, and fails
 // closed on corruption or write failure. No secret, URI or token is stored.
 func withLedger(now time.Time, f func(*ledger) error) error {
+	return withLedgerContext(context.Background(), now, f)
+}
+
+func withLedgerContext(ctx context.Context, now time.Time, f func(*ledger) error) error {
 	dir := policyDir()
 	if err := platformops.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	unlock, err := platformops.LockPath(filepath.Join(dir, "budget.lock"), false)
-	if err != nil {
-		return err
+	lock := filepath.Join(dir, "budget.lock")
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		unlock, err := platformops.LockPath(lock, true)
+		if err == nil {
+			defer unlock()
+			break
+		}
+		if !platformops.IsLockBusy(err) {
+			return err
+		}
+		if err := waitForBudget(ctx, 20*time.Millisecond); err != nil {
+			return err
+		}
 	}
-	defer unlock()
 	path := filepath.Join(dir, "budget.json")
 	l := ledger{Warnings: map[string]bool{}}
 	b, err := os.ReadFile(path)
@@ -139,6 +166,16 @@ func withLedger(now time.Time, f func(*ledger) error) error {
 		}
 	}
 	l.Spends = keep
+	waiters := l.Waiters[:0]
+	for _, waiter := range l.Waiters {
+		if now.Before(waiter.Expires) {
+			waiters = append(waiters, waiter)
+		}
+	}
+	l.Waiters = waiters
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	result := f(&l)
 	b, err = json.Marshal(l)
 	if err != nil {
@@ -168,17 +205,43 @@ func reserve(now time.Time, caller, provider string, n int) error {
 	return reserveWith(now, caller, provider, n, nil)
 }
 func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error {
+	return reserveWithContext(context.Background(), now, caller, provider, n, c)
+}
+
+const callerThrottleMessage = "secrets budget: caller throttled; wait for the rolling window or raise host policy"
+
+type callerThrottle struct{ retryAt time.Time }
+
+func (*callerThrottle) Error() string { return callerThrottleMessage }
+
+func waitForBudget(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
+}
+
+func reserveWithContext(ctx context.Context, now time.Time, caller, provider string, n int, c *Cache) error {
 	p, err := hostPolicy()
 	if err != nil {
 		return fmt.Errorf("secrets budget: %v", err)
 	}
 	caller = sanitizeField(caller, 96)
-	err = withLedger(now, func(l *ledger) error {
+	ticket, _ := ctx.Value(budgetTicketKey{}).(string)
+	err = withLedgerContext(ctx, now, func(l *ledger) error {
 		s := budgetView(p, l, now)
 		used := 0
+		var oldest time.Time
 		for _, v := range l.Spends {
 			if v.Caller == caller && now.Sub(v.At) < time.Minute {
 				used += v.Requests
+				if oldest.IsZero() || v.At.Before(oldest) {
+					oldest = v.At
+				}
 			}
 		}
 		reason := ""
@@ -198,13 +261,32 @@ func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error 
 				return fmt.Errorf("secrets budget: %s", account)
 			}
 		}
-		if reason != "" && !(p.Override != "" && p.Override != l.Override) {
+		override := reason != "" && p.Override != "" && p.Override != l.Override
+		if reason != "" && reason != "caller throttled" && !override {
 			l.Throttles++
 			l.LastCaller = caller
 			return fmt.Errorf("secrets budget: %s; wait for the rolling window or raise host policy", reason)
 		}
-		if reason != "" {
+		if override {
 			l.Override = p.Override
+			l.Waiters = slices.DeleteFunc(l.Waiters, func(w budgetWaiter) bool {
+				return w.Caller == caller && w.Ticket == ticket
+			})
+		} else {
+			var retryAt time.Time
+			if reason == "caller throttled" {
+				l.Throttles++
+				l.LastCaller = caller
+				if n > p.CallerMinute || oldest.IsZero() {
+					return errors.New(callerThrottleMessage)
+				}
+				retryAt = oldest.Add(time.Minute)
+			}
+			if retryAt, err := l.admitCaller(now, caller, ticket, retryAt); err != nil {
+				return err
+			} else if !retryAt.IsZero() {
+				return &callerThrottle{retryAt: retryAt}
+			}
 		}
 		l.Spends = append(l.Spends, Spend{now, caller, provider, n})
 		if c != nil && c.clusterUsage() != nil {
@@ -213,6 +295,9 @@ func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error 
 		return nil
 	})
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if !IsBudgetError(err) {
 			err = fmt.Errorf("secrets budget: %v", err)
 		}
@@ -220,6 +305,56 @@ func reserveWith(now time.Time, caller, provider string, n int, c *Cache) error 
 	}
 	return err
 }
+
+// admitCaller keeps waiting opted-in reads in registration order across
+// processes. Tickets only hold a place, never reserve or spend budget. A
+// short lease after the next retry lets canceled or crashed callers expire
+// without a cleanup process or a credential read.
+func (l *ledger) admitCaller(now time.Time, caller, ticket string, retryAt time.Time) (time.Time, error) {
+	if ticket == "" {
+		return retryAt, nil
+	}
+	first, own := -1, -1
+	for i, waiter := range l.Waiters {
+		if waiter.Caller != caller {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		if waiter.Ticket == ticket {
+			own = i
+			break
+		}
+	}
+	if retryAt.IsZero() {
+		if first < 0 {
+			return time.Time{}, nil
+		}
+		if own == first {
+			l.Waiters = append(l.Waiters[:own], l.Waiters[own+1:]...)
+			return time.Time{}, nil
+		}
+		// There is budget now, but an older waiter gets the first chance.
+		retryAt = now.Add(100 * time.Millisecond)
+	}
+	expires := now.Add(time.Minute)
+	if retryAt.Before(expires) {
+		expires = retryAt
+	}
+	expires = expires.Add(3 * time.Second)
+	if own >= 0 {
+		l.Waiters[own].Expires = expires
+	} else {
+		const maxBudgetWaiters = 64
+		if len(l.Waiters) >= maxBudgetWaiters {
+			return time.Time{}, errors.New("secrets budget: caller queue is full")
+		}
+		l.Waiters = append(l.Waiters, budgetWaiter{Caller: caller, Ticket: ticket, Expires: expires})
+	}
+	return retryAt, nil
+}
+
 func budgetStatus(now time.Time) BudgetStatus {
 	p, err := hostPolicy()
 	if err != nil {

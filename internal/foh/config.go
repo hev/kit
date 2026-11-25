@@ -54,12 +54,13 @@ var DefaultDocsURL = "https://hevkit.com/docs"
 
 // Config is the optional [foh] table in ~/.hev/config.toml.
 type Config struct {
-	Model        string `toml:"model"`
-	BaseURL      string `toml:"base_url"`
-	APIKeyRef    string `toml:"api_key_ref"`
-	SystemPrompt string `toml:"system_prompt"`
-	DocsURL      string `toml:"docs_url"`
-	SummaryModel string `toml:"summary_model"`
+	Model        string     `toml:"model"`
+	BaseURL      string     `toml:"base_url"`
+	APIKeyRef    string     `toml:"api_key_ref"`
+	SystemPrompt string     `toml:"system_prompt"`
+	DocsURL      string     `toml:"docs_url"`
+	SummaryModel string     `toml:"summary_model"`
+	KeyScopes    []KeyScope `toml:"key_scopes"`
 	// Codex is the optional [foh.codex] table for the codex-sub provider.
 	Codex CodexConfig `toml:"codex"`
 	// Kit is the optional top-level [kit] sign-in table loaded alongside [foh].
@@ -118,6 +119,9 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, errors.New("could not read foh configuration")
 	}
 	for _, key := range md.Undecoded() {
+		if len(key) > 2 && key[0] == "foh" && key[1] == "key_scopes" {
+			return Config{}, errors.New("unknown field in [[foh.key_scopes]]")
+		}
 		if len(key) > 2 && key[0] == "foh" && key[1] == "codex" {
 			return Config{}, fmt.Errorf("unknown field in [foh.codex]: %s", key[2])
 		}
@@ -263,12 +267,16 @@ func (c Config) ResolveModel(flag string, favorites []string, available func(id 
 
 // ResolveSecretRef reads a secret reference through hev secrets. Tests replace it.
 var ResolveSecretRef = func(ctx context.Context, ref string) (string, error) {
+	return resolveSecretRef(ctx, ref, time.Hour, 0)
+}
+
+func resolveSecretRef(ctx context.Context, ref string, ttl, callerWait time.Duration) (string, error) {
 	uri, err := secrets.ExpandRef(ref)
 	if err != nil {
 		return "", err
 	}
-	refs := []secrets.Ref{{Name: "FOH_API_KEY", URI: uri, TTL: time.Hour}}
-	values, err := secrets.ResolveWith(ctx, refs, secrets.Options{Caller: secrets.DefaultCaller("hev foh"), Notice: io.Discard})
+	refs := []secrets.Ref{{Name: "FOH_API_KEY", URI: uri, TTL: ttl}}
+	values, err := secrets.ResolveWith(ctx, refs, secrets.Options{Caller: secrets.DefaultCaller("hev foh"), Notice: io.Discard, CallerWait: callerWait})
 	if err != nil {
 		return "", err
 	}

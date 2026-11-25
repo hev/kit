@@ -3,7 +3,9 @@ package secrets
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -321,4 +323,126 @@ func guardRef(neutral bool, name string) string {
 		return "secret://" + name
 	}
 	return "op://example/" + name + "/token"
+}
+
+func TestCallerBudgetWaitHonorsCancellationAndDeadline(t *testing.T) {
+	c := fake(t)
+	t.Setenv("HEV_SECRETS_CACHE", "off")
+	const caller = "scope-test"
+	now := time.Now()
+	for range 5 {
+		if err := reserve(now, caller+" direct", "op", 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := []Ref{{Name: "TOKEN", URI: "op://example/item/token"}}
+	opts := Options{Caller: caller, CallerWait: time.Second, Notice: io.Discard}
+	got, err := ResolveResult(context.Background(), request, opts)
+	if !errors.Is(err, context.DeadlineExceeded) || got.Values != nil || got.Via != ViaDirect {
+		t.Fatal("deadline must abort a queued direct read without returning credentials")
+	}
+	if c.LocalStatus().Budget.Throttles != 1 {
+		t.Fatal("deadline case never entered the caller budget queue")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	type outcome struct {
+		got Result
+		err error
+	}
+	result := make(chan outcome, 1)
+	opts.CallerWait = time.Minute
+	go func() {
+		got, err := ResolveResult(ctx, request, opts)
+		result <- outcome{got, err}
+	}()
+	for c.LocalStatus().Budget.Throttles < 2 {
+		if err := waitForBudget(ctx, 10*time.Millisecond); err != nil {
+			t.Fatal("cancellation case never entered the caller budget queue")
+		}
+	}
+	cancel()
+	select {
+	case outcome := <-result:
+		if !errors.Is(outcome.err, context.Canceled) || outcome.got.Values != nil {
+			t.Fatal("cancellation must stop a queued read without returning credentials")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued read did not stop on cancellation")
+	}
+	if status := c.LocalStatus().Budget; status.UsedDay != 5 || status.Throttles != 2 {
+		t.Fatal("waiting must neither reserve another read nor repeatedly probe the ledger")
+	}
+}
+
+func TestCallerBudgetWaitThroughDaemon(t *testing.T) {
+	c := fake(t)
+	t.Setenv("HEV_SECRETS_CACHE", "")
+	t.Setenv(EndpointEnv, isolatedEndpoint(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	const caller = "scope-test"
+	// Leave a short but real wait on the default rolling minute.
+	spent := time.Now().Add(-57 * time.Second)
+	for range 5 {
+		if err := reserve(spent, caller, "op", 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop, err := Serve(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	got, err := ResolveResult(ctx, refs()[:1], Options{Caller: caller, CallerWait: 8 * time.Second, Notice: io.Discard})
+	if err != nil || got.Via != ViaDaemon || got.Values["TOKEN"] == "" {
+		t.Fatal("queued daemon resolution must succeed through the original endpoint")
+	}
+	if s := c.LocalStatus().Budget; s.UsedDay != 6 || s.Throttles < 1 {
+		t.Fatal("daemon did not apply the default rolling budget")
+	}
+}
+
+func TestCallerBudgetWaitAdmitsOlderReadersBeforeContinuations(t *testing.T) {
+	fake(t)
+	const caller = "shared-parent"
+	now := time.Now()
+	for range 5 {
+		if err := reserve(now, caller, "op", 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait := func(at time.Time, ticket string) error {
+		ctx := context.WithValue(context.Background(), budgetTicketKey{}, ticket)
+		return reserveWithContext(ctx, at, caller, "op", 1, nil)
+	}
+	for _, ticket := range []string{"first-cold-read", "second-cold-read"} {
+		if err := wait(now, ticket); !IsBudgetError(err) {
+			t.Fatal("cold read must queue when all five slots are charged")
+		}
+	}
+	ready := now.Add(time.Minute)
+	for _, ticket := range []string{"turn-continuation", "second-cold-read"} {
+		if err := wait(ready, ticket); !IsBudgetError(err) {
+			t.Fatal("a later reader overtook the oldest pending read")
+		}
+	}
+	for _, ticket := range []string{"first-cold-read", "second-cold-read", "turn-continuation"} {
+		if err := wait(ready, ticket); err != nil {
+			t.Fatal("available budget must be admitted in registration order", err)
+		}
+	}
+	if err := reserve(ready, caller, "op", 1); err != nil {
+		t.Fatal("ordinary callers must still use available budget", err)
+	}
+	if err := reserve(ready, caller, "op", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := wait(ready, "abandoned"); !IsBudgetError(err) {
+		t.Fatal("queue must keep the five-read budget")
+	}
+	if err := wait(ready.Add(time.Minute+4*time.Second), "active"); err != nil {
+		t.Fatal("an abandoned ticket must expire without blocking subsequent reads", err)
+	}
 }
