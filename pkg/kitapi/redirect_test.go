@@ -120,3 +120,31 @@ func TestKitClientRawPathCannotChangeOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestKitClientHidesHevAndProviderKeysInErrorText(t *testing.T) {
+	hevKey := "hev_" + strings.Repeat("a1B2", 8)
+	otherKey := "hvl_" + strings.Repeat("Z9y8", 8)
+	skKey := "sk-or-v1-" + strings.Repeat("deadbeef", 8)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"hev_dispatch hk_word ` + hevKey + ` ` + otherKey + ` ` + skKey + `"}`))
+	}))
+	defer api.Close()
+
+	client := kitapi.New(api.URL, hevKey)
+	_, err := client.Whoami(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	for _, leak := range []string{hevKey, hevKey[4:], otherKey, otherKey[4:], skKey, skKey[9:]} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("error leaked secret %q: %s", leak, msg)
+		}
+	}
+	for _, keep := range []string{"hev_dispatch", "hk_word", "[redacted]"} {
+		if !strings.Contains(msg, keep) {
+			t.Fatalf("error lost %q: %s", keep, msg)
+		}
+	}
+}

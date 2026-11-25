@@ -43,9 +43,10 @@ type AdmittedRepo struct {
 
 // RepoPolicy is the host's repository admission as seen by one caller.
 type RepoPolicy struct {
-	// AdmitAll means [admission] repos is absent: every workspace repo is admitted.
+	// AdmitAll means both [admission] repos and owners are absent.
 	AdmitAll bool           `json:"admit_all"`
 	Repos    []AdmittedRepo `json:"repos"`
+	Owners   []string       `json:"owners,omitempty"`
 	AddFrom  []string       `json:"add_from"`
 	CanAdd   bool           `json:"can_add"`
 }
@@ -82,7 +83,7 @@ var (
 func parseAddURL(raw string, needRepo bool) (addURL, error) {
 	var a addURL
 	refuse := func(why string) (addURL, error) {
-		return a, fmt.Errorf("refused repository URL %q: %s", raw, why)
+		return a, fmt.Errorf("refused repository URL: %s", why)
 	}
 	if raw == "" || len(raw) > 512 {
 		return refuse("empty or too long")
@@ -102,7 +103,7 @@ func parseAddURL(raw string, needRepo bool) (addURL, error) {
 	if i := strings.Index(raw, "://"); i >= 0 {
 		u, err := url.Parse(raw)
 		if err != nil {
-			return refuse(err.Error())
+			return refuse("malformed URL")
 		}
 		scheme = strings.ToLower(u.Scheme)
 		if scheme != "https" && scheme != "ssh" {
@@ -259,11 +260,15 @@ func AddRepo(ctx context.Context, raw string, caller RepoCaller) (Response, erro
 	if err != nil {
 		return r, err
 	}
-	admitted, err := admitAddedRepo(cfgPath, a, caller.Sender, cloned)
+	admitted, viaOwner, err := admitAddedRepo(cfgPath, a, caller.Sender, cloned)
 	if err != nil {
 		return r, err
 	}
 	switch {
+	case viaOwner && cloned:
+		r.Message = fmt.Sprintf("cloned %s as %s; already admitted via owners", a.Clone, a.Name)
+	case viaOwner:
+		r.Message = fmt.Sprintf("%s already present as %s and admitted via owners", a.Clone, a.Name)
 	case cloned && admitted:
 		r.Message = fmt.Sprintf("added %s as %s", a.Clone, a.Name)
 	case admitted:
@@ -496,48 +501,56 @@ func appendRepoLedger(cfgPath string, e repoLedgerEntry) error {
 }
 
 // admitAddedRepo appends the origin to [admission] repos under the dispatch
-// lock. An absent list admits every repo already, so it is left absent.
-func admitAddedRepo(cfgPath string, a addURL, sender string, cloned bool) (bool, error) {
+// lock, unless the current policy admits all repositories or covers this owner.
+func admitAddedRepo(cfgPath string, a addURL, sender string, cloned bool) (admitted, viaOwner bool, err error) {
 	if err := os.MkdirAll(Root(), 0700); err != nil {
-		return false, err
+		return false, false, err
 	}
 	unlock, err := lockRoot()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	defer unlock()
 	text, err := os.ReadFile(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	var current struct {
 		Admission Admission `toml:"admission"`
 	}
 	if _, err = toml.Decode(string(text), &current); err != nil {
-		return false, fmt.Errorf("target admission config: %w", err)
+		return false, false, fmt.Errorf("target admission config: %w", err)
 	}
-	if current.Admission.Repos == nil {
-		return false, nil
+	if current.Admission.admitsOwner(a.Clone) {
+		return false, true, nil
+	}
+	if current.Admission.admitAll() {
+		return false, false, nil
 	}
 	for _, existing := range current.Admission.Repos {
 		if repoIdentity(existing) == a.Identity {
-			return false, nil
+			return false, false, nil
 		}
 	}
-	edited, err := appendAdmissionRepo(string(text), a.Clone)
+	var edited string
+	if current.Admission.Repos == nil {
+		edited, err = createAdmissionRepos(string(text), a.Clone)
+	} else {
+		edited, err = appendAdmissionRepo(string(text), a.Clone)
+	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err = writeFileAtomic(cfgPath, []byte(edited)); err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err = appendRepoLedger(cfgPath, repoLedgerEntry{Origin: a.Clone, Name: a.Name, AddedBy: sender, AddedAt: time.Now().UTC(), Cloned: cloned}); err != nil {
-		return true, fmt.Errorf("admitted %s but could not record attribution: %w", a.Clone, err)
+		return true, false, fmt.Errorf("admitted %s but could not record attribution: %w", a.Clone, err)
 	}
-	return true, nil
+	return true, false, nil
 }
 
 // writeFileAtomic replaces path with a fully written sibling, keeping its mode.
@@ -618,6 +631,36 @@ func appendAdmissionRepo(text, origin string) (string, error) {
 	return edited, nil
 }
 
+// createAdmissionRepos adds an exact exception to an owners-only policy.
+func createAdmissionRepos(text, origin string) (string, error) {
+	nl := "\n"
+	if strings.Contains(text, "\r\n") {
+		nl = "\r\n"
+	}
+	for i := 0; i < len(text); {
+		end := lineEndAt(text, i)
+		if header, _, _ := strings.Cut(strings.TrimSpace(text[i:end]), "#"); strings.TrimSpace(header) == "[admission]" {
+			item := `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(origin) + `"`
+			at := min(end+1, len(text))
+			prefix := text[:at]
+			if end == len(text) {
+				prefix += nl
+			}
+			edited := prefix + "repos = [" + item + "]" + nl + text[at:]
+			if err := sameExceptAppended(text, edited, origin); err != nil {
+				return "", err
+			}
+			return edited, nil
+		}
+		next, err := skipValueLines(text, i, end)
+		if err != nil {
+			return "", err
+		}
+		i = next
+	}
+	return "", fmt.Errorf("cannot find an [admission] table in the target config")
+}
+
 func sameExceptAppended(before, after, origin string) error {
 	refuse := fmt.Errorf("cannot safely edit [admission] repos in the target config; add %q by hand", origin)
 	var a, b map[string]any
@@ -635,7 +678,12 @@ func sameExceptAppended(before, after, origin string) error {
 	if !ok || len(repos) == 0 || repos[len(repos)-1] != origin {
 		return refuse
 	}
-	admission["repos"] = repos[:len(repos)-1]
+	beforeAdmission, _ := a["admission"].(map[string]any)
+	if _, exists := beforeAdmission["repos"]; !exists && len(repos) == 1 {
+		delete(admission, "repos")
+	} else {
+		admission["repos"] = repos[:len(repos)-1]
+	}
 	if !reflect.DeepEqual(a, b) {
 		return refuse
 	}
@@ -828,7 +876,12 @@ func ListRepos(caller RepoCaller) (Response, error) {
 	if err != nil {
 		return r, fmt.Errorf("target admission config: %w", err)
 	}
-	p := &RepoPolicy{AdmitAll: policy.Admission.Repos == nil, Repos: []AdmittedRepo{}, AddFrom: policy.Admission.AddFrom, CanAdd: !caller.Restricted || (caller.CanAdd && len(policy.Admission.AddFrom) > 0)}
+	p := &RepoPolicy{AdmitAll: policy.Admission.admitAll(), Repos: []AdmittedRepo{}, AddFrom: policy.Admission.AddFrom, CanAdd: !caller.Restricted || (caller.CanAdd && len(policy.Admission.AddFrom) > 0)}
+	for _, owner := range policy.Admission.Owners {
+		if ownerIdentity(owner) != "" {
+			p.Owners = append(p.Owners, owner)
+		}
+	}
 	if p.AddFrom == nil {
 		p.AddFrom = []string{}
 	}

@@ -223,7 +223,7 @@ type kitExchange struct {
 }
 
 func (x kitExchange) valid() bool {
-	return validKitURL(x.API) && strings.HasPrefix(x.Key, "hk_") && len(x.Key) > len("hk_") && x.KeyID != "" && x.Team.ID != "" && x.Team.Slug != "" && x.Author.ID != ""
+	return validKitURL(x.API) && kitapi.ValidKey(x.Key) && x.KeyID != "" && x.Team.ID != "" && x.Team.Slug != "" && x.Author.ID != ""
 }
 
 func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {

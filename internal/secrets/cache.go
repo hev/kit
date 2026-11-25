@@ -360,7 +360,7 @@ func (c *Cache) resolveGroup(ctx context.Context, caller string, p Provider, ref
 	if p.Scheme() != "op" {
 		cost = len(unique)
 	}
-	if err := c.reserve(now, caller, p.Scheme(), cost); err != nil {
+	if err := reserveWithContext(ctx, now, caller, p.Scheme(), cost, c); err != nil {
 		return err
 	}
 	c.warnings(ctx, c.LocalStatus())

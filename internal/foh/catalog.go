@@ -115,6 +115,9 @@ func (c *Catalog) path() string {
 	if c.Path != "" {
 		return c.Path
 	}
+	if c.Client != nil && c.Client.isHostedInference() {
+		return filepath.Join(homeDir(), ".hev", "cache", "club-kit-models.json")
+	}
 	return CatalogPath()
 }
 
@@ -162,7 +165,7 @@ func (c *Catalog) fetch(ctx context.Context) ([]Model, error) {
 	}
 	resp, err := c.Client.httpClient().Do(req)
 	if err != nil {
-		return nil, c.Client.scrub(fmt.Errorf("openrouter models: %w", err))
+		return nil, c.Client.scrub(fmt.Errorf("%s models: %w", c.Client.backendName(), err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -180,7 +183,7 @@ func (c *Catalog) fetch(ctx context.Context) ([]Model, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxCatalogBytes)).Decode(&raw); err != nil {
-		return nil, c.Client.scrub(fmt.Errorf("openrouter models: decode: %w", err))
+		return nil, c.Client.scrub(fmt.Errorf("%s models: decode: %w", c.Client.backendName(), err))
 	}
 	var out []Model
 	for _, d := range raw.Data {
@@ -194,7 +197,7 @@ func (c *Catalog) fetch(ctx context.Context) ([]Model, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, errors.New("openrouter models: empty catalog")
+		return nil, fmt.Errorf("%s models: empty catalog", c.Client.backendName())
 	}
 	return out, nil
 }

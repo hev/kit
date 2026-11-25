@@ -19,7 +19,7 @@ func hevToolEmoji(tool string, color bool) string {
 	case "hev_dispatch", "hev dispatch":
 		return "🚀"
 	case "hev_steer", "hev steer":
-		return "⎈"
+		return "🕹"
 	case "hev_peers", "hev peers":
 		return "💬"
 	case "hev_board", "hev board":
@@ -42,6 +42,16 @@ func hevToolEmoji(tool string, color bool) string {
 		return "⏰"
 	case "hev service":
 		return "⚡"
+	case "hev review":
+		return "🔎"
+	case "hev watch":
+		return "👁"
+	case "hev up", "hev d":
+		return "▶"
+	case "hev down", "hev stop":
+		return "■"
+	case "hev version":
+		return "ℹ"
 	default:
 		if strings.HasPrefix(tool, "hev") {
 			return "🔧"
@@ -89,14 +99,18 @@ func pickSummaryModel(p Provider, activeModel, configured string) string {
 		if r.Has(ProviderCodexSub) {
 			return "codex/gpt-5.3-codex"
 		}
+		return activeModel
 	}
-	return activeModel
+	return ""
 }
 
 // summarizeCardAsync asks a small/fast model in the background for a 1-line
 // human summary of a completed hev tool call. Never blocks the agent loop or UI.
 func (m *TUI) summarizeCardAsync(callID, tool, action, rawOutput string) tea.Cmd {
 	if m.opts.Agent == nil || m.opts.Agent.Provider == nil {
+		return nil
+	}
+	if r, ok := m.opts.Agent.Provider.(*Router); ok && r.Has(ProviderScopedInference) {
 		return nil
 	}
 	// Dispatch receipts have an exact run address in their summary.

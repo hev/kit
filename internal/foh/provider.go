@@ -10,8 +10,9 @@ import (
 // Provider IDs. A model's provider is stamped on every turn of a session
 // trace next to the model.
 const (
-	ProviderOpenRouter = "openrouter"
-	ProviderCodexSub   = "codex-sub"
+	ProviderOpenRouter      = "openrouter"
+	ProviderCodexSub        = "codex-sub"
+	ProviderScopedInference = "club-kit-scoped"
 )
 
 // CodexModelPrefix marks a model served by the codex-sub provider. The rest
@@ -37,6 +38,9 @@ type secretHolder interface{ Secrets() []string }
 // ProviderOf names the provider that serves model id: codex/... is
 // codex-sub, everything else is OpenRouter.
 func ProviderOf(id string) string {
+	if strings.HasPrefix(strings.TrimSpace(id), scopedModelPrefix) {
+		return ProviderScopedInference
+	}
 	if strings.HasPrefix(strings.TrimSpace(id), CodexModelPrefix) {
 		return ProviderCodexSub
 	}
@@ -117,9 +121,19 @@ func (r *Router) get(id string) Provider {
 func (r *Router) Resolve(model string) (Provider, error) {
 	id := ProviderOf(model)
 	if p := r.get(id); p != nil {
+		if scoped, ok := p.(*scopedInference); ok {
+			if _, _, err := scoped.scope(model); err != nil {
+				return nil, err
+			}
+		}
 		return p, nil
 	}
+	if r.Has(ProviderScopedInference) {
+		return nil, ErrScopeSelection
+	}
 	switch id {
+	case ProviderScopedInference:
+		return nil, fmt.Errorf("%w: configure [[foh.key_scopes]]", ErrNoProvider)
 	case ProviderCodexSub:
 		return nil, fmt.Errorf("%s: %w: no ChatGPT subscription login found for Codex (run `codex login`)", id, ErrNoProvider)
 	default:

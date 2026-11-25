@@ -74,6 +74,8 @@ func kitTarget(t *testing.T, cfg *Config) bool {
 // capture into its outbox, and say so instead of failing.
 func TestDaemonFailsOpenWhenKitAPIDown(t *testing.T) {
 	kitDaemonHome(t, "[kit]\nservice='http://127.0.0.1:1'\napi='http://127.0.0.1:1'\nkey='hk_x'\nkey_id='k'\nteam_id='t'\nteam_slug='acme'\n[capture]\nscan_interval='1h'\n")
+	// Unrelated Layer references must not block the Club Kit outbox.
+	t.Setenv("HEVLAYER_API_KEY_REF", "op://fixture/club-kit-does-not-read/key")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // one cycle, then return
 	if err := Run(ctx); err != nil {

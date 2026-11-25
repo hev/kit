@@ -138,6 +138,78 @@ func ParseOrchestrator(text string) (OrchestratorSpec, error) {
 	s.Brief = strings.TrimSpace(body)
 	return s, s.Validate()
 }
+
+// ManagedRemoteHosts collects explicit routing labels, folding host aliases.
+func (s OrchestratorSpec) ManagedRemoteHosts(owner string) []string {
+	seen := map[string]bool{hostlabel.Canonical(owner): true}
+	var hosts []string
+	add := func(host string) {
+		if key := hostlabel.Canonical(host); key != "" && !seen[key] {
+			seen[key] = true
+			hosts = append(hosts, host)
+		}
+	}
+	for _, host := range s.Manages.Hosts {
+		add(host)
+	}
+	for _, run := range s.Manages.Runs.Names {
+		if host, _, qualified := strings.Cut(run, "/"); qualified {
+			add(host)
+		}
+	}
+	return hosts
+}
+
+func OrchestratorSpecForHost(text, host string) (string, error) {
+	if _, err := ParseOrchestrator(text); err != nil {
+		return "", err
+	}
+	front, body, _ := strings.Cut(strings.ReplaceAll(text, "\r\n", "\n")[4:], "\n---")
+	// Keep scalar spellings and explicit empty fields (such as authority:
+	// []) intact. Changing host must not change the admitted scope.
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(front), &doc); err != nil {
+		return "", err
+	}
+	mapping := doc.Content[0]
+	value := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: host}
+	replaced := false
+	for i := 0; i < len(mapping.Content); i += 2 {
+		var key string
+		if err := mapping.Content[i].Decode(&key); err != nil {
+			return "", err
+		}
+		if key == "host" {
+			previous := mapping.Content[i+1]
+			if previous.Anchor != "" {
+				expandHostAliases(mapping, previous)
+			}
+			mapping.Content[i+1] = value
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "host"}, value)
+	}
+	data, err := yaml.Marshal(&doc)
+	if err != nil {
+		return "", err
+	}
+	return "---\n" + string(data) + "---" + body, nil
+}
+
+// An alias elsewhere in the document keeps the original host scalar.
+func expandHostAliases(node, previous *yaml.Node) {
+	if node.Kind == yaml.AliasNode && node.Alias == previous {
+		*node = *previous
+		node.Anchor = ""
+	}
+	for _, child := range node.Content {
+		expandHostAliases(child, previous)
+	}
+}
+
 func (s OrchestratorSpec) Validate() error {
 	if err := s.Fallbacks.validate(); err != nil {
 		return err

@@ -1,5 +1,5 @@
 // Package kitapi is a typed client for the Club Kit API: the HTTP API a signed-in
-// machine talks to with its kit key (hk_…), and nothing else. It covers
+// machine talks to with its kit key (hev_… or legacy hk_…), and nothing else. It covers
 // capture (batched session, block and chunk rows), trace reads and search,
 // the board, and one-time dashboard links.
 //
@@ -107,6 +107,43 @@ func ValidBaseURL(raw string) bool {
 		return false
 	}
 	return u.Scheme == "https" || u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1")
+}
+
+// ValidKey reports whether key has the syntax of a Club Kit API key:
+//   - unified hev_ or legacy hvl_ Layer-minted key: prefix + >=24 ASCII base62 chars
+//   - legacy hk_ Club Kit key (bounded migration): prefix + >=16 [A-Za-z0-9_-] chars
+//
+// Empty/whitespace strings, bare prefixes, illegal characters, and raw provider
+// credentials (sk-..., op://...) are rejected.
+func ValidKey(key string) bool {
+	switch {
+	case strings.HasPrefix(key, "hev_"), strings.HasPrefix(key, "hvl_"):
+		suffix := key[4:]
+		if len(suffix) < 24 {
+			return false
+		}
+		for i := 0; i < len(suffix); i++ {
+			c := suffix[i]
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+				return false
+			}
+		}
+		return true
+	case strings.HasPrefix(key, "hk_"):
+		suffix := key[3:]
+		if len(suffix) < 16 {
+			return false
+		}
+		for i := 0; i < len(suffix); i++ {
+			c := suffix[i]
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-') {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 // New is a client for api (the [kit] api URL) with key.

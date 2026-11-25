@@ -249,3 +249,52 @@ func TestRelaunchChecksCurrentTargetPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnerAdmission(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := command(dir, "git", "init"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, origin string
+		owners       []string
+		repos        []string
+		allowed      bool
+	}{
+		{"https", "https://GITHUB.com/hev/kit.git", []string{"github.com/hev"}, nil, true},
+		{"ssh", "ssh://build@github.com/hev/kit", []string{"https://Github.com/hev/"}, nil, true},
+		{"scp", "git@github.com:hev/kit.git", []string{"ssh://git@GITHUB.com/hev"}, nil, true},
+		{"scp-owner", "https://github.com/hev/kit", []string{"git@github.com:hev"}, nil, true},
+		{"port", "ssh://git@github.com:2222/hev/kit", []string{"github.com:2222/hev"}, nil, true},
+		{"owner-with-dot-git", "https://github.com/hev.git/kit", []string{"github.com/hev.git"}, nil, true},
+		{"owner-suffix-is-literal", "https://github.com/hev/kit", []string{"github.com/hev.git"}, nil, false},
+		{"sibling", "https://github.com/hev-other/kit", []string{"github.com/hev"}, nil, false},
+		{"case", "git@github.com:Hev/kit", []string{"github.com/hev"}, nil, false},
+		{"bare-owner", "git@github.com:hev", []string{"github.com/hev"}, nil, false},
+		{"bare-host", "https://github.com", []string{"github.com/hev"}, nil, false},
+		{"other-host", "https://gitlab.com/hev/kit", []string{"github.com/hev"}, nil, false},
+		{"nested", "https://github.com/hev/sub/kit", []string{"github.com/hev"}, nil, false},
+		{"traversal", "https://github.com/hev/sub/../kit", []string{"github.com/hev"}, nil, false},
+		{"encoded-traversal", "https://github.com/hev/%2e%2e/hev/kit", []string{"github.com/hev"}, nil, false},
+		{"credential", "https://account:token-marker@github.com/hev/kit", []string{"github.com/hev"}, nil, false},
+		{"local-path", filepath.Join(dir, "hev", "kit"), []string{"github.com/hev"}, nil, false},
+		{"invalid-owners", "https://github.com/hev/kit", []string{"", "github.com", "https://github.com/other/../hev", "https://account:token-marker@github.com/hev"}, nil, false},
+		{"empty-owners-only", "https://github.com/hev/kit", []string{}, nil, false},
+		{"empty-lists", "https://github.com/hev/kit", []string{}, []string{}, false},
+		{"exact-in-union", "https://gitlab.com/other/kit", []string{"github.com/hev"}, []string{"git@gitlab.com:other/kit.git"}, true},
+		{"owner-in-union", "https://github.com/hev/kit", []string{"github.com/hev"}, []string{"git@gitlab.com:other/kit.git"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := command(dir, "git", "config", "remote.origin.url", tc.origin); err != nil {
+				t.Fatal(err)
+			}
+			err := admitRepo(Admission{Repos: tc.repos, Owners: tc.owners}, dir, "kit", "here")
+			if (err == nil) != tc.allowed {
+				t.Fatalf("allowed=%v: %v", tc.allowed, err)
+			}
+			if err != nil && err.Error() != `repo "kit" is not admitted on host "here"` {
+				t.Fatalf("refusal should only identify repository label and host: %v", err)
+			}
+		})
+	}
+}

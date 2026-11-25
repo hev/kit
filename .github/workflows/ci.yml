@@ -49,7 +49,11 @@ jobs:
       - name: test
         # The repeated CLI race suite approaches the default 10m package cap
         # before new acceptance coverage; individual cluster deadlines stay 5s.
-        run: go test -race -count=3 -timeout=15m ./...
+        run: go test -race -count=3 -timeout=15m -skip '^TestFOHScopedCredentialRefCLI$' ./...
+
+      - name: Scoped credential CLI acceptance under default policy
+        # The contended workload waits across two actual rolling minutes.
+        run: go test -race -count=1 -timeout=3m ./cmd/hev -run '^TestFOHScopedCredentialRefCLI$'
 
       - name: Watch and intake Cobra routing
         run: go test -count=1 ./cmd/hev -run TestWatchAndIntakeCLICompatibility
@@ -219,6 +223,8 @@ jobs:
         run: go build -o hev-candidate.exe ./cmd/hev
       - name: Native read-only observer and fail-closed platform checks
         run: go test -v -count=1 -run '^(TestWindows|TestObserve|TestPowerShell|TestQueue|TestHEVLayer)' ./pkg/nodeinventory ./internal/platformops ./internal/redact ./internal/daemon ./internal/dispatch ./internal/layerenv ./cmd/hev
+      - name: Native Windows hevd bootstrap refusal, ACL repair and authenticated startup
+        run: go test -v -count=1 -timeout=2m -run '^TestHEVDBootstrapOperatorACLRepair$' ./internal/daemon
       - name: Skill sources native Windows acceptance (copies require no symlink privileges)
         run: |
           go test -v -count=1 ./internal/skillsources
@@ -246,4 +252,5 @@ jobs:
       - name: Host invitation and sender security tests
         run: |
           go test -count=1 ./internal/nodes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test -count=1 ./internal/dispatch -run '^TestSender'

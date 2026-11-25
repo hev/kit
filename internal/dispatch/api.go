@@ -23,7 +23,7 @@ func CheckAPIOrder(o Order, host string) error {
 	if err != nil {
 		return err
 	}
-	if len(policy.Admission.Repos) == 0 {
+	if len(policy.Admission.Repos) == 0 && len(policy.Admission.Owners) == 0 {
 		return fmt.Errorf("API execution requires an explicit repository allowlist")
 	}
 	cfg, err := loadTarget("", host)

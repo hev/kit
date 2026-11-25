@@ -105,6 +105,9 @@ func runJoin(ctx context.Context, out io.Writer, code string) error {
 	if err != nil {
 		return err
 	}
+	if hasDiskBootstrap(doc) {
+		return errLayerBootstrapManaged
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -236,6 +239,9 @@ func invitedTarget() (map[string]any, string, error) {
 	doc, err := daemon.ReadInviteConfig()
 	if err != nil {
 		return nil, "", err
+	}
+	if hasDiskBootstrap(doc) {
+		return nil, "", errLayerBootstrapManaged
 	}
 	target, _ := doc["layer"].(map[string]any)
 	key, _ := target["api_key"].(string)

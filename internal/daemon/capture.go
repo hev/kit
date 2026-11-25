@@ -3,13 +3,10 @@ package daemon
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/hev/kit/internal/dispatch"
@@ -73,45 +70,6 @@ func (s *captureStatus) publish(i int, target TargetStatus, result Status) {
 	}
 }
 
-func openLegacyPrimary(ctx context.Context, cfg *Config, logger *slog.Logger) (Target, error) {
-	// With only the legacy target, stay up serving the secret endpoint while
-	// a rate limit clears. This is the existing supervisor startup behavior.
-	_, ref := layerenv.KeyRef()
-	conf := *cfg
-	if key := strings.TrimSpace(conf.LayerAPIKey); (key == "" || key == layerenv.PlaceholderKey) && ref != "" && !conf.Kit.SignedIn() {
-		waitCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-		key, err := layerKeyAfterCooldown(waitCtx, logger)
-		stop()
-		if err != nil {
-			return Target{}, fmt.Errorf("primary capture: %s", captureError("resolve API key", err))
-		}
-		conf.LayerAPIKey = key
-	}
-	return openPrimary(&conf, logger)
-}
-
-func openPrimary(cfg *Config, logger *slog.Logger) (Target, error) {
-	target, err := OpenTarget(cfg, "")
-	if err != nil {
-		var noKey *storagemode.NoKeyError
-		if errors.As(err, &noKey) {
-			return Target{}, errors.New("primary capture: Layer API key unavailable; check HEVLAYER_API_KEY, HEVLAYER_API_KEY_REF, or [layer].api_key")
-		}
-		return Target{}, errors.New("primary capture: could not open archive")
-	}
-	if target.Retired {
-		logger.Warn("local Docker lane retired", "message", RetiredMessage(cfg))
-	}
-	if target.Layer != nil {
-		conf := *cfg
-		conf.LayerAPIKey, conf.LayerEndpoint = target.Layer.APIKey, target.Layer.Endpoint
-		if err := validateLayerTarget(&conf); err != nil {
-			return Target{}, err
-		}
-	}
-	return target, nil
-}
-
 func recordPrimary(target Target, logger *slog.Logger) {
 	record := recordFor(target)
 	record.Endpoint = CaptureEndpoint(record.Endpoint)
@@ -153,7 +111,7 @@ func (c *captureCycle) run(ctx context.Context, target Target, logger *slog.Logg
 	return result
 }
 
-func runCapture(ctx context.Context, cfg *Config, home string, primary Target, resolve captureKeyResolver, logger *slog.Logger) error {
+func runCapture(ctx context.Context, cfg *Config, home string, primary Target, primaryErr error, resolve captureKeyResolver, logger *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
 	defer func() {
@@ -165,10 +123,8 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, r
 	multi := len(cfg.captureTargets) > 0
 	if multi {
 		primaryStatus.Namespace = cfg.LayerNamespace
-		primaryStatus.Storage = storagemode.Filesystem
-		if resolution, err := ResolveMode(cfg); err == nil {
-			primaryStatus.Storage, primaryStatus.KeySource = resolution.Mode, resolution.Source
-		} else {
+		primaryStatus.Storage, primaryStatus.KeySource = primary.Mode, primary.KeySource
+		if primaryErr != nil {
 			primaryStatus.Storage = storagemode.Layer
 		}
 		primarySpec := targetConfig{Namespace: cfg.LayerNamespace}
@@ -197,48 +153,34 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, r
 		}
 	}
 
-	cycle := captureCycle{state: index.LoadState()}
 	var drainer *kitcapture.Drainer
+	if primary.Kit != nil {
+		logger.Info("signed in to Club Kit: capturing to the Club Kit API through a local outbox", "team", cfg.Kit.TeamSlug, "archive", primary.Files.Dir(), "outbox", primary.Kit.Outbox.Dir())
+		drainer = &kitcapture.Drainer{Outbox: primary.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
+		primary.Kit.Outbox.Logger = logger
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			drainer.Run(ctx)
+		}()
+	}
+	cycle := captureCycle{state: index.LoadState()}
 	run := func() {
 		if err := dispatch.SweepQueueBackstop(); err != nil {
 			logger.Warn("dispatch queue sweep", "error", captureError("sweep dispatch queue", err))
 		}
-		if primary.Mode == "" {
-			var err error
-			conf := *cfg
-			_, ref := layerenv.KeyRef()
-			if key := strings.TrimSpace(conf.LayerAPIKey); (key == "" || key == layerenv.PlaceholderKey) && ref != "" && !conf.Kit.SignedIn() {
-				conf.LayerAPIKey, err = resolveCaptureKey(ctx, ref, resolve)
-			}
-			if err == nil {
-				primary, err = openPrimary(&conf, logger)
-			}
-			if err != nil {
-				result := Status{LastRun: time.Now().UTC(), LastError: err.Error()}
-				logger.Error("capture target failed", "target", primaryTarget, "error", result.LastError)
-				status.publish(0, primaryStatus, result)
-				return
-			}
-			recordPrimary(primary, logger)
-			if primary.Layer != nil {
-				if gate := firstScanGate(cfg, func() error { _, err := primary.Layer.Health(); return err }); gate != nil {
-					if err := gate(ctx); err != nil {
-						logger.Warn("gateway health check failed", "error", captureError("gateway health check", err))
-					}
-				}
-			}
+		if primaryErr != nil {
+			logger.Error("capture target failed", "target", primaryTarget, "error", primaryErr.Error())
+			status.publish(0, primaryStatus, Status{LastRun: time.Now().UTC(), LastError: primaryErr.Error()})
+			return
 		}
 		primaryStatus.Storage = primary.Mode
 		if primary.Layer != nil {
 			primaryStatus.Endpoint = CaptureEndpoint(primary.Layer.Endpoint)
 		}
-		if primary.Kit != nil && drainer == nil {
-			primary.Kit.Outbox.Logger = logger
-			drainer = &kitcapture.Drainer{Outbox: primary.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
-			workers.Add(1)
-			go func() { defer workers.Done(); drainer.Run(ctx) }()
-		}
-		result := cycle.run(ctx, primary, logger.With("target", primaryTarget))
+		scanCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+		result := cycle.run(scanCtx, primary, logger.With("target", primaryTarget))
 		if drainer != nil {
 			drainer.Kick()
 			result.Notice = kitNotice(drainer, primary.Kit.Outbox)

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/blob"
+	"github.com/hev/kit/internal/cost"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
 )
@@ -454,7 +455,8 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
-	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": rates, "generated": time.Now().UTC().Format(time.RFC3339), "days": 30, "storage": s.storage(), "board": s.boardPage()})
+	now := time.Now().UTC()
+	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": displayRates(now), "generated": now.Format(time.RFC3339), "days": 30, "storage": s.storage(), "board": s.boardPage()})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
 	link := ""
 	if s.reviewEnabled {
@@ -524,9 +526,26 @@ func writeError(w http.ResponseWriter, err error, status int) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-var rates = map[string][4]float64{
-	"claude-sonnet-5": {3, 15, 6, .3}, "claude-opus-5": {15, 75, 30, 1.5}, "claude-fable-5": {15, 75, 30, 1.5},
-	"claude-fable-5-1": {15, 75, 30, 1.5}, "claude-haiku-4-5-20251001": {1, 5, 2, .1},
+// displayRates returns the active list rates from embedded prices.toml as of
+// now (input, output, cache write, cache read per million tokens).
+func displayRates(now time.Time) map[string][4]float64 {
+	all, err := cost.DefaultRates()
+	if err != nil {
+		return map[string][4]float64{}
+	}
+	today := now.UTC().Format("2006-01-02")
+	seen := map[string]bool{}
+	out := map[string][4]float64{}
+	for _, r := range all {
+		if seen[r.Model] {
+			continue
+		}
+		seen[r.Model] = true
+		if active, _ := cost.LookupRate(all, r.Model, today); active != nil {
+			out[r.Model] = [4]float64{active.Input, active.Output, active.Creation, active.Cached}
+		}
+	}
+	return out
 }
 
 func emptySession() map[string]any { return buildSession(trace.SessionRow{}, nil) }

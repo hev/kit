@@ -29,6 +29,10 @@ subscription (codex/... models), with an in-harness model picker, a composable
 system prompt and first-class hev tools (dispatch, peers, board, traces,
 status).
 
+Type / to browse CLI commands. Run /cluster or /board search "swim failover"
+directly and use Ctrl+O to expand command output. /review hands the terminal
+to the review tool. /secrets accepts diagnostic commands only.
+
 hev kit runs without permissions. It's your responsibility to secure your
 compute.
 
@@ -69,6 +73,7 @@ func terminalWidth(out io.Writer) int {
 }
 
 func runFOH(cmd *cobra.Command, _ []string) error {
+	cmd.SilenceUsage = true
 	out := cmd.OutOrStdout()
 	color := fohColor(cmd)
 	if show, _ := cmd.Flags().GetBool("show-mascot"); show {
@@ -89,7 +94,7 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
 	defer stop()
-	router, secrets, err := fohProviders(ctx, cfg)
+	router, secrets, err := fohProviders(ctx, cfg, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
@@ -99,7 +104,11 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 			fallback = models[0].ID
 		}
 	}
-	model := cfg.ResolveModel(modelFlag, favorites.IDs, func(id string) bool { return router.Has(foh.ProviderOf(id)) }, fallback)
+	startupFavorites := favorites.IDs
+	if len(cfg.KeyScopes) > 0 {
+		startupFavorites = nil
+	}
+	model := cfg.ResolveModel(modelFlag, startupFavorites, func(id string) bool { return router.Has(foh.ProviderOf(id)) }, fallback)
 	cwd, _ := os.Getwd()
 	workspace := foh.WorkspaceName()
 	host, _ := os.Hostname()
@@ -137,8 +146,9 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 		return runFOHOnce(ctx, agent, once, out, cmd.ErrOrStderr())
 	}
 	tui := foh.NewTUI(foh.TUIOptions{
-		Agent: agent, Favorites: favorites, Composer: composer, Version: version.String(),
+		Agent: agent, HevCommands: hevSlashCommands(rootCmd), Favorites: favorites, Composer: composer, Version: version.String(),
 		Cwd: cwd, Workspace: workspace, SummaryModel: cfg.SummaryModel, Color: color,
+		CatalogContext: ctx,
 		Catalog: func(ctx context.Context) ([]foh.Model, foh.CatalogSource, error) {
 			return router.Models(ctx, false)
 		},
@@ -155,19 +165,73 @@ func runFOH(cmd *cobra.Command, _ []string) error {
 	return err
 }
 
-// fohProviders builds the provider router: OpenRouter when a key resolves,
-// and codex-sub when a Codex ChatGPT login is found (or [foh.codex].enabled
-// forces it). It never reads Anthropic/Claude subscription credentials. The
-// returned secrets seed the session and tool scrubbers.
-func fohProviders(ctx context.Context, cfg foh.Config) (*foh.Router, []string, error) {
+// hevSlashCommands derives the kit palette from the same commands as CLI help.
+func hevSlashCommands(root *cobra.Command) []foh.HevSlashCommand {
+	var commands []foh.HevSlashCommand
+	for _, cmd := range root.Commands() {
+		name := cmd.Name()
+		switch name {
+		case "serve", "collect", "browse", "kit", "foh", "init", "onboard", "hook", "completion", "help", "skills-preview":
+			continue
+		}
+		if cmd.Hidden {
+			continue
+		}
+		command := foh.HevSlashCommand{
+			Name: name, Summary: cmd.Short, Group: cmd.GroupID,
+			TakesArg: cmd.HasAvailableSubCommands() || cmd.HasLocalFlags() || cmd.DisableFlagParsing || strings.Contains(cmd.Use, " "),
+		}
+		switch name {
+		case "cluster", "orchestrate", "traces", "cron", "service", "workspace":
+			command.DefaultArgs = []string{"ls"}
+		case "board":
+			command.DefaultArgs = []string{"list"}
+		case "review":
+			command.Mode = foh.HevSlashTerminal
+		case "secrets":
+			command.Mode = foh.HevSlashGuarded
+		}
+		commands = append(commands, command)
+	}
+	return commands
+}
+
+// fohProviders builds the provider router: OpenRouter/Club Kit when a key
+// resolves, and codex-sub when a Codex ChatGPT login is found (or
+// [foh.codex].enabled forces it). It never reads Anthropic/Claude subscription
+// credentials. A stale legacy hk_ key in implicit [kit].key is skipped with a
+// warning when another provider resolves, and surfaced as ErrLegacyKitKey when
+// no provider resolves. The returned secrets seed the session and tool
+// scrubbers.
+func fohProviders(ctx context.Context, cfg foh.Config, errOut io.Writer) (*foh.Router, []string, error) {
+	if len(cfg.KeyScopes) > 0 {
+		provider, err := cfg.ScopedInference()
+		if err != nil {
+			return nil, nil, err
+		}
+		return foh.NewRouter(provider), nil, nil
+	}
 	var providers []foh.Provider
 	var secrets []string
-	key, keyErr := cfg.ResolveAPIKey(ctx)
-	if keyErr == nil {
-		providers = append(providers, foh.NewClient(cfg.ResolvedBaseURL(), key))
-		secrets = append(secrets, key)
-	} else if !errors.Is(keyErr, foh.ErrNoAPIKey) {
-		return nil, nil, keyErr
+	var implicitLegacyErr error
+	ep, epErr := cfg.ResolveEndpoint(ctx)
+	if epErr == nil {
+		providers = append(providers, foh.NewClient(ep.BaseURL, ep.APIKey))
+		secrets = append(secrets, ep.APIKey)
+	} else {
+		var implicitLegacy foh.ImplicitLegacyKitKeyError
+		switch {
+		case errors.Is(epErr, foh.ErrNoAPIKey):
+			// No OpenRouter / Club Kit key configured; continue to other providers.
+		case errors.As(epErr, &implicitLegacy):
+			// Do not block fallback providers (such as codex-sub) on a stale [kit].key.
+			implicitLegacyErr = epErr
+			if k := strings.TrimSpace(cfg.Kit.Key); k != "" {
+				secrets = append(secrets, k)
+			}
+		default:
+			return nil, nil, epErr
+		}
 	}
 	if codex, err := foh.NewCodexSub(cfg.Codex); err == nil && codex.Active() {
 		providers = append(providers, codex)
@@ -176,7 +240,13 @@ func fohProviders(ctx context.Context, cfg foh.Config) (*foh.Router, []string, e
 		return nil, nil, err
 	}
 	if len(providers) == 0 {
+		if implicitLegacyErr != nil {
+			return nil, nil, implicitLegacyErr
+		}
 		return nil, nil, foh.ErrNoProviders
+	}
+	if implicitLegacyErr != nil && errOut != nil {
+		fmt.Fprintln(errOut, "hev foh: skipping legacy hk_ key in [kit].key (run `hev login` to obtain a hev_ key)")
 	}
 	return foh.NewRouter(providers...), secrets, nil
 }

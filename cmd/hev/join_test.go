@@ -469,6 +469,31 @@ func TestJoinRefusesShellOverridesBeforeRedeeming(t *testing.T) {
 	}
 }
 
+func TestHEVLayerInviteCommandsPreserveDiskBootstrap(t *testing.T) {
+	f := inviteSandbox(t)
+	// A legacy inline key and invite record must not make leave eligible while
+	// the daemon uses a different credential from its protected file.
+	const text = "[layer]\napi_key_file = \"layer.key\"\napi_key = \"fixture-inline-key\"\n[invite]\nfor = \"fixture-team\"\n"
+	path := writeConfig(t, f.home, text)
+	keyPath := filepath.Join(filepath.Dir(path), "layer.key")
+	if err := platformops.WriteFileAtomic(keyPath, []byte("fixture-disk-key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runJoin(context.Background(), io.Discard, "fixture-code"); err != errLayerBootstrapManaged {
+		t.Fatalf("expected bootstrap refusal from join, got %v", err)
+	}
+	if err := runLeave(context.Background(), io.Discard); err != errLayerBootstrapManaged {
+		t.Fatalf("expected bootstrap refusal from leave, got %v", err)
+	}
+	got, err := os.ReadFile(path)
+	key, keyErr := os.ReadFile(keyPath)
+	if err != nil || string(got) != text || keyErr != nil || string(key) != "fixture-disk-key" ||
+		f.requests() != "" || allCalls(t, f.log) != "" {
+		t.Fatal("the invite command changed bootstrap state or contacted a service")
+	}
+}
+
 func TestInviteWriterLockPreventsConfigSwitch(t *testing.T) {
 	if err := platformops.RequireTraceWrites(); err != nil {
 		t.Skip("native writer locking unavailable")

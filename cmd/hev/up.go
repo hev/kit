@@ -149,6 +149,9 @@ func upLane(flag string) (store, apiKey string, err error) {
 	if err != nil {
 		return "", "", err
 	}
+	if file.hasBootstrap {
+		return "", "", errLayerBootstrapManaged
+	}
 	switch store {
 	case daemon.RetiredStore:
 		return "", "", errRetiredStore
