@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/cost"
+	"github.com/hev/kit/internal/preval"
 )
 
 // BlockRow is one whole transcript block in <namespace>-blocks. Text is never
@@ -193,6 +194,8 @@ type SessionRow struct {
 	// SkillLoads is each skill's first load in the session, with how it was
 	// loaded; the block rows keep every load.
 	SkillLoads SkillLoads `json:"skill_loads,omitempty"`
+
+	Evaluation *preval.Evaluation `json:"evaluation,omitempty"`
 }
 
 // Blocks converts turns to stable, globally ordered whole-block rows. A tool

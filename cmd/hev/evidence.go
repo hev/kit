@@ -37,13 +37,19 @@ type evidenceStore interface {
 }
 
 var openEvidence = func(cmd *cobra.Command) (evidenceStore, error) {
-	if hosted, err := hostedEvidence(cmd.Context()); err != nil || hosted != nil {
-		if err != nil {
-			return nil, err
-		}
-		return hosted, nil
+	w, err := currentWorkspace()
+	if err != nil {
+		return nil, err
 	}
-	s, err := evidence.Open(evidence.Root())
+	if !w.IsolatedStorage() {
+		if hosted, err := hostedEvidence(cmd.Context()); err != nil || hosted != nil {
+			if err != nil {
+				return nil, err
+			}
+			return hosted, nil
+		}
+	}
+	s, err := evidence.Open(evidenceWorkspaceRoot(w))
 	if err != nil {
 		return nil, err
 	}
@@ -587,6 +593,9 @@ func evidenceShowCmd() *cobra.Command {
 }
 
 func printEvidence(w io.Writer, p *evidence.Package, dir string) {
+	if p.Evaluation != nil {
+		fmt.Fprintf(w, "PR outcome: %s. %s\n", p.Evaluation.Outcome, p.Evaluation.Reason)
+	}
 	fmt.Fprintf(w, "%s  %s\n", p.ID, p.Title)
 	fmt.Fprintf(w, "state    %s", p.State)
 	if p.SealedAt != nil {

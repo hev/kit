@@ -832,6 +832,7 @@ function header(){
   const crumb = el('div',{class:'crumb'}); const back = el('a',{href:'#traces', onclick:e=>{e.preventDefault(); show('traces');}}, 'Traces');
   crumb.append(back, ' / '+S.project); h.append(crumb);
   h.append(el('h1',{}, S.summary || S.summary_reason || S.title || S.id));
+  if(S.evaluation)h.append(el('p',{},S.evaluation.reason));
   const m = el('div',{class:'meta'});
   const repo = S.repo_url ? `<a href="${S.repo_url}/tree/${encodeURIComponent(S.branch||'')}" target="_blank"><b>${esc(S.project)}</b> · ${esc(S.branch||'')} ↗</a>` : `<b>${esc(S.project)}</b> · ${esc(S.branch||'')}`;
   m.append(el('span',{html:repo}));

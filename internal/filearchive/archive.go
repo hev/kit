@@ -37,6 +37,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hev/kit/internal/hevpaths"
+	"github.com/hev/kit/internal/preval"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -584,6 +586,7 @@ func (s *Store) writeSessions(rows []trace.SessionRow, written *int, listed map[
 				row.Commits = append(row.Commits, old.Commits...)
 			}
 			row.Commits = uniqueSorted(row.Commits)
+			row.Evaluation = nil // Evaluation belongs to the conditional enrichment writer.
 			obj, err := objectOf(row)
 			if err != nil {
 				return err
@@ -1068,4 +1071,90 @@ func (s *Store) WriteInstructionVersions(rows []layer.InstructionVersion) error 
 		_, err := s.upsertLines(s.instructionsPath(), group)
 		return err
 	})
+}
+
+func (s *Store) ReadEvaluation(id string) (eval *preval.Evaluation, etag string, err error) {
+	err = s.lockedRead(func() error {
+		stored, err := s.readSession(keyOf(id))
+		if err != nil {
+			return err
+		}
+		if stored.obj == nil {
+			return os.ErrNotExist
+		}
+		eval, etag, err = preval.TraceRevision(stored.obj)
+		return err
+	})
+	if etag == "" && err == nil {
+		err = os.ErrNotExist
+	}
+	return
+}
+
+// SetEvaluation preserves session contents and verifies the recorded attempt.
+func (s *Store) SetEvaluation(id string, eval preval.Evaluation) error {
+	_, err := s.SetEvaluationConditional(context.Background(), id, "", eval)
+	return err
+}
+
+func (s *Store) SetEvaluationConditional(ctx context.Context, id, expected string, eval preval.Evaluation) (etag string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	err = s.locked(func() error {
+		key := keyOf(id)
+		stored, err := s.readSession(key)
+		if err != nil {
+			return err
+		}
+		if stored.obj == nil {
+			return os.ErrNotExist
+		}
+		_, prior, err := preval.TraceRevision(stored.obj)
+		if err != nil {
+			return err
+		}
+		if expected != "" && expected != prior || !preval.TraceMatches(stored.obj, id, eval.Provenance) {
+			return preval.ErrConflict
+		}
+		changed, err := preval.Patch(stored.obj, eval)
+		if err != nil {
+			return err
+		}
+		if changed {
+			if err := s.writeSession(key, stored, stored.obj); err != nil {
+				return err
+			}
+		}
+		_, etag, err = preval.TraceRevision(stored.obj)
+		return err
+	})
+	return
+}
+
+// EvaluationSample returns a bounded set of text blocks from one session.
+func (s *Store) EvaluationSample(ctx context.Context, id string) (sample string, err error) {
+	err = s.lockedRead(func() error {
+		file, err := os.Open(s.path("blocks", keyOf(id)))
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		scanner := bufio.NewScanner(io.LimitReader(file, 192<<10))
+		scanner.Buffer(make([]byte, 4096), 64<<10)
+		var text strings.Builder
+		for text.Len() < 4800 && scanner.Scan() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			var row trace.BlockRow
+			if json.Unmarshal(scanner.Bytes(), &row) == nil && row.SessionID == id {
+				text.WriteString(row.Text[:min(len(row.Text), 4799-text.Len())])
+				text.WriteByte('\n')
+			}
+		}
+		sample = text.String()
+		return nil
+	})
+	return sample, err
 }

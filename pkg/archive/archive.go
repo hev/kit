@@ -16,6 +16,7 @@ import (
 
 	"github.com/hev/kit/internal/filearchive"
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/preval"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -143,3 +144,7 @@ func Hostname() string { return layer.Hostname() }
 
 var _ Store = (*LayerStore)(nil)
 var _ Store = (*FileStore)(nil)
+
+type Evaluation = preval.Evaluation
+
+var ErrEvaluationConflict = preval.ErrConflict
