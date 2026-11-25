@@ -3,6 +3,7 @@ package orders
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -12,29 +13,32 @@ import (
 // Request contains API operations only. In particular it carries no launch
 // environment, workspace, sender-selected capacity or forwarding authority.
 type Request struct {
-	Action      string `json:"action"`
-	ID          string `json:"id,omitempty"`
-	Host        string `json:"host,omitempty"`
-	Order       string `json:"order,omitempty"`
-	Trace       string `json:"trace,omitempty"`
-	Actor       string `json:"actor,omitempty"`
-	Note        string `json:"note,omitempty"`
-	Resolve     string `json:"resolve,omitempty"`
-	Level       string `json:"level,omitempty"`
-	HaltTimeout string `json:"halt_timeout,omitempty"`
-	Offset      int64  `json:"offset,omitempty"`
-	Limit       int    `json:"limit,omitempty"`
-	Round       int    `json:"round,omitempty"`
+	Action      string          `json:"action"`
+	ID          string          `json:"id,omitempty"`
+	Host        string          `json:"host,omitempty"`
+	Order       string          `json:"order,omitempty"`
+	Trace       string          `json:"trace,omitempty"`
+	Actor       string          `json:"actor,omitempty"`
+	Note        string          `json:"note,omitempty"`
+	Resolve     string          `json:"resolve,omitempty"`
+	Level       string          `json:"level,omitempty"`
+	HaltTimeout string          `json:"halt_timeout,omitempty"`
+	Offset      int64           `json:"offset,omitempty"`
+	Limit       int             `json:"limit,omitempty"`
+	Round       int             `json:"round,omitempty"`
+	Evaluation  json.RawMessage `json:"evaluation,omitempty"`
+	IfMatch     string          `json:"if_match,omitempty"`
 }
 
 // Reply carries the projection of the dispatch record used by the API.
 type Reply struct {
-	Rows    []map[string]any `json:"rows,omitempty"`
-	Order   map[string]any   `json:"order,omitempty"`
-	Receipt map[string]any   `json:"receipt,omitempty"`
-	Log     string           `json:"log,omitempty"`
-	Offset  int64            `json:"offset,omitempty"`
-	Active  bool             `json:"active,omitempty"`
+	Rows           []map[string]any `json:"rows,omitempty"`
+	Order          map[string]any   `json:"order,omitempty"`
+	Receipt        map[string]any   `json:"receipt,omitempty"`
+	Log            string           `json:"log,omitempty"`
+	Offset         int64            `json:"offset,omitempty"`
+	Active         bool             `json:"active,omitempty"`
+	EvaluationETag string           `json:"evaluation_etag,omitempty"`
 }
 
 type Backend interface {
@@ -76,10 +80,11 @@ func (b RPCBackend) Execute(ctx context.Context, team string, req Request) (Repl
 }
 
 var (
-	ErrInvalid     = errors.New("invalid request")
-	ErrForbidden   = errors.New("host or operation unavailable")
-	ErrNotFound    = errors.New("order not found")
-	ErrConflict    = errors.New("order state conflict")
-	ErrRejected    = errors.New("order rejected by execution host")
-	ErrUnavailable = errors.New("execution host unavailable")
+	ErrInvalid      = errors.New("invalid request")
+	ErrForbidden    = errors.New("host or operation unavailable")
+	ErrNotFound     = errors.New("order not found")
+	ErrConflict     = errors.New("order state conflict")
+	ErrRejected     = errors.New("order rejected by execution host")
+	ErrPrecondition = errors.New("evaluation precondition failed")
+	ErrUnavailable  = errors.New("execution host unavailable")
 )

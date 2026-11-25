@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hev/kit/internal/preval"
 )
 
 // Schema names the package manifest version, on disk and over /v1/evidence.
@@ -142,6 +143,8 @@ type Package struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	SealedAt  *time.Time `json:"sealed_at,omitempty"`
+
+	Evaluation *preval.Evaluation `json:"evaluation,omitempty"`
 }
 
 // Summary is EvidencePackageSummary: a package without its items.
@@ -167,11 +170,13 @@ type Summary struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	SealedAt  *time.Time `json:"sealed_at,omitempty"`
+
+	Evaluation *preval.Evaluation `json:"evaluation,omitempty"`
 }
 
 // Summarize drops the items.
 func (p *Package) Summarize() Summary {
-	return Summary{Schema: p.Schema, ID: p.ID, State: p.State, Title: p.Title, Summary: p.Summary, Source: p.Source,
+	return Summary{Evaluation: p.Evaluation, Schema: p.Schema, ID: p.ID, State: p.State, Title: p.Title, Summary: p.Summary, Source: p.Source,
 		Order: p.Order, Session: p.Session, Gate: p.Gate, Repo: p.Repo, Branch: p.Branch, Commit: p.Commit, Host: p.Host,
 		Author: p.Author, Role: p.Role, Tags: p.Tags, Claims: p.Claims, ItemCount: p.ItemCount,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt, SealedAt: p.SealedAt}

@@ -488,3 +488,21 @@ entries:
 	}
 	return out
 }
+
+// PRLearningClaudeAuth admits only the Claude credentials explicitly assigned to
+// the selected workspace. The evaluator never inherits the caller's credentials.
+func PRLearningClaudeAuth(ctx context.Context, w workspace.Selection) ([]string, []string, error) {
+	h := HarnessConfig{EnvRefs: make(map[string]string)}
+	for _, key := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if ref := w.Subscriptions.EnvRefs[key]; ref != "" {
+			h.EnvRefs[key] = ref
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	env, values, err := harnessSecretEnv(ctx, "claude", h, "pr-evaluation")
+	if err != nil {
+		return nil, nil, errors.New("cannot resolve workspace learning credentials")
+	}
+	return env, values, nil
+}

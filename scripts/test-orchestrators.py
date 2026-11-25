@@ -7,7 +7,6 @@ No network, model, operator tmux server, or operator state is used.
 import json
 import os
 from pathlib import Path
-import shlex
 import shutil
 import subprocess
 import sys
@@ -25,19 +24,20 @@ def main():
         home, binary, workspace = root / "home", root / "bin", root / "workspace"
         for p in (home, binary, workspace):
             p.mkdir()
-        socket = str(root / "tmux.sock")
+        tmux_dir = root / "tmux"
+        tmux_dir.mkdir()
+        socket = str(tmux_dir / f"tmux-{os.getuid()}" / "default")
         env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
                "PATH": str(binary) + os.pathsep + os.environ["PATH"],
                "HEV_ORCHESTRATOR": "", "GIT_CONFIG_NOSYSTEM": "1",
                "HEV_PEERS_BACKEND": "", "HEV_PEERS_STATE": str(root / "peers"),
-               "HEV_CONFIG": str(root / "config.toml"), "PEERS_SELF": "test-host"}
+               "HEV_CONFIG": str(root / "config.toml"), "PEERS_SELF": "test-host", "TMUX_TMPDIR": str(tmux_dir)}
         env.pop("TMUX", None)
         env.pop("TMUX_PANE", None)
         config = home / ".config/hev/dispatch.toml"
         config.parent.mkdir(parents=True)
         config.write_text(f"cap = 3\nworkspace = '{workspace}'\ndefault_host = 'local'\n[hosts.local]\nlocal = true\n")
         env["HEV_DISPATCH_CONFIG"] = str(config)
-        (binary / "tmux").write_text(f"#!/bin/sh\nexec {shlex.quote(real_tmux)} -S {shlex.quote(socket)} \"$@\"\n")
         fake_harness = """#!/bin/sh
 if [ -f packet.json ]; then
     printf 'Goal pending. Next: await operator.\\n' > checkpoint.md
@@ -164,7 +164,11 @@ Test intake only.
             assert inbox.count("stopped") == 1, inbox
             print("PASS: durable owner notices, reply delivered once, stop notice, show/ls notice status; apply, fake source -> scoped dispatch, fake harness, cursor, JSON inventories, early say, replay idempotency, render preview, stop removes placeholder, agent:on packet")
         finally:
-            subprocess.run([real_tmux, "-S", socket, "kill-server"], env=env, capture_output=True)
+            sessions = subprocess.run([real_tmux, "-S", socket, "list-sessions", "-F", "#{session_id}"],
+                                      env=env, text=True, capture_output=True, timeout=5)
+            for session_id in sessions.stdout.splitlines():
+                subprocess.run([real_tmux, "-S", socket, "kill-session", "-t", session_id],
+                               env=env, capture_output=True, timeout=5)
 
 
 if __name__ == "__main__":

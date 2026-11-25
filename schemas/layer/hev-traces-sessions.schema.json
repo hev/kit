@@ -242,5 +242,9 @@
   "skill_loads": {
     "filterable": false,
     "type": "string"
+  },
+  "evaluation": {
+    "type": "string",
+    "filterable": false
   }
 }
