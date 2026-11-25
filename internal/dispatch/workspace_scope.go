@@ -22,6 +22,26 @@ func (c *Config) ScopeWorkspace(w workspace.Selection) {
 	}
 }
 
+// OrchestratorHost resolves a remote route from this machine's configuration.
+func (c Config) OrchestratorHost(label string) (Host, error) {
+	if h, ok := c.Hosts[label]; ok && !h.Local {
+		return h, nil
+	}
+	var route Host
+	for name, host := range c.Hosts {
+		if !host.Local && hostlabel.Same(name, label) {
+			if route.SSH != "" {
+				return Host{}, fmt.Errorf("ambiguous dispatch host %q", label)
+			}
+			route = host
+		}
+	}
+	if route.SSH == "" {
+		return Host{}, fmt.Errorf("remote dispatch host %q is not configured", label)
+	}
+	return route, nil
+}
+
 type workspaceContextKey struct{}
 
 func WorkspaceContext(ctx context.Context, w workspace.Selection) context.Context {

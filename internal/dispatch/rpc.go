@@ -31,6 +31,7 @@ var runLauncher = launch
 type Request struct {
 	WorkspaceName   string `json:"workspace_name,omitempty"`
 	ScopeOwner      *Host  `json:"scope_owner,omitempty"`
+	ScopeOwnerLabel string `json:"scope_owner_label,omitempty"`
 	excludeFinished string
 	Dequeue         bool `json:"dequeue,omitempty"`
 	AdmissionOnly   bool `json:"admission_only,omitempty"`
@@ -376,6 +377,26 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	if e := admitOrchestrator(q); e != nil {
 		return r, e
+	}
+	if q.Action == "orchestrator-apply" && q.ScopeOwnerLabel != "" {
+		if !q.AdmissionOnly || q.ScopeOwner != nil {
+			return r, fmt.Errorf("scope owner label requires admission-only apply")
+		}
+		spec, err := ParseOrchestrator(q.Order)
+		if err != nil {
+			return r, err
+		}
+		if q.WorkspaceName != "" && q.WorkspaceName != workspaceOfRun(spec.WorkspaceName) {
+			return r, fmt.Errorf("workspace boundary: request and orchestrator workspace disagree")
+		}
+		if q.Orchestrator != "" {
+			if err := admitOrchestratorChild(q.Orchestrator, spec.Name, spec); err != nil {
+				return r, err
+			}
+		}
+		_, err = RegisterOrchestratorScopeForOwner(q.Order, q.ScopeOwnerLabel, false)
+		r.ScopeRegistered = err == nil
+		return r, err
 	}
 	if q.AdmissionOnly && q.Action == "orchestrator-apply" && q.ScopeOwner != nil {
 		_, e := RegisterOrchestratorScope(q.Order, *q.ScopeOwner, false)
