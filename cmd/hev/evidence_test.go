@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/hev/kit/internal/evidence"
+	"github.com/hev/kit/internal/layerenv"
 )
 
 func evidenceHome(t *testing.T) string {
@@ -22,6 +23,19 @@ func evidenceHome(t *testing.T) string {
 	t.Setenv(evidence.DirEnv, "")
 	t.Setenv("HEV_HOOKS", "off")
 	t.Setenv("HEV_ORDER", "")
+	// A dispatch shell can carry an archive key reference. The local fixture
+	// must select its own storage mode independently of that environment.
+	t.Setenv("HEV_KIT_SERVICE", "")
+	t.Setenv("HEV_API_KEY", "")
+	if err := os.Unsetenv("HEV_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	for name, aliases := range layerenv.Aliases {
+		t.Setenv(name, "")
+		for _, alias := range aliases {
+			t.Setenv(alias, "")
+		}
+	}
 	return home
 }
 
