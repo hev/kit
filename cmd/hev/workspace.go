@@ -23,7 +23,9 @@ func init() {
 		if cmd.DisableFlagParsing {
 			return nil
 		}
-		if flag := cmd.Flags().Lookup("workspace"); flag != nil && flag.Changed && workspaceFlag == "" {
+		// A subcommand may use the same flag name for a different kind of workspace.
+		flag := rootCmd.PersistentFlags().Lookup("workspace")
+		if flag.Changed && workspaceFlag == "" {
 			return fmt.Errorf("workspace name must not be empty")
 		}
 		if workspaceFlag != "" || os.Getenv("HEV_WORKSPACE") != "" {

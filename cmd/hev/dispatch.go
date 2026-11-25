@@ -127,6 +127,7 @@ func newDispatchCommand() *cobra.Command {
 	d.AddCommand(&cobra.Command{Use: "redirect-follow NAME ID", Hidden: true, Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		return dispatch.FollowRedirect(args[0], args[1])
 	}})
+	d.AddCommand(newDispatchIdentityCommand())
 	// notices reports an unknown --host itself, naming where joined hosts are listed.
 	d.AddCommand(newDispatchNoticesCommand(func() (dispatch.Config, error) { return loadWorkspaceDispatch(dispatch.ConfigPath(configPath)) }, &host))
 	for _, action := range []string{"say", "attach", "ls", "hosts", "show", "logs", "stop", "amend", "rework", "retry", "clean", "validate", "adopt"} {
