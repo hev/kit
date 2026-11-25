@@ -267,9 +267,9 @@ func ListOrchestrators() ([]OrchestratorState, error) {
 }
 func exists(p string) bool { _, e := os.Stat(p); return e == nil }
 func ApplyOrchestrator(text string, dry bool) (OrchestratorSpec, error) {
-	return applyOrchestrator(text, dry, true)
+	return applyOrchestrator(text, dry, nil)
 }
-func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error) {
+func applyOrchestrator(text string, dry bool, owner *Host) (OrchestratorSpec, error) {
 	s, e := ParseOrchestrator(text)
 	if e != nil {
 		return s, e
@@ -286,9 +286,6 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 			if err = w.RequireHost(s.Host); err != nil {
 				return s, err
 			}
-		}
-		if previous, err := LoadOrchestrator(s.Name); err == nil && workspaceOfRun(previous.WorkspaceName) != s.WorkspaceName {
-			return s, fmt.Errorf("workspace boundary: orchestrator belongs to workspace %q", workspaceOfRun(previous.WorkspaceName))
 		}
 	}
 	if s.Fallbacks == nil {
@@ -311,7 +308,7 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 			return s, e
 		}
 	}
-	if notices && s.Reply != "" {
+	if owner == nil && s.Reply != "" {
 		if _, e = noticeSenderAddress(s); e != nil {
 			return s, e
 		}
@@ -326,6 +323,9 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 			return s, e
 		}
 		defer unlock()
+	}
+	if previous, err := LoadOrchestrator(s.Name); err == nil && workspaceOfRun(previous.WorkspaceName) != workspaceOfRun(s.WorkspaceName) {
+		return s, fmt.Errorf("workspace boundary: orchestrator belongs to workspace %q", workspaceOfRun(previous.WorkspaceName))
 	}
 	specs := map[string]OrchestratorSpec{}
 	entries, e := os.ReadDir(OrchestratorConfigDir())
@@ -371,6 +371,13 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	if e = orchestratorBusy(s.Name); e != nil {
 		return s, e
 	}
+	// Install the owner guard before exposing the scope. Keep it in place
+	// throughout updates so a concurrent reader never treats it as runnable.
+	if owner != nil {
+		if e = WriteJSON(filepath.Join(dir, "scope-owner.json"), owner); e != nil {
+			return s, e
+		}
+	}
 	if e = os.WriteFile(filepath.Join(OrchestratorConfigDir(), s.Name+".md"), []byte(text), 0600); e != nil {
 		return s, e
 	}
@@ -396,13 +403,16 @@ func applyOrchestrator(text string, dry, notices bool) (OrchestratorSpec, error)
 	st.ConsecutiveFailures = 0
 	st.Attempts = nil
 	st.Digest = "" // A changed spec/brief must get a new model round.
-	for _, f := range []string{"stop", "pause", "wake", "handoff.json", "scope-owner.json"} {
+	for _, f := range []string{"stop", "pause", "wake", "handoff.json"} {
 		_ = os.Remove(filepath.Join(dir, f))
 	}
 	if e = WriteJSON(filepath.Join(dir, "state.json"), st); e != nil {
 		return s, e
 	}
-	if notices {
+	if owner == nil {
+		if e = os.Remove(filepath.Join(dir, "scope-owner.json")); e != nil && !os.IsNotExist(e) {
+			return s, e
+		}
 		// Notices queued before this apply belong to the old lineage.
 		if e = staleOrchestratorNotices(s.Name); e != nil {
 			return s, e
@@ -887,11 +897,47 @@ func orchestratorEnvironment(name string) []string {
 // RegisterOrchestratorScope applies an admission-only copy on a target. The
 // owner remains the sole lifecycle authority; this target cannot run rounds.
 func RegisterOrchestratorScope(text string, owner Host, dry bool) (OrchestratorSpec, error) {
-	s, e := applyOrchestrator(text, dry, false)
-	if e != nil || dry {
-		return s, e
+	if owner.Local || hostlabel.Same(owner.SSH, hostlabel.Self(os.Hostname)) {
+		return OrchestratorSpec{}, fmt.Errorf("scope owner and target must be different hosts")
 	}
-	return s, WriteJSON(filepath.Join(OrchestratorDir(s.Name), "scope-owner.json"), owner)
+	// Only persist the fields needed to contact the owner. Host config can
+	// also carry environment values and paths specific to the applying host.
+	route := Host{SSH: owner.SSH, OS: owner.OS, PathPrefix: owner.PathPrefix}
+	return applyOrchestrator(text, dry, &route)
+}
+
+// RegisterOrchestratorScopeForOwner resolves the owner from target-side config.
+func RegisterOrchestratorScopeForOwner(text, owner string, dry bool) (OrchestratorSpec, error) {
+	spec, err := ParseOrchestrator(text)
+	if err != nil {
+		return spec, err
+	}
+	self := hostlabel.Self(os.Hostname)
+	if hostlabel.Same(owner, self) {
+		return spec, fmt.Errorf("scope owner and target must be different hosts")
+	}
+	if !hostlabel.Same(spec.Host, self) {
+		return spec, fmt.Errorf("scope target %q does not match this host %q", spec.Host, self)
+	}
+	selected, err := workspace.Named(workspaceOfRun(spec.WorkspaceName))
+	if err != nil {
+		return spec, err
+	}
+	for _, host := range append([]string{self, owner}, spec.ManagedRemoteHosts(owner)...) {
+		if err := selected.RequireHost(host); err != nil {
+			return spec, err
+		}
+	}
+	cfg, err := loadTarget("", "")
+	if err != nil {
+		return spec, err
+	}
+	cfg.ScopeWorkspace(selected)
+	route, err := cfg.OrchestratorHost(owner)
+	if err != nil {
+		return spec, err
+	}
+	return RegisterOrchestratorScope(text, route, dry)
 }
 
 // SayOrchestrator appends under the same lock used by checkpoint consumption.

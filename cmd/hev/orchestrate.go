@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -28,7 +31,7 @@ func newOrchestrateCommand() *cobra.Command {
 	var file string
 	var dry bool
 	var scopeOwner, seed string
-	apply := &cobra.Command{Use: "apply -f FILE", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	apply := &cobra.Command{Use: "apply -f FILE", Short: "Apply an orchestrator and register scope on managed hosts", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		b, e := os.ReadFile(file)
 		if e != nil {
 			return e
@@ -48,98 +51,7 @@ func newOrchestrateCommand() *cobra.Command {
 				return err
 			}
 		}
-		var s dispatch.OrchestratorSpec
-		parsed, parseErr := dispatch.ParseOrchestrator(string(b))
-		if parseErr != nil {
-			return parseErr
-		}
-		selected, e := currentWorkspace()
-		if e != nil {
-			return e
-		}
-		targetName := parsed.Host
-		if targetName == "" {
-			targetName = selfHostLabel()
-		}
-		if e = selected.RequireHost(targetName); e != nil {
-			return e
-		}
-		if scopeOwner != "" {
-			if e = selected.RequireHost(scopeOwner); e != nil {
-				return e
-			}
-		}
-		if parsed.WorkspaceName != "" && parsed.WorkspaceName != selected.Name {
-			return fmt.Errorf("workspace boundary: orchestrator spec belongs to %q", parsed.WorkspaceName)
-		}
-		if parsed.WorkspaceName == "" && (selected.Name != workspace.Default || len(selected.Hosts) > 0) {
-			b = []byte(strings.Replace(strings.ReplaceAll(string(b), "\r\n", "\n"), "---\n", "---\nworkspace: "+selected.Name+"\n", 1))
-		}
-		if parsed.Host != "" && !hostlabel.Same(parsed.Host, selfHostLabel()) {
-			if cfg, cfgErr := loadWorkspaceDispatch(dispatch.ConfigPath("")); cfgErr == nil {
-				if target, ok := cfg.Hosts[parsed.Host]; ok && !target.Local {
-					if dry {
-						fmt.Fprintln(cmd.OutOrStdout(), "valid", parsed.Name)
-						return nil
-					}
-					if seed != "" {
-						return fmt.Errorf("--seed-checkpoint is not supported for remote host %s; run on %s directly", parsed.Host, parsed.Host)
-					}
-					req := dispatch.Request{Action: "orchestrator-apply", Name: parsed.Name, Order: string(b)}
-					if scopeOwner != "" {
-						owner, ok := cfg.Hosts[scopeOwner]
-						if !ok || owner.Local {
-							return fmt.Errorf("scope owner must name a configured remote host")
-						}
-						req.ScopeOwner = &owner
-						req.AdmissionOnly = true
-					}
-					if _, e = orchestrateApplyRPC(cmd.Context(), target, req); e != nil {
-						return e
-					}
-					if parsed.AllowNested {
-						fmt.Fprintln(cmd.ErrOrStderr(), "warning: nesting enabled; maximum depth is 2")
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "applied %s on %s\n", parsed.Name, parsed.Host)
-					return nil
-				}
-			}
-		}
-		if scopeOwner != "" {
-			cfg, err := loadWorkspaceDispatch(dispatch.ConfigPath(""))
-			if err != nil {
-				return err
-			}
-			owner, ok := cfg.Hosts[scopeOwner]
-			if !ok || owner.Local {
-				return fmt.Errorf("scope owner must name a configured remote host")
-			}
-			s, e = dispatch.RegisterOrchestratorScope(string(b), owner, dry)
-		} else {
-			s, e = dispatch.ApplyOrchestrator(string(b), dry)
-		}
-		if e != nil {
-			return e
-		}
-		if dry {
-			fmt.Fprintln(cmd.OutOrStdout(), "valid", s.Name)
-			return nil
-		}
-		if s.AllowNested {
-			fmt.Fprintln(cmd.ErrOrStderr(), "warning: nesting enabled; maximum depth is 2")
-		}
-		if seed != "" {
-			if e = dispatch.SeedOrchestratorCheckpoint(s.Name, seed); e != nil {
-				return e
-			}
-		}
-		if scopeOwner == "" {
-			if e = dispatch.LaunchOrchestrator(s.Name); e != nil {
-				return e
-			}
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), "applied", s.Name)
-		return nil
+		return applyOrchestratorFile(cmd, string(b), scopeOwner, seed, dry)
 	}}
 	apply.Flags().StringVarP(&file, "file", "f", "", "Markdown spec")
 	_ = apply.MarkFlagRequired("file")
@@ -408,6 +320,161 @@ func parseSourceEvents(b []byte) ([]dispatch.SourceEvent, error) {
 
 // resolveSpecPaths stores relative templates and pause_file as absolute
 // paths beside the input spec, so the CLI and API resolve the same files.
+func applyOrchestratorFile(cmd *cobra.Command, spec, scopeOwner, seed string, dry bool) error {
+	parsed, err := dispatch.ParseOrchestrator(spec)
+	if err != nil {
+		return err
+	}
+	selected, err := currentWorkspace()
+	if err != nil {
+		return err
+	}
+	if parsed.WorkspaceName != "" && parsed.WorkspaceName != selected.Name {
+		return fmt.Errorf("workspace boundary: orchestrator spec belongs to %q", parsed.WorkspaceName)
+	}
+	if parsed.WorkspaceName == "" && scopedOrchestratorName(selected) != "" {
+		spec = strings.Replace(strings.ReplaceAll(spec, "\r\n", "\n"), "---\n", "---\nworkspace: "+selected.Name+"\n", 1)
+	}
+	self := selfHostLabel()
+	target := parsed.Host
+	if target == "" || hostlabel.Same(target, self) || (scopeOwner != "" && hostlabel.Same(target, scopeOwner)) {
+		target = self
+	}
+	hosts := parsed.ManagedRemoteHosts(target)
+	if scopeOwner != "" {
+		if hostlabel.Same(scopeOwner, target) {
+			return fmt.Errorf("scope owner and target must be different hosts")
+		}
+		if err := selected.RequireHost(scopeOwner); err != nil {
+			return err
+		}
+		hosts = nil
+	}
+
+	routes := append([]string{target}, hosts...)
+	for _, host := range routes {
+		if err := selected.RequireHost(host); err != nil {
+			return err
+		}
+	}
+	var cfg dispatch.Config
+	if !hostlabel.Same(target, self) || len(hosts) > 0 {
+		cfg, err = loadWorkspaceDispatch(dispatch.ConfigPath(""))
+		if err != nil && !(os.IsNotExist(err) && dry && scopeOwner == "" && len(hosts) == 0) {
+			return fmt.Errorf("dispatch configuration for %s: %w", strings.Join(routes, ", "), err)
+		}
+	}
+	for _, host := range routes {
+		if hostlabel.Same(host, self) {
+			continue
+		}
+		if _, err := cfg.OrchestratorHost(host); err != nil {
+			// Keep offline validation for owner-only specs, including
+			// specs generated by swarm before dispatch is configured.
+			if dry && scopeOwner == "" && len(hosts) == 0 {
+				target = self
+				continue
+			}
+			return err
+		}
+	}
+
+	ctx := dispatch.WorkspaceContext(cmd.Context(), selected)
+	applyRemote := func(host string, req dispatch.Request) (dispatch.Response, error) {
+		route, err := cfg.OrchestratorHost(host)
+		if err != nil {
+			return dispatch.Response{}, err
+		}
+		bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return orchestrateApplyRPC(bounded, route, req)
+	}
+	register := func(host, owner string, dry bool) error {
+		copy, err := dispatch.OrchestratorSpecForHost(spec, host)
+		if err != nil {
+			return err
+		}
+		if hostlabel.Same(host, self) {
+			_, err = dispatch.RegisterOrchestratorScopeForOwner(copy, owner, dry)
+		} else if !dry {
+			var response dispatch.Response
+			response, err = applyRemote(host, dispatch.Request{
+				Action: "orchestrator-apply", Name: parsed.Name, Order: copy,
+				AdmissionOnly: true, ScopeOwnerLabel: owner,
+			})
+			if err == nil && !response.ScopeRegistered {
+				err = fmt.Errorf("host did not acknowledge scope registration; check its hev version")
+			}
+		}
+		return err
+	}
+
+	switch {
+	case scopeOwner != "":
+		if err := register(target, scopeOwner, dry); err != nil {
+			return fmt.Errorf("scope on %s (owner %s): %w", target, scopeOwner, err)
+		}
+	case hostlabel.Same(target, self):
+		if _, err := dispatch.ApplyOrchestrator(spec, dry); err != nil {
+			return err
+		}
+	default:
+		if seed != "" {
+			return fmt.Errorf("--seed-checkpoint is not supported for remote host %s; run on %s directly", target, target)
+		}
+		if !dry {
+			if _, err := applyRemote(target, dispatch.Request{Action: "orchestrator-apply", Name: parsed.Name, Order: spec}); err != nil {
+				return err
+			}
+		}
+	}
+
+	out := cmd.OutOrStdout()
+	if dry {
+		fmt.Fprintln(out, "valid", parsed.Name)
+	}
+	if scopeOwner != "" {
+		if !dry {
+			fmt.Fprintf(out, "registered scope on %s (owner %s)\n", target, scopeOwner)
+		}
+		return nil
+	}
+	sort.Strings(hosts)
+	var failures []error
+	for _, host := range hosts {
+		if dry {
+			fmt.Fprintf(out, "would register scope on %s (owner %s)\n", host, target)
+		} else if err := register(host, target, false); err != nil {
+			failures = append(failures, fmt.Errorf("scope registration on %s: %w", host, err))
+		} else {
+			fmt.Fprintf(out, "registered scope on %s (owner %s)\n", host, target)
+		}
+	}
+	if err := errors.Join(failures...); err != nil {
+		return err
+	}
+	if dry {
+		return nil
+	}
+	if parsed.AllowNested {
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning: nesting enabled; maximum depth is 2")
+	}
+	if seed != "" {
+		if err := dispatch.SeedOrchestratorCheckpoint(parsed.Name, seed); err != nil {
+			return err
+		}
+	}
+	if hostlabel.Same(target, self) {
+		if err := dispatch.LaunchOrchestrator(parsed.Name); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "applied", parsed.Name)
+	} else {
+		fmt.Fprintf(out, "applied %s on %s\n", parsed.Name, target)
+	}
+	return nil
+}
+
 func resolveSpecPaths(file string, b []byte) ([]byte, error) {
 	parsed, e := dispatch.ParseOrchestrator(string(b))
 	if e != nil {
