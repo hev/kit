@@ -208,9 +208,7 @@ func TestShortInviteJoinPendingAcceptByName(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if st, e := os.Stat(filepath.Join(home, ".ssh", j.Name)); e != nil || st.Mode().Perm() != 0600 {
-		t.Fatalf("private key %v %v", st, e)
-	}
+	assertPrivateJoinKey(t, filepath.Join(home, ".ssh", j.Name))
 
 	all, _ := h.s.Invitations()
 	if len(all) != 1 || all[0].State(time.Now()) != "pending" || all[0].Pending.Fingerprint != memberFP {

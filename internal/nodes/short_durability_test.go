@@ -20,7 +20,7 @@ import (
 func TestAttemptRecordedBeforeOffer(t *testing.T) {
 	h := newShortHost(t)
 	r := h.invite(t, "alex")
-	before, e := os.Stat(h.s.shortPath(r.Token))
+	before, e := statInvitationFile(h.s.shortPath(r.Token))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -38,7 +38,10 @@ func TestAttemptRecordedBeforeOffer(t *testing.T) {
 	if e = read(h.s.shortPath(r.Token), &rec); e != nil || rec.Failures != 1 {
 		t.Fatalf("failures on disk at offer: %d %v", rec.Failures, e)
 	}
-	after, _ := os.Stat(h.s.shortPath(r.Token))
+	after, e := statInvitationFile(h.s.shortPath(r.Token))
+	if e != nil {
+		t.Fatal(e)
+	}
 	if os.SameFile(before, after) {
 		t.Fatal("record rewritten in place rather than replaced")
 	}
@@ -50,6 +53,17 @@ func TestAttemptRecordedBeforeOffer(t *testing.T) {
 			t.Fatalf("temporary file left: %s", f.Name())
 		}
 	}
+}
+
+// File.Stat captures the file identity from its handle. On Windows, os.Stat
+// may defer the identity lookup until SameFile, after the path was replaced.
+func statInvitationFile(path string) (os.FileInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.Stat()
 }
 
 // TestUnreadableInvitationFailsClosedAlone damages one record: it matches no
