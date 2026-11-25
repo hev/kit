@@ -154,3 +154,49 @@ func TestBatchesRespectLimits(t *testing.T) {
 		t.Fatal("oversized row accepted")
 	}
 }
+
+func TestValidKeyBothSides(t *testing.T) {
+	accepted := []string{
+		"hev_" + strings.Repeat("a1B2", 8),        // 32 base62 chars
+		"hev_" + strings.Repeat("a1B2", 6),        // 24 base62 chars (min)
+		"hvl_" + strings.Repeat("Z9y8", 8),        // 32 base62 chars
+		"hvl_" + strings.Repeat("Z9y8", 6),        // 24 base62 chars (min)
+		"hk_" + strings.Repeat("Ab9_-1", 7) + "A", // 43 b64url chars
+		"hk_secret_do_not_print_7f3a",             // 24 chars
+		"hk_" + strings.Repeat("a1_-", 4),         // 16 chars (min)
+	}
+	for _, k := range accepted {
+		if !kitapi.ValidKey(k) {
+			t.Errorf("ValidKey(%q) = false, want true", k)
+		}
+	}
+
+	rejected := []string{
+		"",
+		"   ",
+		"hev_",
+		"hvl_",
+		"hk_",
+		"hev_short",
+		"hev_" + strings.Repeat("a", 23),
+		"hev_" + strings.Repeat("a1B2", 6) + "_bad",
+		"hev_" + strings.Repeat("a1B2", 6) + "-bad",
+		"hev_" + strings.Repeat("a1B2", 8) + " ",
+		" hev_" + strings.Repeat("a1B2", 8),
+		"hvl_short",
+		"hvl_" + strings.Repeat("Z", 23),
+		"hvl_" + strings.Repeat("Z9y8", 6) + "_x",
+		"hk_short",
+		"hk_word",
+		"hk_" + strings.Repeat("a", 15),
+		"hk_" + strings.Repeat("a", 16) + "!",
+		"sk-or-v1-" + strings.Repeat("deadbeef", 8),
+		"sk-proj-" + strings.Repeat("a1B2", 8),
+		"op://vault/kit/key",
+	}
+	for _, k := range rejected {
+		if kitapi.ValidKey(k) {
+			t.Errorf("ValidKey(%q) = true, want false", k)
+		}
+	}
+}

@@ -101,10 +101,30 @@ type Client struct {
 	Referer, Title string
 }
 
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
 // NewClient returns a client for baseURL with key.
 func NewClient(baseURL, key string) *Client {
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), APIKey: key, HTTP: &http.Client{},
+	key = strings.TrimSpace(key)
+	httpClient := &http.Client{}
+	if isKitScopedKey(key) {
+		httpClient.CheckRedirect = refuseRedirect
+	}
+	return &Client{BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), APIKey: key, HTTP: httpClient,
 		Referer: "https://hevkit.com", Title: "hev foh"}
+}
+
+func (c *Client) isHostedInference() bool {
+	return isHostedInferenceKey(c.APIKey)
+}
+
+func (c *Client) backendName() string {
+	if c.isHostedInference() {
+		return "club kit inference"
+	}
+	return "openrouter"
 }
 
 // ID is ProviderOpenRouter.
@@ -137,12 +157,23 @@ func (c *Client) timeout() time.Duration {
 
 func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
+		if c.isHostedInference() && c.HTTP.CheckRedirect == nil {
+			cp := *c.HTTP
+			cp.CheckRedirect = refuseRedirect
+			return &cp
+		}
 		return c.HTTP
+	}
+	if c.isHostedInference() {
+		return &http.Client{CheckRedirect: refuseRedirect}
 	}
 	return http.DefaultClient
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	if err := validateClientTarget(c.BaseURL, c.APIKey); err != nil {
+		return nil, c.scrub(err)
+	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.BaseURL, "/")+path, body)
 	if err != nil {
 		return nil, c.scrub(err)
@@ -161,19 +192,54 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 
 func (c *Client) scrub(err error) error { return scrubErr(err, c.APIKey) }
 
-// statusError reads a bounded, scrubbed error body.
-func (c *Client) statusError(resp *http.Response) error {
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-	msg := strings.TrimSpace(string(b))
-	var e struct {
+func extractErrorMessage(b []byte) string {
+	var nested struct {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if json.Unmarshal(b, &e) == nil && e.Error.Message != "" {
-		msg = e.Error.Message
+	if json.Unmarshal(b, &nested) == nil && strings.TrimSpace(nested.Error.Message) != "" {
+		return strings.TrimSpace(nested.Error.Message)
 	}
-	return c.scrub(fmt.Errorf("openrouter: %s: %s", resp.Status, msg))
+	var flat struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+		Detail  string `json:"detail"`
+	}
+	if json.Unmarshal(b, &flat) == nil {
+		for _, s := range []string{flat.Message, flat.Error, flat.Detail} {
+			if s = strings.TrimSpace(s); s != "" {
+				return s
+			}
+		}
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// statusError reads a bounded, scrubbed error body.
+func (c *Client) statusError(resp *http.Response) error {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
+	msg := extractErrorMessage(b)
+	if !c.isHostedInference() {
+		return c.scrub(fmt.Errorf("openrouter: %s: %s", resp.Status, msg))
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return c.scrub(fmt.Errorf("club kit inference: %s: redirect refused to protect credentials", resp.Status))
+	}
+	detail := ""
+	if msg != "" {
+		detail = " (" + msg + ")"
+	}
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return c.scrub(fmt.Errorf("club kit inference: %s: invalid, revoked, or expired hev_ key; run `hev login` to sign in again%s", resp.Status, detail))
+	case http.StatusPaymentRequired:
+		return c.scrub(fmt.Errorf("club kit inference: %s: organization inference budget exhausted or billing required%s", resp.Status, detail))
+	case http.StatusForbidden:
+		return c.scrub(fmt.Errorf("club kit inference: %s: organization inference disabled, suspended, or missing inference entitlement%s", resp.Status, detail))
+	default:
+		return c.scrub(fmt.Errorf("club kit inference: %s: %s", resp.Status, msg))
+	}
 }
 
 type streamChunk struct {
@@ -246,7 +312,7 @@ func (c *Client) Stream(ctx context.Context, req ChatRequest, onDelta func(Delta
 			continue
 		}
 		if ch.Error != nil {
-			return res, c.scrub(fmt.Errorf("openrouter: %s", ch.Error.Message))
+			return res, c.scrub(fmt.Errorf("%s: %s", c.backendName(), ch.Error.Message))
 		}
 		if ch.Model != "" {
 			res.Model = ch.Model
@@ -286,12 +352,12 @@ func (c *Client) Stream(ctx context.Context, req ChatRequest, onDelta func(Delta
 	}
 	if err := sc.Err(); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return res, c.scrub(fmt.Errorf("openrouter: stream: %w", ctxErr))
+			return res, c.scrub(fmt.Errorf("%s: stream: %w", c.backendName(), ctxErr))
 		}
-		return res, c.scrub(fmt.Errorf("openrouter: stream: %w", err))
+		return res, c.scrub(fmt.Errorf("%s: stream: %w", c.backendName(), err))
 	}
 	if err := ctx.Err(); err != nil {
-		return res, c.scrub(fmt.Errorf("openrouter: stream: %w", err))
+		return res, c.scrub(fmt.Errorf("%s: stream: %w", c.backendName(), err))
 	}
 	res.Content = text.String()
 	idx := make([]int, 0, len(calls))

@@ -46,7 +46,7 @@ func dispatchRelayCommand() *cobra.Command {
 			}
 			u, err := url.Parse(base)
 			if err != nil || !kitapi.ValidBaseURL(base) || u.Scheme != "https" ||
-				(u.Path != "" && u.Path != "/") || !dispatch.ValidLabel(host) || !selected.AllowsHost(host) || !strings.HasPrefix(key, "hk_") {
+				(u.Path != "" && u.Path != "/") || !dispatch.ValidLabel(host) || !selected.AllowsHost(host) || !kitapi.ValidKey(key) {
 				return errors.New("relay requires an HTTPS origin, a host label and a kit key")
 			}
 			u.Path = hostrelay.Path
@@ -65,8 +65,16 @@ func dispatchRelayCommand() *cobra.Command {
 	return cmd
 }
 
+// relayTransport is overridden in tests to verify HTTPS relay requests without
+// live network I/O. Nil uses http.DefaultTransport.
+var relayTransport http.RoundTripper
+
 func pollRelay(ctx context.Context, endpoint, host, key string) error {
-	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{
+		Timeout:       15 * time.Second,
+		Transport:     relayTransport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 	call := func(method string, body []byte) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
 		if err != nil {

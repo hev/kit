@@ -92,6 +92,8 @@ func Samples() ([]Sample, error) {
 		{"url-credentials", "https://user:synthetic-password@example.invalid/path", "user:synthetic-password"},
 		{"slack-token", "xoxe-" + "1234567890-AbCdEfGhIjKlMnOpQrSt", ""},
 		{"sk-token", "sk-" + "ABCDEFGHIJKLMNOP0123456789", ""},
+		{"layer-key", "hev_" + strings.Repeat("a1B2", 8), ""},
+		{"kit-key", "hk_" + strings.Repeat("Ab9_-1", 7) + "A", ""},
 		{"turbopuffer", "tpuf_" + "AbCdEfGhIjKlMnOpQrStUvWx01234567", ""},
 		{"jwt", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.AbCdEfGhIjKlMnOpQrStUvWxYz", ""},
 		{"high-entropy-assignment", "UNUSUAL_KEY=AbCdEfGhIjKlMnOpQrStUvWx0123456789", "AbCdEfGhIjKlMnOpQrStUvWx0123456789"},
