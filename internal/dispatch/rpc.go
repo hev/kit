@@ -865,7 +865,7 @@ func Handle(q Request) (r Response, handleErr error) {
 		if err != nil {
 			return r, fmt.Errorf("target admission config: %w", err)
 		}
-		if q.APILocalOnly && len(policy.Admission.Repos) == 0 {
+		if q.APILocalOnly && len(policy.Admission.Repos) == 0 && len(policy.Admission.Owners) == 0 {
 			return r, fmt.Errorf("API execution requires an explicit repository allowlist")
 		}
 		cap := policy.Cap

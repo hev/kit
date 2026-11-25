@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// hev admission manages a dispatch host's [admission] repos over the same RPC as
+// hev admission manages a dispatch host's repository admission over the same RPC as
 // hev dispatch. Without --host it acts on this machine as its owner.
 func newAdmissionCommand() *cobra.Command {
 	var configPath, host string
@@ -53,7 +53,7 @@ func newAdmissionCommand() *cobra.Command {
 		fmt.Fprintln(cmd.OutOrStdout(), r.Message)
 		return nil
 	}}
-	remove := &cobra.Command{Use: "remove URL", Aliases: []string{"rm"}, Short: "Stop admitting a repository; its clone and running runs are left alone", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	remove := &cobra.Command{Use: "remove URL", Aliases: []string{"rm"}, Short: "Remove an explicit repository entry; its clone and running runs are left alone", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		r, e := call(cmd, dispatch.Request{Action: "admission-remove", URL: args[0]}, time.Minute)
 		if e != nil {
 			return e
@@ -78,7 +78,7 @@ func newAdmissionCommand() *cobra.Command {
 		}
 		out := cmd.OutOrStdout()
 		if p.AdmitAll {
-			fmt.Fprintln(out, "admission: every repository in the host workspace (no [admission] repos list)")
+			fmt.Fprintln(out, "admission: every repository in the host workspace (no [admission] repos or owners lists)")
 		}
 		for _, repo := range p.Repos {
 			name, by := repo.Name, ""
@@ -89,6 +89,9 @@ func newAdmissionCommand() *cobra.Command {
 				by = fmt.Sprintf(" added-by=%s added=%s", repo.AddedBy, repo.AddedAt.Format(time.RFC3339))
 			}
 			fmt.Fprintf(out, "%s %s%s\n", name, repo.Origin, by)
+		}
+		for _, owner := range p.Owners {
+			fmt.Fprintf(out, "owner %s\n", owner)
 		}
 		for _, prefix := range p.AddFrom {
 			fmt.Fprintf(out, "add-from %s\n", prefix)

@@ -13,7 +13,7 @@ import (
 )
 
 // RemoveRepo drops an origin from [admission] repos. The clone stays in the
-// workspace and running runs continue; only new dispatches are refused.
+// workspace and running runs continue. Owner admission still applies.
 // Removing an origin that is not admitted succeeds without a change.
 func RemoveRepo(raw string, caller RepoCaller) (Response, error) {
 	r := Response{}
@@ -39,15 +39,24 @@ func RemoveRepo(raw string, caller RepoCaller) (Response, error) {
 	if caller.Restricted && !addFromAllows(policy.Admission.AddFrom, a) {
 		return r, fmt.Errorf("permission denied: %s was not added from an allowed organization; ask the owner", a.Clone)
 	}
-	removed, err := unadmitRepo(ConfigPath(""), a, caller.Sender)
+	removed, viaOwner, err := unadmitRepo(ConfigPath(""), a, caller.Sender)
 	if err != nil {
 		return r, err
+	}
+	if len(removed) == 0 && viaOwner {
+		r.Message = fmt.Sprintf("%s is admitted via owners; there is no explicit repos entry to remove", a.Clone)
+		return r, nil
 	}
 	if len(removed) == 0 {
 		r.Message = fmt.Sprintf("%s is not admitted; nothing to remove", a.Clone)
 		return r, nil
 	}
-	r.Message = fmt.Sprintf("removed %s from admission; new dispatches to it are refused", strings.Join(removed, ", "))
+	r.Message = fmt.Sprintf("removed %s from [admission] repos", strings.Join(removed, ", "))
+	if viaOwner {
+		r.Message += "; still admitted via owners"
+	} else {
+		r.Message += "; new dispatches to it are refused"
+	}
 	if a.Name != "" {
 		r.Message += fmt.Sprintf("; the clone %s stays in the workspace and runs already started keep running", a.Name)
 	} else {
@@ -58,31 +67,32 @@ func RemoveRepo(raw string, caller RepoCaller) (Response, error) {
 
 // unadmitRepo removes every [admission] repos entry with a's identity under
 // the dispatch lock and returns the entries it removed.
-func unadmitRepo(cfgPath string, a addURL, sender string) ([]string, error) {
+func unadmitRepo(cfgPath string, a addURL, sender string) ([]string, bool, error) {
 	if err := os.MkdirAll(Root(), 0700); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	unlock, err := lockRoot()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer unlock()
 	text, err := os.ReadFile(cfgPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("this host admits every workspace repository (no [admission] repos list), so %s cannot be removed; ask the owner", a.Clone)
+		return nil, false, fmt.Errorf("this host admits every workspace repository (no [admission] repos or owners lists), so %s cannot be removed; ask the owner", a.Clone)
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var current struct {
 		Admission Admission `toml:"admission"`
 	}
 	if _, err = toml.Decode(string(text), &current); err != nil {
-		return nil, fmt.Errorf("target admission config: %w", err)
+		return nil, false, fmt.Errorf("target admission config: %w", err)
 	}
-	if current.Admission.Repos == nil {
-		return nil, fmt.Errorf("this host admits every workspace repository (no [admission] repos list), so %s cannot be removed; ask the owner", a.Clone)
+	if current.Admission.admitAll() {
+		return nil, false, fmt.Errorf("this host admits every workspace repository (no [admission] repos or owners lists), so %s cannot be removed; ask the owner", a.Clone)
 	}
+	viaOwner := current.Admission.admitsOwner(a.Clone)
 	removed := []string{}
 	for _, existing := range current.Admission.Repos {
 		if repoIdentity(existing) == a.Identity {
@@ -90,21 +100,21 @@ func unadmitRepo(cfgPath string, a addURL, sender string) ([]string, error) {
 		}
 	}
 	if len(removed) == 0 {
-		return nil, nil
+		return nil, viaOwner, nil
 	}
 	edited, err := removeAdmissionRepos(string(text), a.Identity)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err = writeFileAtomic(cfgPath, []byte(edited)); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, origin := range removed {
 		if err = appendRepoLedger(cfgPath, repoLedgerEntry{Action: "remove", Origin: origin, Name: a.Name, RemovedBy: sender, RemovedAt: time.Now().UTC()}); err != nil {
-			return removed, fmt.Errorf("removed %s but could not record attribution: %w", origin, err)
+			return removed, viaOwner, fmt.Errorf("removed %s but could not record attribution: %w", origin, err)
 		}
 	}
-	return removed, nil
+	return removed, viaOwner, nil
 }
 
 // removeAdmissionRepos deletes the [admission] repos elements whose identity
