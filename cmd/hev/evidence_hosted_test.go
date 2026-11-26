@@ -190,3 +190,30 @@ func TestHostedEvidenceStagingKeepsKitBearerOffS3(t *testing.T) {
 		t.Fatalf("staged upload failed: %v", err)
 	}
 }
+
+func TestHostedEvidenceAcceptsOnlyWellFormedMachineKeys(t *testing.T) {
+	evidenceHome(t)
+	t.Setenv("HEV_KIT_SERVICE", "https://kit.hevmind.com")
+	for _, tc := range []struct {
+		name, key string
+		valid     bool
+	}{
+		{"unified", "hev_" + strings.Repeat("a", 32), true},
+		{"legacy kit", "hk_" + strings.Repeat("a", 43), true},
+		{"short unified", "hev_short", false},
+		{"malformed unified", "hev_!" + strings.Repeat("a", 31), false},
+		{"foreign", "sk-" + strings.Repeat("a", 32), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HEV_API_KEY", tc.key)
+			client, err := hostedEvidence(context.Background())
+			if tc.valid {
+				if err != nil || client == nil || client.key != tc.key {
+					t.Fatal("valid machine key was not accepted")
+				}
+			} else if client != nil || err == nil || err.Error() != "invalid hosted evidence credential" {
+				t.Fatal("expected a credential rejection without exposing the key")
+			}
+		})
+	}
+}
