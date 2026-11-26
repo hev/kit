@@ -19,6 +19,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/pkg/kitapi"
 )
 
 const fakeKitKey = "hk_secret_do_not_print_7f3a"
@@ -26,18 +27,19 @@ const fakeKitKey = "hk_secret_do_not_print_7f3a"
 // fakeKit is a kit sign-in service and API. The browser half is played by
 // browse, which follows the login URL the way a signed-in user would.
 type fakeKit struct {
-	t         *testing.T
-	srv       *httptest.Server
-	mu        sync.Mutex
-	challenge string
-	exchanges int
-	whoamis   int
-	verifier  string
-	logouts   []string
-	whoamiOK  bool
-	logoutErr int
-	invite    string
-	mintKey   string
+	t              *testing.T
+	srv            *httptest.Server
+	mu             sync.Mutex
+	challenge      string
+	exchanges      int
+	whoamis        int
+	verifier       string
+	logouts        []string
+	whoamiOK       bool
+	logoutErr      int
+	invite         string
+	mintKey        string
+	whoamiMetadata map[string]any
 }
 
 func newFakeKit(t *testing.T) *fakeKit {
@@ -66,13 +68,18 @@ func newFakeKit(t *testing.T) *fakeKit {
 		f.whoamis++
 		ok := f.whoamiOK
 		wantKey := f.mintKey
+		metadata := f.whoamiMetadata
 		f.mu.Unlock()
 		if !ok || r.Header.Get("Authorization") != "Bearer "+wantKey {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"key_id": "key_42", "hostname": "box",
-			"team": map[string]string{"id": "team_1", "slug": "acme"}, "author": map[string]string{"id": "user_9", "name": "Ada"}})
+		who := map[string]any{"key_id": "key_42", "hostname": "box",
+			"team": map[string]string{"id": "team_1", "slug": "acme"}, "author": map[string]string{"id": "user_9", "name": "Ada"}}
+		for field, value := range metadata {
+			who[field] = value
+		}
+		json.NewEncoder(w).Encode(who)
 	})
 	mux.HandleFunc("POST /cli/logout", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -188,7 +195,7 @@ func TestKitLoginStatusLogout(t *testing.T) {
 	if exchanges != 1 || verifier == "" {
 		t.Fatal("PKCE verifier not sent")
 	}
-	if strings.Contains(out.String(), fakeKitKey) || strings.Contains(out.String(), "hk_") {
+	if strings.Contains(out.String(), fakeKitKey) || !strings.Contains(out.String(), "Key: box (hk_••••7f3a)\n") || strings.Contains(out.String(), "secret_do_not_print") || strings.Contains(out.String(), "key_42") {
 		t.Fatalf("login printed the key: %s", out.String())
 	}
 	if !strings.Contains(out.String(), "queue rows for the hevmind.com service API") {
@@ -217,7 +224,7 @@ func TestKitLoginStatusLogout(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := runLoginStatus(context.Background(), &out); err != nil || !strings.Contains(out.String(), "acme as Ada") || strings.Contains(out.String(), fakeKitKey) {
+	if err := runLoginStatus(context.Background(), &out); err != nil || !strings.Contains(out.String(), "acme as Ada") || !strings.Contains(out.String(), "Key: box (hk_••••7f3a)\n") || strings.Contains(out.String(), "key_42") || strings.Contains(out.String(), "Scope:") || strings.Contains(out.String(), "Expires:") || strings.Contains(out.String(), fakeKitKey) {
 		t.Fatalf("status: %v %q", err, out.String())
 	}
 	f.set(func() { f.whoamiOK = false })
@@ -379,7 +386,14 @@ func TestKitLoginMintedHevKeyParityAndRefusals(t *testing.T) {
 	t.Run("minted-hev-key-roundtrip", func(t *testing.T) {
 		path := kitTestHome(t)
 		f := newFakeKit(t)
-		f.set(func() { f.mintKey = hevKey })
+		f.set(func() {
+			f.mintKey = hevKey
+			f.whoamiMetadata = map[string]any{
+				"key_name": "Build machine", "key_mask": "hev_••••a1B2",
+				"scopes": []string{"read", "write"}, "expires_at": "2027-01-01T00:00:00Z",
+			}
+		})
+		const keyDetails = "Key: Build machine (hev_••••a1B2)\nScope: read, write\nExpires: 2027-01-01T00:00:00Z\n"
 		old := openBrowser
 		t.Cleanup(func() { openBrowser = old })
 		openBrowser = f.browse(func(sent string) string { return sent })
@@ -388,7 +402,7 @@ func TestKitLoginMintedHevKeyParityAndRefusals(t *testing.T) {
 		if err := runLogin(context.Background(), &out, f.srv.URL, ""); err != nil {
 			t.Fatalf("runLogin with minted hev_ key: %v", err)
 		}
-		if strings.Contains(out.String(), hevKey) || strings.Contains(out.String(), hevPayload) || strings.Contains(out.String(), "hev_") {
+		if strings.Contains(out.String(), hevKey) || strings.Contains(out.String(), hevPayload) || strings.Contains(out.String(), "key_42") || !strings.Contains(out.String(), keyDetails) {
 			t.Fatalf("login output leaked hev_ material: %q", out.String())
 		}
 		doc := readTOML(t, path)
@@ -401,7 +415,7 @@ func TestKitLoginMintedHevKeyParityAndRefusals(t *testing.T) {
 		if err := runLoginStatus(context.Background(), &out); err != nil {
 			t.Fatalf("runLoginStatus: %v", err)
 		}
-		if !strings.Contains(out.String(), "acme as Ada") || strings.Contains(out.String(), hevKey) || strings.Contains(out.String(), hevPayload) || strings.Contains(out.String(), "hev_") {
+		if !strings.Contains(out.String(), "acme as Ada") || strings.Contains(out.String(), hevKey) || strings.Contains(out.String(), hevPayload) || strings.Contains(out.String(), "key_42") || !strings.Contains(out.String(), keyDetails) {
 			t.Fatalf("login status output = %q", out.String())
 		}
 
@@ -592,5 +606,21 @@ func TestLoginRefreshesOnlyInstalledCaptureService(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A service may supply only part of the optional metadata. An unsafe mask
+// falls back to the local mask and other fields still go through redaction.
+func TestWriteLoginKeyPartialMetadata(t *testing.T) {
+	var out bytes.Buffer
+	who := kitapi.Whoami{KeyName: fakeKitKey, KeyMask: fakeKitKey}
+	writeLoginKey(&out, who, "local-box", fakeKitKey)
+	if got := out.String(); got != "Key: [redacted] (hk_••••7f3a)\n" {
+		t.Fatal("expected a redacted name and local mask")
+	}
+	out.Reset()
+	writeLoginKey(&out, kitapi.Whoami{KeyMask: "hev_••••a1B2"}, "local-box", fakeKitKey)
+	if got := out.String(); got != "Key: local-box (hev_••••a1B2)\n" {
+		t.Fatal("expected the local hostname and safe service mask")
 	}
 }

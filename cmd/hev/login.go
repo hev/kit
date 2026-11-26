@@ -336,7 +336,9 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 	if err = daemon.WriteKitConfig(doc, kit); err != nil {
 		return err
 	}
-	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to the hevmind.com service team %s as %s (key %s). The previous archive target is saved for hev logout.\n", x.Team.Slug, x.Author.Name, x.KeyID), x.Key))
+	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to the hevmind.com service team %s as %s\n", x.Team.Slug, x.Author.Name), x.Key))
+	writeLoginKey(out, who, hostname, x.Key)
+	fmt.Fprintln(out, "The previous archive target is saved for hev logout.")
 	unlock()
 	if refresh == nil {
 		fmt.Fprintln(out, "Restart capture with hev up or hev d to queue rows for the hevmind.com service API.")
@@ -413,6 +415,31 @@ func signedInKit() (*daemon.KitConfig, error) {
 	return kit, nil
 }
 
+var displayedKeyMask = regexp.MustCompile(`^(?:hev_••••[A-Za-z0-9]{4}|hvl_••••[A-Za-z0-9]{4}|hk_••••[A-Za-z0-9_-]{4}|••••)$`)
+
+func writeLoginKey(out io.Writer, who kitapi.Whoami, hostname, key string) {
+	name := strings.TrimSpace(who.KeyName)
+	if name == "" {
+		name = strings.TrimSpace(who.Hostname)
+	}
+	if name == "" {
+		name = hostname
+	}
+	mask := who.KeyMask
+	if !displayedKeyMask.MatchString(mask) {
+		mask = kitapi.MaskKey(key)
+	}
+	var display strings.Builder
+	fmt.Fprintf(&display, "Key: %s (%s)\n", name, mask)
+	if scope := strings.Join(who.Scopes, ", "); scope != "" {
+		fmt.Fprintf(&display, "Scope: %s\n", scope)
+	}
+	if who.ExpiresAt != "" {
+		fmt.Fprintf(&display, "Expires: %s\n", who.ExpiresAt)
+	}
+	fmt.Fprint(out, redact.HideKitKeys(display.String(), key))
+}
+
 func runLoginStatus(ctx context.Context, out io.Writer) error {
 	kit, err := signedInKit()
 	if err != nil {
@@ -424,7 +451,7 @@ func runLoginStatus(ctx context.Context, out io.Writer) error {
 	var who kitapi.Whoami
 	err = kitRequest(ctx, "GET", strings.TrimRight(kit.API, "/")+"/v1/whoami", kit.Key, nil, &who)
 	if isUnauthorized(err) {
-		return fmt.Errorf("hevmind.com service rejected this machine's key %s (revoked or expired); run hev logout --local, then hev login", redact.HideKitKeys(kit.KeyID, kit.Key))
+		return fmt.Errorf("hevmind.com service rejected this machine's key (revoked or expired); run hev logout --local, then hev login")
 	}
 	if err != nil {
 		return err
@@ -446,7 +473,10 @@ func runLoginStatus(ctx context.Context, out io.Writer) error {
 	if team == "" {
 		team = who.Team.ID
 	}
-	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to the hevmind.com service team %s as %s\nMachine: %s\nKey: %s\nAPI: %s\n", team, name, who.Hostname, who.KeyID, kit.API), kit.Key))
+	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to the hevmind.com service team %s as %s\nMachine: %s\n", team, name, who.Hostname), kit.Key))
+	hostname, _ := os.Hostname()
+	writeLoginKey(out, who, hostname, kit.Key)
+	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("API: %s\n", kit.API), kit.Key))
 	if o, err := kitcapture.OpenOutbox(daemon.KitOutboxDir(), kit.TeamID); err == nil {
 		fmt.Fprintln(out, kitcapture.FormatProgress(o.Progress()))
 	}
