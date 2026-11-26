@@ -308,11 +308,23 @@ func errorMessage(raw []byte, key string) string {
 	return s
 }
 
+// MaskKey returns the public prefix and last four characters of a valid key.
+func MaskKey(key string) string {
+	if !ValidKey(key) {
+		return "••••"
+	}
+	return key[:strings.IndexByte(key, '_')+1] + "••••" + key[len(key)-4:]
+}
+
 // Whoami is what /v1/whoami says about the key.
 type Whoami struct {
-	WorkWorkspaceID string `json:"work_workspace_id"`
-	KeyID           string `json:"key_id"`
-	Hostname        string `json:"hostname"`
+	WorkWorkspaceID string   `json:"work_workspace_id"`
+	KeyID           string   `json:"key_id"`
+	Hostname        string   `json:"hostname"`
+	KeyName         string   `json:"key_name"`
+	KeyMask         string   `json:"key_mask"`
+	Scopes          []string `json:"scopes"`
+	ExpiresAt       string   `json:"expires_at"`
 	Team            struct {
 		ID          string `json:"id"`
 		Slug        string `json:"slug"`

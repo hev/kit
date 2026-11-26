@@ -200,3 +200,21 @@ func TestValidKeyBothSides(t *testing.T) {
 		}
 	}
 }
+
+func TestMaskKeyOnlyDisplaysValidPrefixAndTail(t *testing.T) {
+	for _, tc := range []struct{ name, token, want string }{
+		{"unified", "hev_" + strings.Repeat("x", 28) + "a1B2", "hev_••••a1B2"},
+		{"legacy kit", "hk_" + strings.Repeat("x", 39) + "_-ab", "hk_••••_-ab"},
+		{"legacy layer", "hvl_" + strings.Repeat("x", 28) + "a1B2", "hvl_••••a1B2"},
+		{"short", "hev_a1B2", "••••"},
+		{"malformed", "hev_!" + strings.Repeat("x", 31), "••••"},
+		{"foreign", "sk-" + strings.Repeat("x", 32), "••••"},
+		{"empty", "", "••••"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if kitapi.MaskKey(tc.token) != tc.want {
+				t.Fatal("unexpected display mask")
+			}
+		})
+	}
+}

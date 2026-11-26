@@ -26,6 +26,7 @@ import (
 	"github.com/hev/kit/internal/layerenv"
 	"github.com/hev/kit/internal/redact"
 	"github.com/hev/kit/internal/storagemode"
+	"github.com/hev/kit/pkg/kitapi"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -73,7 +74,8 @@ func hostedEvidence(ctx context.Context) (*remoteEvidence, error) {
 		}
 		return nil, nil
 	}
-	if !hostedEvidenceKey.MatchString(strings.TrimSpace(*key)) {
+	token := strings.TrimSpace(*key)
+	if !hostedEvidenceKey.MatchString(token) && !(strings.HasPrefix(token, "hev_") && kitapi.ValidKey(token)) {
 		return nil, errors.New("invalid hosted evidence credential")
 	}
 	base = defaultString(base, "https://kit.hevmind.com")
@@ -83,7 +85,6 @@ func hostedEvidence(ctx context.Context) (*remoteEvidence, error) {
 		return nil, errors.New("invalid hosted evidence API origin")
 	}
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	token := strings.TrimSpace(*key)
 	salt := sha256.Sum256([]byte(token))
 	scrubber, err := redact.New(salt[:])
 	if err != nil {
