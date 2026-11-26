@@ -182,6 +182,10 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 
 // DoRaw is Do with the body already encoded and the answer returned as is.
 func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Values, payload []byte) ([]byte, error) {
+	return c.doRaw(ctx, method, path, query, payload, nil)
+}
+
+func (c *Client) doRaw(ctx context.Context, method, path string, query url.Values, payload []byte, progress *SyncProgress) ([]byte, error) {
 	if c.API == "" || c.key == "" {
 		return nil, errors.New("hevmind.com service API: not signed in (no api or key)")
 	}
@@ -205,7 +209,7 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Value
 		maxWait = 30 * time.Second
 	}
 	for attempt := 0; ; attempt++ {
-		raw, err := c.once(ctx, method, u, payload)
+		raw, err := c.once(ctx, method, u, payload, progress)
 		if err == nil || attempt >= retries || !Retryable(err) {
 			return raw, err
 		}
@@ -227,7 +231,7 @@ func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Value
 	}
 }
 
-func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]byte, error) {
+func (c *Client) once(ctx context.Context, method, u string, payload []byte, progress *SyncProgress) ([]byte, error) {
 	var body io.Reader
 	if payload != nil {
 		body = bytes.NewReader(payload)
@@ -238,6 +242,9 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 	}
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	req.Header.Set("Accept", "application/json")
+	if progress != nil {
+		progress.setHeaders(req.Header)
+	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -259,7 +266,11 @@ func (c *Client) once(ctx context.Context, method, u string, payload []byte) ([]
 		return nil, errors.New(redact.HideKitKeys(err.Error(), c.key))
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	limit := int64(64 << 20)
+	if progress != nil {
+		limit = 1 << 20
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +339,9 @@ type batch[T any] struct {
 
 type accepted struct {
 	Accepted int `json:"accepted"`
+	Rejected []struct {
+		Index int `json:"index"`
+	} `json:"rejected"`
 }
 
 // PostSessions sends session rows, split into contract-sized batches, and

@@ -241,6 +241,11 @@ func summarizeSource(src trace.Source, cl Archive, batchRows int, repoURL func(s
 
 // Run indexes a source into a namespace.
 func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) {
+	return runUnits(src, cl, st, opt, nil, nil)
+}
+
+// sourceAt supplies the native reader and scoped signatures for a merged scan.
+func runUnits(src trace.Source, cl Archive, st *State, opt Options, units []trace.Unit, sourceAt func(int) (trace.Source, *State)) (*Report, error) {
 	scrubber, err := redact.Load()
 	if err != nil {
 		return nil, fmt.Errorf("load redaction: %w", err)
@@ -262,11 +267,13 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 		opt.RepoURL = cachedRepoURL()
 	}
 
-	units, err := src.Units()
-	if err != nil {
-		return nil, fmt.Errorf("enumerate units: %w", err)
+	if sourceAt == nil {
+		units, err = src.Units()
+		if err != nil {
+			return nil, fmt.Errorf("enumerate units: %w", err)
+		}
+		sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
 	}
-	sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
 	if opt.Select != nil {
 		units = selectUnits(units, opt.Select)
 	}
@@ -284,6 +291,10 @@ func run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 		}
 		if opt.Progress != nil {
 			opt.Progress(i+1, len(units), u.Key)
+		}
+		src, st := src, st
+		if sourceAt != nil {
+			src, st = sourceAt(i)
 		}
 		if !opt.Force && u.Signature != "" && st.Units[u.Key] == u.Signature {
 			rep.UnitsSkipped++

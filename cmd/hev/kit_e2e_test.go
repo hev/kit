@@ -22,8 +22,10 @@ import (
 	boardstore "github.com/hev/kit/internal/board/store"
 	"github.com/hev/kit/internal/daemon"
 	"github.com/hev/kit/internal/filearchive"
+	"github.com/hev/kit/internal/kitcapture"
 	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/layerenv"
+	"github.com/hev/kit/internal/platformops"
 	"github.com/hev/kit/internal/trace"
 	"github.com/hev/kit/pkg/kitapi"
 	"github.com/hev/kit/pkg/kitapi/kitapitest"
@@ -344,7 +346,7 @@ func TestKitLoginImportsHistory(t *testing.T) {
 	if err := runKitImport(ctx, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "sent 3/3 batches") || !strings.Contains(out.String(), "1 threads and 2 posts") {
+	if !strings.Contains(out.String(), "Syncing: 3 / 3 batches (100%)") || !strings.Contains(out.String(), "1 threads and 2 posts") {
 		t.Fatalf("progress: %s", out.String())
 	}
 	rows, _ := api.Traces.ListSessionRows(-1, nil)
@@ -379,6 +381,52 @@ func TestKitLoginImportsHistory(t *testing.T) {
 	posts, _ = api.Board.Posts(ctx, threads[0].ID)
 	if len(threads) != 1 || len(posts) != 3 {
 		t.Fatalf("after resume: %d threads, %d posts", len(threads), len(posts))
+	}
+}
+
+func TestKitLoginImportReportsProgressWhileDaemonHoldsDrainLock(t *testing.T) {
+	home := kitE2EHome(t)
+	api := kitapitest.New(t, fakeKitKey, e2eIdentity)
+	svc := newKitService(t, api)
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	if err := runLogin(ctx, &out, svc.srv.URL, ""); err != nil {
+		t.Fatal(err)
+	}
+	o, err := kitcapture.OpenOutbox(daemon.KitOutboxDir(), e2eIdentity.TeamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Enqueue(kitcapture.KindSessions, []byte(`{"rows":[{"id":"on-disk","session_id":"on-disk"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := platformops.LockPath(filepath.Join(o.Dir(), ".drain.lock"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	finishScan := o.BeginScan()
+	defer finishScan()
+	out.Reset()
+	if err := runKitImport(ctx, &out); err != nil {
+		t.Fatal(err)
+	}
+	if text := out.String(); !strings.Contains(text, "daemon is draining") ||
+		!strings.Contains(text, "Syncing: 0 / 1 batches (0%)") || !strings.Contains(text, "scanning=true, 1 sessions pending") ||
+		strings.Contains(text, home) || strings.Contains(text, fakeKitKey) {
+		t.Fatal("import did not present safe, live outbox progress")
+	}
+	finishScan()
+	out.Reset()
+	if err := runLoginStatus(ctx, &out); err != nil {
+		t.Fatal(err)
+	}
+	if text := out.String(); !strings.Contains(text, "Syncing: 0 / 1 batches (0%)") || !strings.Contains(text, "scanning=false") || strings.Contains(text, home) {
+		t.Fatal("login status did not present safe, live outbox progress")
+	}
+	if api.Requests("POST /v1/traces/sessions") != 0 {
+		t.Fatal("import sent traces concurrently with the drain owner")
 	}
 }
 

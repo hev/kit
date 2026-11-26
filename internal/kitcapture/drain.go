@@ -71,14 +71,18 @@ func (d *Drainer) Run(ctx context.Context) {
 			return
 		}
 		d.mu.Lock()
-		d.last, d.err = res, err
+		if !errors.Is(err, ErrDrainBusy) {
+			d.last, d.err = res, err
+		}
 		d.mu.Unlock()
 		switch {
 		case err == nil:
 			if failures > 0 && d.Logger != nil {
 				d.Logger.Info("hevmind.com service API reachable again; outbox drained", "sent", res.Sent)
 			}
-			failures, wait = 0, interval
+			failures, wait = 0, min(interval, time.Second)
+		case errors.Is(err, ErrDrainBusy):
+			failures, wait = 0, min(interval, time.Second)
 		case kitapi.ReadOnly(err):
 			// The team is read-only for billing. Keep everything queued and
 			// check back now and then; uploads resume once it pays.
@@ -101,7 +105,7 @@ func (d *Drainer) Run(ctx context.Context) {
 			wait = maxBackoff
 		default:
 			failures++
-			wait = min(maxBackoff, interval<<min(failures, 8))
+			wait = min(maxBackoff, time.Second<<min(failures-1, 8))
 			if d.Logger != nil {
 				d.Logger.Warn("hevmind.com service API unavailable; rows stay in the outbox", "err", err, "pending", res.Pending, "retry_in", wait)
 			}

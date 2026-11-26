@@ -92,6 +92,35 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
 
   # ───────────────────────────── Traces ─────────────────────────────
+  /v1/sync/status:
+    post:
+      tags: [Traces]
+      operationId: reportTraceSyncStatus
+      summary: Report an initial scan or an empty trace outbox
+      description: Optional endpoint. Clients keep ingesting traces if the heartbeat fails or the server does not implement it.
+      parameters:
+        - $ref: '#/components/parameters/KitSyncScanning'
+        - $ref: '#/components/parameters/KitSyncPendingBatches'
+        - $ref: '#/components/parameters/KitSyncTotalBatches'
+        - $ref: '#/components/parameters/KitSyncPendingSessions'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scanning, pending_batches, total_batches, pending_sessions]
+              properties:
+                scanning: {type: boolean}
+                pending_batches: {type: integer, minimum: 0}
+                total_batches: {type: integer, minimum: 0}
+                pending_sessions: {type: integer, minimum: 0}
+      responses:
+        '2XX':
+          description: Progress received.
+        '404':
+          description: Optional heartbeat endpoint unavailable.
+
   /v1/traces/sessions:
     post:
       tags: [Traces]
@@ -104,6 +133,10 @@ paths:
         `SessionOutcomes` fields filled.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/KitSyncScanning'
+        - $ref: '#/components/parameters/KitSyncPendingBatches'
+        - $ref: '#/components/parameters/KitSyncTotalBatches'
+        - $ref: '#/components/parameters/KitSyncPendingSessions'
       requestBody:
         required: true
         content:
@@ -208,6 +241,10 @@ paths:
       description: Upserts `BlockRow`s by `id` into the session's block set (`<namespace>-blocks`).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/KitSyncScanning'
+        - $ref: '#/components/parameters/KitSyncPendingBatches'
+        - $ref: '#/components/parameters/KitSyncTotalBatches'
+        - $ref: '#/components/parameters/KitSyncPendingSessions'
       requestBody:
         required: true
         content:
@@ -243,6 +280,10 @@ paths:
         clients never send vectors.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/KitSyncScanning'
+        - $ref: '#/components/parameters/KitSyncPendingBatches'
+        - $ref: '#/components/parameters/KitSyncTotalBatches'
+        - $ref: '#/components/parameters/KitSyncPendingSessions'
       requestBody:
         required: true
         content:
@@ -1615,6 +1656,26 @@ components:
       description: A kit API key (`HEV_API_KEY`, or `[kit] key` from `hev login`). Never sent to a redirect target.
 
   parameters:
+    KitSyncScanning:
+      name: X-Kit-Sync-Scanning
+      in: header
+      description: Whether this machine is enumerating or capturing its initial trace history.
+      schema: {type: boolean}
+    KitSyncPendingBatches:
+      name: X-Kit-Sync-Pending-Batches
+      in: header
+      description: Source outbox files still pending, including files in flight.
+      schema: {type: integer, minimum: 0}
+    KitSyncTotalBatches:
+      name: X-Kit-Sync-Total-Batches
+      in: header
+      description: Source outbox files discovered in the active sync, including those already processed.
+      schema: {type: integer, minimum: 0}
+    KitSyncPendingSessions:
+      name: X-Kit-Sync-Pending-Sessions
+      in: header
+      description: Distinct sessions represented by pending source files.
+      schema: {type: integer, minimum: 0}
     Cursor:
       name: cursor
       in: query

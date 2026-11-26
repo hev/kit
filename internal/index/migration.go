@@ -61,13 +61,7 @@ func Run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 			if err != nil {
 				return nil, err
 			}
-			for _, unit := range units {
-				if _, exists := scoped.Units[unit.Key]; !exists {
-					if sig, exists := st.Units[unit.Key]; exists {
-						scoped.Units[unit.Key] = sig
-					}
-				}
-			}
+			inheritLegacySignatures(units, scoped, st)
 		}
 		rep, err := run(src, cl, scoped, opt)
 		mergeScopedState(st, scoped, cl, root)
@@ -92,6 +86,16 @@ func Run(src trace.Source, cl Archive, st *State, opt Options) (*Report, error) 
 	rep, err = run(src, cl, scoped, opt)
 	mergeScopedState(st, scoped, cl, root)
 	return rep, err
+}
+
+func inheritLegacySignatures(units []trace.Unit, scoped, legacy *State) {
+	for _, unit := range units {
+		if _, exists := scoped.Units[unit.Key]; !exists {
+			if sig, exists := legacy.Units[unit.Key]; exists {
+				scoped.Units[unit.Key] = sig
+			}
+		}
+	}
 }
 
 func Summarize(src trace.Source, cl Archive, batchRows int, repoURL func(string) string, sessionIDs map[string]bool, summarize func(trace.SessionRow) (string, error), progress func(done, total int, unit string), allowSourceLoss bool) (*Report, error) {

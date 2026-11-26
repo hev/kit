@@ -448,8 +448,7 @@ func runLoginStatus(ctx context.Context, out io.Writer) error {
 	}
 	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to the hevmind.com service team %s as %s\nMachine: %s\nKey: %s\nAPI: %s\n", team, name, who.Hostname, who.KeyID, kit.API), kit.Key))
 	if o, err := kitcapture.OpenOutbox(daemon.KitOutboxDir(), kit.TeamID); err == nil {
-		pending, _ := o.Pending()
-		fmt.Fprintf(out, "Outbox: %d batches queued in %s\n", len(pending), o.Dir())
+		fmt.Fprintln(out, kitcapture.FormatProgress(o.Progress()))
 	}
 	// hevd's last word on hosted capture: a 402 (team read-only for
 	// billing), an outage or a full outbox shows here.

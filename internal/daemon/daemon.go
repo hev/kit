@@ -279,7 +279,7 @@ func kitNotice(d *kitcapture.Drainer, o *kitcapture.Outbox) string {
 	case kitapi.ReadOnly(err):
 		notes = append(notes, kitcapture.BillingNotice(len(pending)))
 	case errors.Is(err, kitcapture.ErrTeamMismatch), errors.Is(err, kitcapture.ErrNoTeam):
-		notes = append(notes, fmt.Sprintf("kit outbox not sent (%v): %d batches queued in %s", err, len(pending), o.Dir()))
+		notes = append(notes, fmt.Sprintf("kit outbox not sent (%v): %d batches queued", err, len(pending)))
 	case err != nil:
 		notes = append(notes, fmt.Sprintf("hevmind.com service API unavailable (%v): %d batches queued in %s", err, len(pending), o.Dir()))
 	case len(pending) > 0:
@@ -291,7 +291,7 @@ func kitNotice(d *kitcapture.Drainer, o *kitcapture.Outbox) string {
 		notes = append(notes, fmt.Sprintf("outbox full: %d batches not queued (last %s); their rows are in the local archive only", n, at.UTC().Format(time.RFC3339)))
 	}
 	if unbound, _ := o.Unbound(); len(unbound) > 0 {
-		notes = append(notes, fmt.Sprintf("%d batches queued before outboxes were bound to a team are not sent (no record of their team); they are in the local archive, and the files can be deleted from %s", len(unbound), filepath.Dir(filepath.Dir(o.Dir()))))
+		notes = append(notes, fmt.Sprintf("%d batches queued before outboxes were bound to a team are not sent (no record of their team); they are in the local archive", len(unbound)))
 	}
 	return strings.Join(notes, "; ")
 }
@@ -344,17 +344,23 @@ func indexCapture(client index.Archive, state *index.State, logger *slog.Logger,
 		s.UnitsIndexed += rep.UnitsIndexed
 		failures += len(rep.Errors)
 	}
-	for _, src := range sources {
-		if opts.Context != nil && opts.Context.Err() != nil {
-			break
-		}
-		rep, err := index.Run(src, client, state, opts)
+	record := func(rep *index.Report, err error) {
 		if err != nil {
 			failures++
 		}
 		add(rep)
 		if rep != nil && rep.MigrationPending {
 			s.MigrationPending = true
+		}
+	}
+	if _, hosted := client.(*kitcapture.Archive); hosted {
+		record(index.RunNewest(sources, client, state, opts))
+	} else {
+		for _, src := range sources {
+			if opts.Context != nil && opts.Context.Err() != nil {
+				break
+			}
+			record(index.Run(src, client, state, opts))
 		}
 	}
 	if s.MigrationPending {

@@ -13,12 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -35,7 +33,7 @@ const (
 )
 
 // Outbox is a directory of batches waiting for the kit API, one file per
-// batch, posted oldest first. Any number of processes may enqueue; one
+// batch. Any number of processes may enqueue; one
 // drains at a time (a lock file guards it).
 //
 // An outbox belongs to one team: its batches live under teams/<team id>/ of
@@ -49,6 +47,11 @@ type Outbox struct {
 	dir  string
 	team string
 	seq  atomic.Int64
+
+	// Notify is set before capture starts and called after a durable enqueue.
+	Notify   func()
+	scanning atomic.Bool
+	announce atomic.Bool
 
 	// MaxBatches and MaxBytes bound what the outbox holds, queued and
 	// failed/ together (defaults DefaultMaxBatches, DefaultMaxBytes). At
@@ -204,8 +207,8 @@ func (o *Outbox) reserve(n int64) error {
 		total := o.refused.Add(1)
 		o.refusedAt.Store(time.Now().UnixNano())
 		o.logger().Error("kit outbox full: a new batch was not queued for the kit API; its rows are kept in the local archive only",
-			"outbox", o.dir, "batches", u.batches, "bytes", u.bytes, "max_batches", maxN, "max_bytes", maxB, "refused_total", total)
-		return fmt.Errorf("%w (%d batches, %d bytes; limit %d batches, %d bytes) at %s", ErrFull, u.batches, u.bytes, maxN, maxB, o.dir)
+			"batches", u.batches, "bytes", u.bytes, "max_batches", maxN, "max_bytes", maxB, "refused_total", total)
+		return fmt.Errorf("%w (%d batches, %d bytes; limit %d batches, %d bytes)", ErrFull, u.batches, u.bytes, maxN, maxB)
 	}
 	return nil
 }
@@ -237,7 +240,7 @@ func (o *Outbox) pruneFailed(u *usage, maxN int, maxB, n int64) {
 		removed++
 	}
 	if removed > 0 {
-		o.logger().Warn("kit outbox at its bound: removed the oldest refused batches from failed/", "removed", removed, "outbox", o.dir)
+		o.logger().Warn("kit outbox at its bound: removed the oldest refused batches from failed/", "removed", removed)
 	}
 }
 
@@ -279,7 +282,13 @@ func (o *Outbox) Enqueue(kind string, body []byte) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return syncDir(o.dir)
+	if err := syncDir(o.dir); err != nil {
+		return err
+	}
+	if o.Notify != nil {
+		o.Notify()
+	}
+	return nil
 }
 
 // syncDir makes a rename in dir durable. Windows cannot open a directory
@@ -348,104 +357,4 @@ type DrainResult struct {
 	Rows    int // rows it accepted
 	Failed  int // batches it refused for good, moved to failed/
 	Pending int // batches still waiting
-}
-
-// Drain posts pending batches oldest first until the outbox is empty or a
-// retryable failure (API down, 429, 5xx), a rejected key (401) or a team
-// read-only for billing (402) stops it; then it returns that error and
-// leaves the rest, the batch it was sending included, for next time. A
-// batch the API refuses for good (400, 403, 413, ...) moves to failed/ so
-// it cannot block the queue. Before sending anything it asks /v1/whoami
-// which team c's key belongs to and sends nothing (ErrTeamMismatch) unless
-// that is the outbox's team. progress, when set, is called after each
-// batch.
-func (o *Outbox) Drain(ctx context.Context, c *kitapi.Client, progress func(DrainResult)) (DrainResult, error) {
-	lockCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	unlock, err := lockFile(lockCtx, filepath.Join(o.dir, ".drain.lock"))
-	cancel()
-	if err != nil {
-		return DrainResult{}, err
-	}
-	defer unlock()
-	names, err := o.Pending()
-	if err != nil {
-		return DrainResult{}, err
-	}
-	res := DrainResult{Pending: len(names)}
-	if len(names) == 0 {
-		return res, nil
-	}
-	if o.team == "" {
-		return res, ErrNoTeam
-	}
-	who, err := c.Whoami(ctx)
-	if err != nil {
-		return res, err
-	}
-	if who.Team.ID != o.team {
-		return res, ErrTeamMismatch
-	}
-	for _, name := range names {
-		if err := ctx.Err(); err != nil {
-			return res, err
-		}
-		path := filepath.Join(o.dir, name)
-		body, err := os.ReadFile(path)
-		if errors.Is(err, os.ErrNotExist) {
-			res.Pending--
-			continue
-		}
-		if err != nil {
-			return res, err
-		}
-		n, err := send(ctx, c, kindOf(name), body)
-		if err != nil {
-			if kitapi.Retryable(err) || errors.Is(err, kitapi.ErrUnauthorized) || kitapi.ReadOnly(err) || ctx.Err() != nil {
-				return res, err
-			}
-			var e *kitapi.Error
-			if errors.As(err, &e) && e.Status == 404 && kindOf(name) == KindDelete {
-				// Already gone there: the delete is done.
-				err = nil
-			} else {
-				_ = os.WriteFile(path+".error", []byte(err.Error()+"\n"), 0o600)
-				_ = os.Rename(path+".error", filepath.Join(o.dir, "failed", name+".error"))
-				if rerr := os.Rename(path, filepath.Join(o.dir, "failed", name)); rerr != nil {
-					return res, rerr
-				}
-				res.Failed++
-				res.Pending--
-				if progress != nil {
-					progress(res)
-				}
-				continue
-			}
-		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return res, err
-		}
-		res.Sent++
-		res.Rows += n
-		res.Pending--
-		if progress != nil {
-			progress(res)
-		}
-	}
-	return res, nil
-}
-
-func send(ctx context.Context, c *kitapi.Client, kind string, body []byte) (int, error) {
-	switch kind {
-	case KindSessions, KindBlocks, KindChunks:
-		return c.PostBatch(ctx, "/v1/traces/"+kind, body)
-	case KindDelete:
-		var d struct {
-			SessionID string `json:"session_id"`
-		}
-		if err := json.Unmarshal(body, &d); err != nil || d.SessionID == "" {
-			return 0, &kitapi.Error{Status: 400, Message: "bad delete entry"}
-		}
-		return 0, c.Do(ctx, "DELETE", "/v1/traces/sessions/"+url.PathEscape(d.SessionID), nil, nil, nil)
-	}
-	return 0, &kitapi.Error{Status: 400, Message: "unknown outbox kind " + strconv.Quote(kind)}
 }
