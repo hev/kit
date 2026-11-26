@@ -154,10 +154,14 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, p
 	}
 
 	var drainer *kitcapture.Drainer
+	var finishScan func()
 	if primary.Kit != nil {
-		logger.Info("signed in to Club Kit: capturing to the Club Kit API through a local outbox", "team", cfg.Kit.TeamSlug, "archive", primary.Files.Dir(), "outbox", primary.Kit.Outbox.Dir())
+		logger.Info("signed in to Club Kit: capturing to the Club Kit API through a local outbox", "team", cfg.Kit.TeamSlug)
 		drainer = &kitcapture.Drainer{Outbox: primary.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
 		primary.Kit.Outbox.Logger = logger
+		primary.Kit.Outbox.Notify = drainer.Kick
+		finishScan = primary.Kit.Outbox.BeginScan()
+		defer finishScan()
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
@@ -182,7 +186,10 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, p
 		defer cancel()
 		result := cycle.run(scanCtx, primary, logger.With("target", primaryTarget))
 		if drainer != nil {
-			drainer.Kick()
+			if finishScan != nil {
+				finishScan()
+				finishScan = nil
+			}
 			result.Notice = kitNotice(drainer, primary.Kit.Outbox)
 		}
 		status.publish(0, primaryStatus, result)

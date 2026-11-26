@@ -141,10 +141,16 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 		return errors.New("enable capture.redact before importing to Club Kit")
 	}
 
-	if pending, err := target.Kit.Outbox.Pending(); err != nil {
+	outbox := target.Kit.Outbox
+	drainBusy := false
+	if pending, err := outbox.Pending(); err != nil {
 		return err
 	} else if len(pending) > 0 {
-		if _, err := target.Kit.Outbox.Drain(ctx, c, nil); err != nil {
+		if _, err := outbox.Drain(ctx, c, nil); errors.Is(err, kitcapture.ErrDrainBusy) {
+			drainBusy = true
+			fmt.Fprintln(out, "The daemon is draining the outbox.")
+			fmt.Fprintln(out, kitcapture.FormatProgress(outbox.Progress()))
+		} else if err != nil {
 			return fmt.Errorf("pending traces are still queued: %w", err)
 		}
 	}
@@ -157,20 +163,27 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 			return err
 		}
 	}
-	pending, _ := target.Kit.Outbox.Pending()
-	fmt.Fprintf(out, "Traces: %d sessions queued now, %d batches to send.\n", queued, len(pending))
-	total := len(pending)
-	res, err := target.Kit.Outbox.Drain(ctx, c, func(r kitcapture.DrainResult) {
+	fmt.Fprintf(out, "Traces: %d sessions queued now.\n", queued)
+	fmt.Fprintln(out, kitcapture.FormatProgress(outbox.Progress()))
+	displayed := 0
+	res, err := outbox.Drain(ctx, c, func(r kitcapture.DrainResult) {
 		done := r.Sent + r.Failed
-		if done == total || done%25 == 0 {
-			fmt.Fprintf(out, "  sent %d/%d batches (%d rows)\n", done, total, r.Rows)
+		if r.Pending == 0 || done-displayed >= 25 {
+			fmt.Fprintln(out, kitcapture.FormatProgress(outbox.Progress()))
+			displayed = done
 		}
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, kitcapture.ErrDrainBusy):
+		if !drainBusy {
+			fmt.Fprintln(out, "The daemon is draining the outbox.")
+			fmt.Fprintln(out, kitcapture.FormatProgress(outbox.Progress()))
+		}
+	case err != nil:
 		return fmt.Errorf("traces import stopped with %d batches left (run hev login --import again to resume; hev d also drains them): %w", res.Pending, err)
 	}
 	if res.Failed > 0 {
-		fmt.Fprintf(out, "  %d batches were refused; they are kept in %s\n", res.Failed, filepath.Join(target.Kit.Outbox.Dir(), "failed"))
+		fmt.Fprintf(out, "  %d batches were refused and kept in the local failed outbox.\n", res.Failed)
 	}
 
 	if queueErr != nil {
@@ -192,7 +205,12 @@ func kitQueueSessions(ctx context.Context, a *kitcapture.Archive, state *kitImpo
 	if err != nil {
 		return 0, err
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].SessionID < rows[j].SessionID })
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].End != rows[j].End {
+			return rows[i].End > rows[j].End
+		}
+		return rows[i].SessionID < rows[j].SessionID
+	})
 	todo := 0
 	for _, r := range rows {
 		if !state.Sessions[r.SessionID] {

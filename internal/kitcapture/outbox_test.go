@@ -79,7 +79,7 @@ func TestOutboxDrainsAfterOutage(t *testing.T) {
 	srv.RateLimit(1) // and one 429 on the way back
 	var seen []kitcapture.DrainResult
 	res, err = a.Outbox.Drain(ctx, c, func(r kitcapture.DrainResult) { seen = append(seen, r) })
-	if err != nil || res.Sent != 6 || res.Pending != 0 || len(seen) != 6 {
+	if err != nil || res.Sent != 6 || res.Pending != 0 || len(seen) == 0 || seen[len(seen)-1] != res {
 		t.Fatalf("drain after outage = %+v, %v (progress %d)", res, err, len(seen))
 	}
 	rows, _ := srv.Traces.ListSessionRows(-1, nil)
