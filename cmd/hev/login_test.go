@@ -191,7 +191,7 @@ func TestKitLoginStatusLogout(t *testing.T) {
 	if strings.Contains(out.String(), fakeKitKey) || strings.Contains(out.String(), "hk_") {
 		t.Fatalf("login printed the key: %s", out.String())
 	}
-	if !strings.Contains(out.String(), "queue rows for the Club Kit API") {
+	if !strings.Contains(out.String(), "queue rows for the hevmind.com service API") {
 		t.Fatalf("login did not say where capture goes: %s", out.String())
 	}
 	info, err := os.Stat(path)
@@ -458,6 +458,138 @@ func TestKitLoginMintedHevKeyParityAndRefusals(t *testing.T) {
 			}
 			if doc := readTOML(t, path); doc["kit"] != nil {
 				t.Fatalf("invalid exchange wrote [kit] config: %v", doc["kit"])
+			}
+		})
+	}
+}
+
+func TestLoginCLIUsesServiceNameAndConciseErrors(t *testing.T) {
+	home := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, fakeKitKey, http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	config := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(config, []byte("[kit]\napi = '"+server.URL+"'\nservice = '"+server.URL+"'\nkey = '"+fakeKitKey+"'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HEV_CONFIG=" + config}
+	for _, args := range [][]string{{"login"}, {"login", "status"}, {"logout"}} {
+		help, stderr, code := runHevChild(t, home, env, append(append([]string{}, args...), "--help")...)
+		if code != 0 || !strings.Contains(help, "Usage:") || !strings.Contains(help, "hevmind.com service") || strings.Contains(help+stderr, "Club Kit") {
+			t.Fatalf("%v help: exit %d, %s%s", args, code, help, stderr)
+		}
+		errorEnv := append(append([]string{}, env...), "HEVLAYER_API_KEY_REF=op://fixture/unused/key")
+		out, stderr, code := runHevChild(t, home, errorEnv, args...)
+		want := "HTTP 503"
+		if len(args) == 1 && args[0] == "login" {
+			want = "unset HEVLAYER_API_KEY_REF"
+		}
+		if code == 0 || !strings.Contains(stderr, want) || !strings.Contains(stderr, "hevmind.com service") ||
+			strings.Contains(out+stderr, "Usage:") || strings.Contains(out+stderr, fakeKitKey) || strings.Contains(out+stderr, "op://fixture") {
+			t.Fatalf("%v error: exit %d, %s%s", args, code, out, stderr)
+		}
+	}
+}
+
+func TestLoginStatusTeamDisplayFallbacks(t *testing.T) {
+	for _, tc := range []struct{ team, want string }{
+		{`{"id":"team_1","slug":"acme","name":"Acme Inc","display_name":"Acme Studio"}`, "Acme Studio"},
+		{`{"id":"team_1","slug":"acme","name":"Acme Inc","display_name":" "}`, "Acme Inc"},
+		{`{"id":"team_1","slug":"acme"}`, "acme"},
+		{`{"id":"team_1"}`, "team_1"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			path := kitTestHome(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(`{"team":` + tc.team + `,"author":{"id":"user_1"}}`))
+			}))
+			defer server.Close()
+			if err := os.WriteFile(path, []byte("[kit]\napi = '"+server.URL+"'\nkey = '"+fakeKitKey+"'\nteam_id = 'team_1'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := runLoginStatus(context.Background(), &out); err != nil ||
+				!strings.Contains(out.String(), "team "+tc.want+" as user_1") || strings.Contains(out.String(), fakeKitKey) {
+				t.Fatalf("status: %v, %s", err, out.String())
+			}
+		})
+	}
+}
+
+func TestLoginRefreshesOnlyInstalledCaptureService(t *testing.T) {
+	for _, kind := range []string{"launchd", "systemd", "absent", "operator-managed"} {
+		t.Run(kind, func(t *testing.T) {
+			home, log := sandbox(t, "0")
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+			t.Setenv("HEV_HOST", "fixture-host")
+			f := newFakeKit(t)
+			oldBrowser, oldService := openBrowser, linuxService
+			t.Cleanup(func() { openBrowser, linuxService = oldBrowser, oldService })
+			openBrowser = f.browse(func(state string) string { return state })
+			userService := &fakeUserService{}
+			linuxService = userService
+			onOS(t, "linux")
+			path := systemdPath(home)
+			stale := "HEVLAYER_API_KEY_REF=stale\nHEVLAYER_API_KEY_OP_REF=stale\n"
+			if kind == "systemd" {
+				stale = managedUnitMarker + "\n" + stale
+			}
+			if kind == "launchd" || kind == "absent" {
+				onOS(t, "darwin")
+				job := daemonJob(filepath.Join(home, ".local", "bin", "hev"), home, daemon.DefaultConfigPath())
+				path = job.plistPath(home)
+				job.Env["HEVLAYER_API_KEY_REF"] = "stale"
+				job.Env["HEVLAYER_API_KEY_OP_REF"] = "stale"
+				stale = job.plist()
+			}
+			if kind != "absent" {
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(stale), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				t.Setenv("FAKE_UNLOADED", "1")
+			}
+			if err := os.MkdirAll(filepath.Dir(daemon.DefaultConfigPath()), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(daemon.DefaultConfigPath(), []byte("[layer]\napi_key = 'old-key'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := runLogin(context.Background(), &out, f.srv.URL, ""); err != nil {
+				t.Fatal(err)
+			}
+			doc := readTOML(t, daemon.DefaultConfigPath())
+			if doc["kit"] == nil || doc["layer"] != nil || doc["kit_prior"] == nil {
+				t.Fatal("login did not move the Layer configuration aside")
+			}
+			raw, err := os.ReadFile(path)
+			switch kind {
+			case "absent":
+				if !os.IsNotExist(err) || strings.Contains(calls(t, log), "bootstrap") || len(userService.calls) != 0 {
+					t.Fatal("login installed a previously absent service")
+				}
+			case "operator-managed":
+				if err != nil || string(raw) != stale || len(userService.calls) != 0 {
+					t.Fatal("login touched an operator-managed service")
+				}
+			default:
+				if err != nil || strings.Contains(string(raw), "HEVLAYER_API_KEY_") || strings.Contains(string(raw), fakeKitKey) ||
+					!strings.Contains(string(raw), daemon.DefaultConfigPath()) {
+					t.Fatal("refresh leaked credentials or lost daemon configuration")
+				}
+				if kind == "launchd" {
+					if !strings.Contains(string(raw), "fixture-host") || !strings.Contains(calls(t, log), "launchctl bootout") ||
+						!strings.Contains(calls(t, log), "launchctl bootstrap") {
+						t.Fatal("login did not restart launchd with the current environment")
+					}
+				} else if strings.Join(userService.calls, ",") != "stop hevd.service,daemon-reload,enable --now hevd.service,restart hevd.service" {
+					t.Fatalf("unexpected systemd calls: %v", userService.calls)
+				}
 			}
 		})
 	}

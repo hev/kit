@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"debug/buildinfo"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // userService keeps every systemctl call replaceable in platform-independent tests.
@@ -25,10 +27,13 @@ func (systemctlService) Available() bool {
 	if err != nil || bus != nil {
 		return false
 	}
-	return exec.Command("systemctl", "--user", "show-environment").Run() == nil
+	_, err = (systemctlService{}).Run("show-environment")
+	return err == nil
 }
 func (systemctlService) Run(args ...string) ([]byte, error) {
-	return exec.Command("systemctl", append([]string{"--user"}, args...)...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...).CombinedOutput()
 }
 
 var linuxService userService = systemctlService{}

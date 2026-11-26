@@ -283,7 +283,15 @@ type storageView struct {
 	where     string // endpoint or archive directory
 }
 
+func hostedStorageLabel(origin string) string {
+	if origin == "" {
+		return "hevmind.com service"
+	}
+	return "hevmind.com service at " + origin
+}
+
 func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stErr error) {
+	const kitMode storagemode.Mode = "kit"
 	var dv *storageView
 	switch {
 	case stErr != nil:
@@ -292,6 +300,10 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 		fmt.Fprintln(out, "Storage (daemon): no capture daemon is running")
 	case st.Record == nil:
 		fmt.Fprintln(out, "Storage (daemon): not reported (the running daemon predates this build; restart it to see its mode)")
+	case st.Record.KeySource == "kit" || st.Record.KitService != "":
+		origin := daemon.CaptureEndpoint(st.Record.KitService)
+		dv = &storageView{kitMode, st.Record.Namespace, origin}
+		fmt.Fprintf(out, "Storage (daemon): %s (pid %d)\n", hostedStorageLabel(origin), st.Record.PID)
 	case st.Record.Mode == storagemode.Layer:
 		endpoint := daemon.CaptureEndpoint(st.Record.Endpoint)
 		dv = &storageView{storagemode.Layer, st.Record.Namespace, endpoint}
@@ -306,8 +318,16 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 		ns = "hev-traces"
 	}
 	var sv *storageView
-	res, err := daemon.ResolveMode(cfg)
+	var res storagemode.Resolution
+	var err error
+	if !cfg.Kit.SignedIn() {
+		res, err = daemon.ResolveMode(cfg)
+	}
 	switch {
+	case cfg.Kit.SignedIn():
+		origin := daemon.KitServiceOrigin(cfg.Kit)
+		sv = &storageView{kitMode, ns, origin}
+		fmt.Fprintf(out, "Storage (this shell): %s\n", hostedStorageLabel(origin))
 	case storagemode.IsNoKey(err):
 		fmt.Fprintln(out, "Storage (this shell): error: this machine is set up for hev layer and this shell has no usable Layer API key")
 		if dv != nil && dv.mode == storagemode.Layer {
@@ -332,7 +352,8 @@ func writeStorage(out io.Writer, cfg *daemon.Config, st daemon.DaemonState, stEr
 		return
 	}
 	same := func(a, b *storageView) bool {
-		return a.mode == b.mode && a.namespace == b.namespace && strings.TrimRight(a.where, "/") == strings.TrimRight(b.where, "/")
+		return a.mode == b.mode && a.namespace == b.namespace &&
+			(a.mode == kitMode && a.where == "" || strings.TrimRight(a.where, "/") == strings.TrimRight(b.where, "/"))
 	}
 	if sv == nil || !same(sv, dv) {
 		fmt.Fprintln(out, "  ! the daemon and this shell differ: trace commands run here (and dispatched workers with this environment) do not read what the daemon writes")

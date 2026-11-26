@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,8 +44,15 @@ func (j launchdJob) bootstrapArgs(plistPath string) []string {
 
 func (j launchdJob) bootoutArgs() []string { return []string{"bootout", j.target()} }
 
+func runLaunchctl(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "launchctl", args...).CombinedOutput()
+}
+
 func (j launchdJob) loaded() bool {
-	return exec.Command("launchctl", "print", j.target()).Run() == nil
+	_, err := runLaunchctl("print", j.target())
+	return err == nil
 }
 
 // bootout unloads the job if it is loaded. Unloading is what stops a KeepAlive
@@ -53,7 +61,7 @@ func (j launchdJob) bootout() (wasLoaded bool, err error) {
 	if !j.loaded() {
 		return false, nil
 	}
-	if out, err := exec.Command("launchctl", j.bootoutArgs()...).CombinedOutput(); err != nil {
+	if out, err := runLaunchctl(j.bootoutArgs()...); err != nil {
 		return true, fmt.Errorf("launchctl bootout %s: %s: %w", j.Label, strings.TrimSpace(string(out)), err)
 	}
 	return true, nil
@@ -85,7 +93,7 @@ func (j launchdJob) ensure(home string, restart bool) (changed bool, err error) 
 	// after a bootout that is the race, not a bad plist, so it is retried
 	// for a few seconds.
 	for attempt := 0; ; attempt++ {
-		out, err := exec.Command("launchctl", j.bootstrapArgs(path)...).CombinedOutput()
+		out, err := runLaunchctl(j.bootstrapArgs(path)...)
 		if err == nil {
 			return true, nil
 		}
