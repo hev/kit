@@ -1,4 +1,4 @@
-// Package kitapi is a typed client for the Club Kit API: the HTTP API a signed-in
+// Package kitapi is a typed client for the hevmind.com service API: the HTTP API a signed-in
 // machine talks to with its kit key (hev_… or legacy hk_…), and nothing else. It covers
 // capture (batched session, block and chunk rows), trace reads and search,
 // the board, and one-time dashboard links.
@@ -36,7 +36,7 @@ const (
 )
 
 // ErrUnauthorized is a 401: the key was revoked or never valid.
-var ErrUnauthorized = errors.New("Club Kit API rejected the kit key (401): run `hev login` again")
+var ErrUnauthorized = errors.New("hevmind.com service API rejected the kit key (401): run `hev login` again")
 
 // Error is a non-2xx answer the client did not retry (or stopped retrying).
 type Error struct {
@@ -47,7 +47,7 @@ type Error struct {
 	Location string
 }
 
-// ReadOnly reports whether err is a 402 from the Club Kit API: the team is
+// ReadOnly reports whether err is a 402 from the hevmind.com service API: the team is
 // read-only for billing (message billing_read_only). Nothing is wrong with
 // the write itself; keep it and send it again once the team pays.
 func ReadOnly(err error) bool {
@@ -61,15 +61,15 @@ func (e *Error) Error() string {
 		if msg == "" {
 			msg = "billing_read_only"
 		}
-		return fmt.Sprintf("Club Kit API: HTTP 402: %s: the team is read-only until its billing is settled; reads still work, writes wait", msg)
+		return fmt.Sprintf("hevmind.com service API: HTTP 402: %s: the team is read-only until its billing is settled; reads still work, writes wait", msg)
 	}
 	if e.Location != "" {
-		return fmt.Sprintf("Club Kit API: HTTP %d: redirect to %s refused (kit never follows redirects with its key; check [kit] api)", e.Status, e.Location)
+		return fmt.Sprintf("hevmind.com service API: HTTP %d: redirect to %s refused (kit never follows redirects with its key; check [kit] api)", e.Status, e.Location)
 	}
 	if e.Message == "" {
-		return fmt.Sprintf("Club Kit API: HTTP %d", e.Status)
+		return fmt.Sprintf("hevmind.com service API: HTTP %d", e.Status)
 	}
-	return fmt.Sprintf("Club Kit API: HTTP %d: %s", e.Status, e.Message)
+	return fmt.Sprintf("hevmind.com service API: HTTP %d: %s", e.Status, e.Message)
 }
 
 // Retryable reports whether err is worth trying again later: a transport
@@ -85,7 +85,7 @@ func Retryable(err error) bool {
 	return true
 }
 
-// Client talks to one Club Kit API with one kit key. The zero value is not
+// Client talks to one hevmind.com service API with one kit key. The zero value is not
 // usable; use New.
 type Client struct {
 	API  string
@@ -109,9 +109,9 @@ func ValidBaseURL(raw string) bool {
 	return u.Scheme == "https" || u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1")
 }
 
-// ValidKey reports whether key has the syntax of a Club Kit API key:
+// ValidKey reports whether key has the syntax of a hevmind.com service API key:
 //   - unified hev_ or legacy hvl_ Layer-minted key: prefix + >=24 ASCII base62 chars
-//   - legacy hk_ Club Kit key (bounded migration): prefix + >=16 [A-Za-z0-9_-] chars
+//   - legacy hk_ hevmind.com service key (bounded migration): prefix + >=16 [A-Za-z0-9_-] chars
 //
 // Empty/whitespace strings, bare prefixes, illegal characters, and raw provider
 // credentials (sk-..., op://...) are rejected.
@@ -175,7 +175,7 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		return err
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("Club Kit API %s %s: decode: %w", method, path, err)
+		return fmt.Errorf("hevmind.com service API %s %s: decode: %w", method, path, err)
 	}
 	return nil
 }
@@ -183,13 +183,13 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 // DoRaw is Do with the body already encoded and the answer returned as is.
 func (c *Client) DoRaw(ctx context.Context, method, path string, query url.Values, payload []byte) ([]byte, error) {
 	if c.API == "" || c.key == "" {
-		return nil, errors.New("Club Kit API: not signed in (no api or key)")
+		return nil, errors.New("hevmind.com service API: not signed in (no api or key)")
 	}
 	if !ValidBaseURL(c.API) {
-		return nil, errors.New("invalid Club Kit API URL")
+		return nil, errors.New("invalid hevmind.com service API URL")
 	}
 	if !strings.HasPrefix(path, "/") {
-		return nil, errors.New("Club Kit API path must start with a slash")
+		return nil, errors.New("hevmind.com service API path must start with a slash")
 	}
 	u := c.API + path
 	if len(query) > 0 {
@@ -299,11 +299,14 @@ func errorMessage(raw []byte, key string) string {
 
 // Whoami is what /v1/whoami says about the key.
 type Whoami struct {
-	KeyID    string `json:"key_id"`
-	Hostname string `json:"hostname"`
-	Team     struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+	WorkWorkspaceID string `json:"work_workspace_id"`
+	KeyID           string `json:"key_id"`
+	Hostname        string `json:"hostname"`
+	Team            struct {
+		ID          string `json:"id"`
+		Slug        string `json:"slug"`
+		Name        string `json:"name"`
+		DisplayName string `json:"display_name"`
 	} `json:"team"`
 	Author struct {
 		ID   string `json:"id"`
@@ -405,7 +408,7 @@ func (c *Client) PostBatch(ctx context.Context, path string, body []byte) (int, 
 	}
 	var a accepted
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return 0, fmt.Errorf("Club Kit API POST %s: decode: %w", path, err)
+		return 0, fmt.Errorf("hevmind.com service API POST %s: decode: %w", path, err)
 	}
 	return a.Accepted, nil
 }
@@ -626,7 +629,7 @@ func (c *Client) OpenSession(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if out.URL == "" {
-		return "", errors.New("Club Kit API: /v1/session returned no url")
+		return "", errors.New("hevmind.com service API: /v1/session returned no url")
 	}
 	return out.URL, nil
 }

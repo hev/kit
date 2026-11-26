@@ -17,13 +17,14 @@ import (
 // another process can ask the daemon (not its own environment) which mode it
 // is in. It names where a key came from, never the key.
 type StorageRecord struct {
-	PID       int              `json:"pid"`
-	Started   time.Time        `json:"started"`
-	Mode      storagemode.Mode `json:"mode"`
-	Namespace string           `json:"namespace"`
-	Endpoint  string           `json:"endpoint,omitempty"`
-	KeySource string           `json:"key_source,omitempty"`
-	Archive   string           `json:"archive,omitempty"`
+	PID        int              `json:"pid"`
+	Started    time.Time        `json:"started"`
+	Mode       storagemode.Mode `json:"mode"`
+	Namespace  string           `json:"namespace"`
+	Endpoint   string           `json:"endpoint,omitempty"`
+	KeySource  string           `json:"key_source,omitempty"`
+	KitService string           `json:"kit_service,omitempty"`
+	Archive    string           `json:"archive,omitempty"`
 }
 
 // hevDir is ~/.hev, where the daemon keeps its lock, status and record.
@@ -55,7 +56,7 @@ func DaemonLockPath() string {
 
 // recordFor describes target as the daemon opened it.
 func recordFor(target Target) StorageRecord {
-	r := StorageRecord{PID: os.Getpid(), Started: time.Now().UTC(), Mode: target.Mode, KeySource: target.KeySource}
+	r := StorageRecord{PID: os.Getpid(), Started: time.Now().UTC(), Mode: target.Mode, KeySource: target.KeySource, KitService: target.KitService}
 	switch {
 	case target.Files != nil:
 		r.Namespace, r.Archive = target.Files.Namespace(), target.Files.Dir()

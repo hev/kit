@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -54,7 +55,7 @@ var openBrowser = func(u string) {
 var loginTimeout = 3 * time.Minute
 
 func init() {
-	login := &cobra.Command{Use: "login", Short: "Sign this machine into Club Kit", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	login := &cobra.Command{Use: "login", SilenceUsage: true, SilenceErrors: true, Short: "Sign this machine into the hevmind.com service", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		service, _ := cmd.Flags().GetString("service")
 		invite, _ := cmd.Flags().GetString("code")
 		importHistory, _ := cmd.Flags().GetBool("import")
@@ -71,13 +72,13 @@ func init() {
 		offerKitImport(cmd.OutOrStdout())
 		return nil
 	}}
-	login.Flags().String("service", "", "Club Kit sign-in URL (or "+kitServiceEnv+", or [kit] service in the config)")
-	login.Flags().Bool("import", false, "Copy this machine's trace archive and board to the Club Kit API (resumable; run again after signing in to resume)")
+	login.Flags().String("service", "", "hevmind.com service sign-in URL (or "+kitServiceEnv+", or [kit] service in the config)")
+	login.Flags().Bool("import", false, "Copy this machine's trace archive and board to the hevmind.com service API (resumable; run again after signing in to resume)")
 	login.Flags().String("code", "", "Invite code to redeem while signing in (prefilled on the sign-in page)")
-	login.AddCommand(&cobra.Command{Use: "status", Short: "Ask Club Kit who this machine is signed in as", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	login.AddCommand(&cobra.Command{Use: "status", SilenceUsage: true, SilenceErrors: true, Short: "Ask the hevmind.com service who this machine is signed in as", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return runLoginStatus(cmd.Context(), cmd.OutOrStdout())
 	}})
-	logout := &cobra.Command{Use: "logout", Short: "Revoke this machine's Club Kit key and restore the previous archive target", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	logout := &cobra.Command{Use: "logout", SilenceUsage: true, SilenceErrors: true, Short: "Revoke this machine's hevmind.com service key and restore the previous archive target", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		local, _ := cmd.Flags().GetBool("local")
 		return runLogout(cmd.Context(), cmd.OutOrStdout(), local)
 	}}
@@ -101,7 +102,9 @@ func loginRandom() string {
 // from an unreachable service. Its message never includes the response body.
 type kitStatusError struct{ code int }
 
-func (e kitStatusError) Error() string { return fmt.Sprintf("Club Kit returned HTTP %d", e.code) }
+func (e kitStatusError) Error() string {
+	return fmt.Sprintf("hevmind.com service returned HTTP %d", e.code)
+}
 
 func isUnauthorized(err error) bool {
 	var se kitStatusError
@@ -131,7 +134,7 @@ func kitRequest(ctx context.Context, method, target, key string, body, out any) 
 	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("Club Kit unavailable: %s", redact.HideKitKeys(err.Error(), key))
+		return fmt.Errorf("hevmind.com service unavailable: %s", redact.HideKitKeys(err.Error(), key))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
@@ -188,7 +191,7 @@ func refusedError(reason string) error {
 	if reason == inviteRequired {
 		return fmt.Errorf("this account needs an invite code: ask your team for one, then run hev login --code CODE")
 	}
-	return errors.New("sign-in refused by Club Kit")
+	return errors.New("sign-in refused by the hevmind.com service")
 }
 
 // resolveKitService picks the service from the flag, then the environment,
@@ -232,7 +235,7 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 	}
 	for _, name := range []string{"HEVLAYER_ENDPOINT", "HEVLAYER_API_KEY", "HEVLAYER_API_KEY_REF", "HEVLAYER_API_KEY_OP_REF"} {
 		if layerenv.Get(name) != "" {
-			return fmt.Errorf("unset %s before login: it would override the signed-in target", name)
+			return fmt.Errorf("unset %s before signing in to the hevmind.com service", name)
 		}
 	}
 	doc, err := daemon.ReadInviteConfig()
@@ -247,7 +250,7 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 	}
 	service := resolveKitService(flag, doc)
 	if !validKitURL(service) {
-		return fmt.Errorf("Club Kit service must use HTTPS or loopback HTTP")
+		return fmt.Errorf("hevmind.com service must use HTTPS or loopback HTTP")
 	}
 	service = strings.TrimRight(service, "/")
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -294,19 +297,23 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 		return err
 	}
 	if !x.valid() {
-		return fmt.Errorf("invalid response from kit service")
+		return fmt.Errorf("invalid response from the hevmind.com service")
 	}
 	var who kitapi.Whoami
 	if err = kitRequest(ctx, http.MethodGet, strings.TrimRight(x.API, "/")+"/v1/whoami", x.Key, nil, &who); err != nil {
 		return err
 	}
 	if who.Team.ID != x.Team.ID || who.KeyID != x.KeyID {
-		return errors.New("Club Kit sign-in identity does not match the issued key")
+		return errors.New("hevmind.com service sign-in identity does not match the issued key")
 	}
 	if x.Author.Name == "" {
 		x.Author.Name = x.Author.ID
 	}
 	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	refresh, err := prepareKitCaptureService(home)
 	if err != nil {
 		return err
 	}
@@ -329,9 +336,52 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 	if err = daemon.WriteKitConfig(doc, kit); err != nil {
 		return err
 	}
-	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to Club Kit team %s as %s (key %s). The previous archive target is saved for hev logout.\n", x.Team.Slug, x.Author.Name, x.KeyID), x.Key))
-	fmt.Fprintln(out, "Restart capture with hev up or hev d to queue rows for the Club Kit API.")
+	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to the hevmind.com service team %s as %s (key %s). The previous archive target is saved for hev logout.\n", x.Team.Slug, x.Author.Name, x.KeyID), x.Key))
+	unlock()
+	if refresh == nil {
+		fmt.Fprintln(out, "Restart capture with hev up or hev d to queue rows for the hevmind.com service API.")
+	} else if err := refresh(); err != nil {
+		return errors.New("signed in to the hevmind.com service, but capture could not be restarted. Run hev up to retry.")
+	} else {
+		fmt.Fprintln(out, "Restarted the installed capture service.")
+	}
 	return nil
+}
+
+// prepareKitCaptureService selects an existing installation and stops the Linux
+// writer before the config switch takes the capture lock. stopInviteWriter handles launchd.
+func prepareKitCaptureService(home string) (func() error, error) {
+	var path string
+	switch {
+	case hasLaunchd():
+		path = (launchdJob{Label: launchdLabel()}).plistPath(home)
+	case hasSystemd():
+		path = systemdPath(home)
+	default:
+		return nil, nil
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, errors.New("could not inspect the installed capture service")
+	}
+	bin := filepath.Join(home, ".local", "bin", "hev")
+	config := daemon.DefaultConfigPath()
+	if hasLaunchd() {
+		return func() error {
+			_, err := daemonJob(bin, home, config).ensure(home, true)
+			return err
+		}, nil
+	}
+	if err := systemdOwnership(home); errors.Is(err, errUnmanaged) {
+		return nil, nil
+	} else if err != nil {
+		return nil, errors.New("could not inspect the installed capture service")
+	}
+	if err := systemdRun("stop", daemonUnit); err != nil {
+		return nil, errors.New("could not stop the installed capture service")
+	}
+	return func() error { return ensureSystemd(home, bin, config, true) }, nil
 }
 
 // offerKitImport says how to bring this machine's history along when there
@@ -358,7 +408,7 @@ func signedInKit() (*daemon.KitConfig, error) {
 		return nil, err
 	}
 	if !kit.SignedIn() {
-		return nil, fmt.Errorf("not signed in; run hev login")
+		return nil, fmt.Errorf("not signed in to the hevmind.com service; run hev login")
 	}
 	return kit, nil
 }
@@ -369,24 +419,34 @@ func runLoginStatus(ctx context.Context, out io.Writer) error {
 		return err
 	}
 	if !validKitURL(kit.API) {
-		return fmt.Errorf("invalid Club Kit API URL in config")
+		return fmt.Errorf("invalid hevmind.com service API URL in config")
 	}
 	var who kitapi.Whoami
-	err = kitRequest(ctx, "GET", kit.API+"/v1/whoami", kit.Key, nil, &who)
+	err = kitRequest(ctx, "GET", strings.TrimRight(kit.API, "/")+"/v1/whoami", kit.Key, nil, &who)
 	if isUnauthorized(err) {
-		return fmt.Errorf("Club Kit rejected this machine's key %s (revoked or expired); run hev logout --local, then hev login", redact.HideKitKeys(kit.KeyID, kit.Key))
+		return fmt.Errorf("hevmind.com service rejected this machine's key %s (revoked or expired); run hev logout --local, then hev login", redact.HideKitKeys(kit.KeyID, kit.Key))
 	}
 	if err != nil {
 		return err
 	}
 	if kit.TeamID != "" && who.Team.ID != kit.TeamID {
-		return kitcapture.ErrTeamMismatch
+		return fmt.Errorf("hevmind.com service: %w", kitcapture.ErrTeamMismatch)
 	}
 	name := who.Author.Name
 	if name == "" {
 		name = who.Author.ID
 	}
-	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to Club Kit team %s as %s\nMachine: %s\nKey: %s\nAPI: %s\n", who.Team.Slug, name, who.Hostname, who.KeyID, kit.API), kit.Key))
+	team := strings.TrimSpace(who.Team.DisplayName)
+	if team == "" {
+		team = strings.TrimSpace(who.Team.Name)
+	}
+	if team == "" {
+		team = strings.TrimSpace(who.Team.Slug)
+	}
+	if team == "" {
+		team = who.Team.ID
+	}
+	fmt.Fprint(out, redact.HideKitKeys(fmt.Sprintf("Signed in to the hevmind.com service team %s as %s\nMachine: %s\nKey: %s\nAPI: %s\n", team, name, who.Hostname, who.KeyID, kit.API), kit.Key))
 	if o, err := kitcapture.OpenOutbox(daemon.KitOutboxDir(), kit.TeamID); err == nil {
 		pending, _ := o.Pending()
 		fmt.Fprintf(out, "Outbox: %d batches queued in %s\n", len(pending), o.Dir())
@@ -411,10 +471,10 @@ func runLogout(ctx context.Context, out io.Writer, local bool) error {
 	switch {
 	case !validKitURL(kit.Service):
 		if !local {
-			return fmt.Errorf("invalid Club Kit service URL in config; run hev logout --local to forget the key without revoking it")
+			return fmt.Errorf("invalid hevmind.com service URL in config; run hev logout --local to forget the key without revoking it")
 		}
 	default:
-		err = kitRequest(ctx, "POST", kit.Service+"/cli/logout", kit.Key, nil, nil)
+		err = kitRequest(ctx, "POST", strings.TrimRight(kit.Service, "/")+"/cli/logout", kit.Key, nil, nil)
 		switch {
 		case err == nil || isUnauthorized(err):
 			revoked = true // A rejected key is already unusable.
@@ -423,6 +483,10 @@ func runLogout(ctx context.Context, out io.Writer, local bool) error {
 		}
 	}
 	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	refresh, err := prepareKitCaptureService(home)
 	if err != nil {
 		return err
 	}
@@ -436,15 +500,21 @@ func runLogout(ctx context.Context, out io.Writer, local bool) error {
 		return err
 	}
 	if entry, _ := doc["kit"].(map[string]any); entry["key"] != kit.Key {
-		return errors.New("the Club Kit sign-in changed during logout")
+		return errors.New("the hevmind.com service sign-in changed during logout")
 	}
 	if err = daemon.ClearKitConfig(doc); err != nil {
 		return err
 	}
 	if revoked {
-		fmt.Fprintln(out, "Signed out of Club Kit; this machine's key is revoked and the previous archive target is restored.")
+		fmt.Fprintln(out, "Signed out of the hevmind.com service; this machine's key is revoked and the previous archive target is restored.")
 	} else {
-		fmt.Fprintln(out, "Forgot this machine's Club Kit key. The previous archive target is restored.")
+		fmt.Fprintln(out, "Forgot this machine's hevmind.com service key. The previous archive target is restored.")
+	}
+	unlock()
+	if refresh != nil {
+		if err := refresh(); err != nil {
+			return errors.New("signed out of the hevmind.com service, but capture could not be restarted. Run hev up to retry.")
+		}
 	}
 	return nil
 }

@@ -39,7 +39,8 @@ type Target struct {
 	Images *trace.ImageCapture
 	// Kit is set on a machine signed in to a kit service: Files is then the
 	// local copy, and every write is also queued for the kit API.
-	Kit *kitcapture.Archive
+	Kit        *kitcapture.Archive
+	KitService string
 }
 
 // ImageCapture is the blob store for a namespace's images on this host.
@@ -180,7 +181,7 @@ func openResolvedTarget(cfg *Config, namespace string, open func(root, namespace
 		}
 		kit := kitcapture.New(files, outbox)
 		kit.AuthorID, kit.AuthorName = cfg.Kit.AuthorID, cfg.Kit.AuthorName
-		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images, Kit: kit, KeySource: "kit"}, nil
+		return Target{Mode: storagemode.Filesystem, Files: files, Retired: retired, Images: images, Kit: kit, KitService: KitServiceOrigin(cfg.Kit), KeySource: "kit"}, nil
 	}
 	if res.Mode == storagemode.Filesystem {
 		files, err := open(filearchive.Root(cfg.ArchiveDir), namespace)
@@ -265,4 +266,13 @@ func OpenWorkspaceTarget(w workspace.Selection, namespace string) (Target, error
 	}
 	client := layer.New(endpoint, key, traces, "")
 	return Target{Mode: storagemode.Layer, Layer: client, Images: images, KeySource: "workspace"}, nil
+}
+
+// KitServiceOrigin returns the sign-in service for status output. Older
+// configurations may only name the API.
+func KitServiceOrigin(kit *KitConfig) string {
+	if kit.Service != "" {
+		return CaptureEndpoint(kit.Service)
+	}
+	return CaptureEndpoint(kit.API)
 }

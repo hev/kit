@@ -55,6 +55,17 @@ func primaryCredential(cfg *Config) (string, string, error) {
 	return key, source, nil
 }
 
+// LayerWorkIdentityCredentials returns the endpoint and credential used for
+// the primary Layer archive, honoring a configured private key file.
+func LayerWorkIdentityCredentials(cfg *Config) (string, string, error) {
+	endpoint := cfg.LayerEndpoint
+	if endpoint == "" {
+		endpoint = layer.DefaultEndpoint
+	}
+	key, _, err := primaryCredential(cfg)
+	return endpoint, key, err
+}
+
 func openPrimary(cfg *Config, logger *slog.Logger) (Target, error) {
 	// Club Kit uses its own outbox and never needs a primary Layer identity.
 	// Still validate an explicitly configured bootstrap file before starting.

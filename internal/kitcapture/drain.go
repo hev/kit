@@ -76,7 +76,7 @@ func (d *Drainer) Run(ctx context.Context) {
 		switch {
 		case err == nil:
 			if failures > 0 && d.Logger != nil {
-				d.Logger.Info("Club Kit API reachable again; outbox drained", "sent", res.Sent)
+				d.Logger.Info("hevmind.com service API reachable again; outbox drained", "sent", res.Sent)
 			}
 			failures, wait = 0, interval
 		case kitapi.ReadOnly(err):
@@ -95,7 +95,7 @@ func (d *Drainer) Run(ctx context.Context) {
 			wait = maxBackoff
 		case errors.Is(err, kitapi.ErrUnauthorized):
 			if d.Logger != nil {
-				d.Logger.Error("Club Kit API rejected the kit key; captured rows stay queued until `hev login`", "pending", res.Pending)
+				d.Logger.Error("hevmind.com service API rejected the kit key; captured rows stay queued until `hev login`", "pending", res.Pending)
 			}
 			failures++
 			wait = maxBackoff
@@ -103,7 +103,7 @@ func (d *Drainer) Run(ctx context.Context) {
 			failures++
 			wait = min(maxBackoff, interval<<min(failures, 8))
 			if d.Logger != nil {
-				d.Logger.Warn("Club Kit API unavailable; rows stay in the outbox", "err", err, "pending", res.Pending, "retry_in", wait)
+				d.Logger.Warn("hevmind.com service API unavailable; rows stay in the outbox", "err", err, "pending", res.Pending, "retry_in", wait)
 			}
 		}
 	}
@@ -128,8 +128,8 @@ func (d *Drainer) sleep(ctx context.Context, wait time.Duration, healthy bool) b
 	}
 }
 
-// BillingNotice is the one-line diagnostic for a Club Kit API 402: the team is
+// BillingNotice is the one-line diagnostic for a hevmind.com service API 402: the team is
 // read-only for billing, so captured batches wait locally.
 func BillingNotice(pending int) string {
-	return fmt.Sprintf("Club Kit team is read-only for billing (HTTP 402 billing_read_only): %d batches kept queued on this machine; capture continues locally and uploads resume once the team's billing is settled", pending)
+	return fmt.Sprintf("hevmind.com service team is read-only for billing (HTTP 402 billing_read_only): %d batches kept queued on this machine; capture continues locally and uploads resume once the team's billing is settled", pending)
 }

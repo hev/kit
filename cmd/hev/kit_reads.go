@@ -31,7 +31,7 @@ func kitSignedIn() *daemon.KitConfig {
 	return k
 }
 
-// kitClient is the Club Kit API client for a signed-in machine.
+// kitClient is the hevmind.com service API client for a signed-in machine.
 var kitClient = func(k *daemon.KitConfig) *kitapi.Client { return daemon.KitClient(k) }
 
 // kitWindow maps --since onto the dashboard's search windows, rounding up
@@ -52,7 +52,7 @@ func kitWindow(since string) (string, error) {
 	return "all", nil
 }
 
-// runKitSearch is `hev traces search` on a signed-in machine: the Club Kit API
+// runKitSearch is `hev traces search` on a signed-in machine: the hevmind.com service API
 // searches the team's archive and answers one best passage per session.
 // Each phrasing is its own request; a session keeps its best score.
 func runKitSearch(ctx context.Context, out io.Writer, c *kitapi.Client, phrasings []string, top int, asJSON bool) error {
@@ -116,8 +116,8 @@ func runKitSearch(ctx context.Context, out io.Writer, c *kitapi.Client, phrasing
 }
 
 // kitDashboard serves the local dashboard page with its /api reads answered
-// by the Club Kit API, so `hev serve` shows the team's archive on a signed-in
-// machine. Routes the Club Kit API does not carry answer 404.
+// by the hevmind.com service API, so `hev serve` shows the team's archive on a signed-in
+// machine. Routes the hevmind.com service API does not carry answer 404.
 func kitDashboard(c *kitapi.Client) http.Handler {
 	page := dashboard.NewReaderHandler(emptyReader{}, dashboard.ReaderOptions{Board: readserve.HostedBoard(c)})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +127,7 @@ func kitDashboard(c *kitapi.Client) http.Handler {
 		}
 		p, ok := dashboard.APIPath(r.URL.Path)
 		if !ok || r.Method != http.MethodGet {
-			http.Error(w, `{"error":"not available from the Club Kit API"}`, http.StatusNotFound)
+			http.Error(w, `{"error":"not available from the hevmind.com service API"}`, http.StatusNotFound)
 			return
 		}
 		raw, err := c.DoRaw(r.Context(), "GET", "/v1/traces"+p, r.URL.Query(), nil)
@@ -147,11 +147,11 @@ func kitDashboard(c *kitapi.Client) http.Handler {
 }
 
 func serveKitDashboard(out io.Writer, ln net.Listener, c *kitapi.Client, team string) error {
-	fmt.Fprintf(out, "hev read side (Club Kit team %s): http://%s\n", team, ln.Addr())
+	fmt.Fprintf(out, "hev read side (hevmind.com service team %s): http://%s\n", team, ln.Addr())
 	return http.Serve(ln, kitDashboard(c))
 }
 
-// emptyReader backs the page handler; every /api read goes to the Club Kit API.
+// emptyReader backs the page handler; every /api read goes to the hevmind.com service API.
 type emptyReader struct{}
 
 func (emptyReader) ListSessionRows(int, any) ([]trace.SessionRow, error) { return nil, nil }
