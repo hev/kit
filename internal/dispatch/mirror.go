@@ -64,7 +64,7 @@ func mirrorMutation(q Request) bool {
 }
 
 var (
-	mirrorPath   = regexp.MustCompile(`(?i)(?:op://|file:/+|[a-z]:[/\\]|~[/\\]|\\\\|(?:^|[\s"'=:(])[/\\])[^\s"'<>]*`)
+	mirrorPath   = regexp.MustCompile(`(?i)(?:op://|file:/+|[a-z]:[/\\]|~[/\\]|\\\\|(?:^|[^[:alnum:]_.@/\\-])[/\\])[^\s"'<>]*`)
 	mirrorRef    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./-]{0,199}$`)
 	mirrorRepo   = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}(?:/[A-Za-z0-9_][A-Za-z0-9_.-]{0,99})?$`)
 	mirrorPR     = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]{1,12}$`)

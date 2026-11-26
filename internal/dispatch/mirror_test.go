@@ -60,7 +60,7 @@ func TestOrderMirrorMetadataOnWire(t *testing.T) {
 		"hvl_0123456789abcdefghijklmnopqrstuv",
 		"sk-or-v1-00000000111111112222222233333333",
 		"op://vault/item/field",
-		"/home/operator/private",
+		"/home/operator/private", "< /mnt/internal/path>", "</opt/unlisted/private>",
 		"C:\\Users\\operator\\private",
 	}
 	text := "Choose SQLite " + strings.Join(sentinels, " ")
@@ -80,7 +80,7 @@ func TestOrderMirrorMetadataOnWire(t *testing.T) {
 		}
 		raw, _ := io.ReadAll(r.Body)
 		for _, secret := range sentinels {
-			if strings.Contains(string(raw), secret) || strings.Contains(string(raw), "operator") {
+			if strings.Contains(string(raw), strings.Trim(secret, "< >")) || strings.Contains(string(raw), "operator") {
 				t.Error("secret or host path in mirror body")
 			}
 		}
