@@ -87,7 +87,7 @@ jobs:
 
       - name: Keep the pinned build
         if: steps.pin.outputs.pinned == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hevkit-${{ steps.pin.outputs.tag }}
           path: site/dist
