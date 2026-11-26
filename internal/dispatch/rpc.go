@@ -15,6 +15,7 @@ import (
 	"github.com/hev/kit/internal/update"
 	"github.com/hev/kit/internal/version"
 	"github.com/hev/kit/internal/workspace"
+	"github.com/hev/kit/pkg/kitapi"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ var validationNotificationLauncher = launchValidationNotification
 var runLauncher = launch
 
 type Request struct {
+	MirrorSnapshot  bool   `json:"mirror_snapshot,omitempty"`
 	WorkspaceName   string `json:"workspace_name,omitempty"`
 	ScopeOwner      *Host  `json:"scope_owner,omitempty"`
 	ScopeOwnerLabel string `json:"scope_owner_label,omitempty"`
@@ -123,6 +125,7 @@ type Row struct {
 	Attention string `json:"attention,omitempty"`
 }
 type Response struct {
+	MirroredOrder *kitapi.MirroredOrder `json:"mirrored_order,omitempty"`
 	// SteerID and Delivery answer a steer request.
 	SteerID         string                `json:"steer_id,omitempty"`
 	Delivery        string                `json:"delivery,omitempty"`
@@ -226,6 +229,23 @@ func RPC(ctx context.Context, h Host, q Request) (Response, error) {
 			return Response{}, e
 		}
 		defer release()
+	}
+	if mirrorMutation(q) {
+		selected := q.WorkspaceName
+		if selected == "" {
+			selected = q.Meta.WorkspaceName
+		}
+		selected = workspaceOfRun(selected)
+		signIn, ok := orderMirrorSignIn(selected)
+		if ok {
+			q.MirrorSnapshot = true
+			r, err := rpcTransport(ctx, h, q)
+			if r.MirroredOrder != nil {
+				watch := q.Action != "close" && mirrorActive(r.MirroredOrder.State)
+				launchOrderMirror(h, selected, r.MirroredOrder, watch, signIn)
+			}
+			return r, err
+		}
 	}
 	return rpcTransport(ctx, h, q)
 }
@@ -703,6 +723,19 @@ func Handle(q Request) (r Response, handleErr error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		return routeRPC(ctx, *m.Forward, q)
+	}
+	if q.Action == "mirror-snapshot" {
+		r.MirroredOrder = readOrderMirror(q.Name, workspaceOfRun(q.WorkspaceName))
+		return r, nil
+	}
+	if q.MirrorSnapshot && mirrorMutation(q) {
+		previousStart := m.Start
+		defer func() {
+			launched := (q.Action == "start" || q.Action == "rework") && m.Start.After(previousStart)
+			if r.MirroredOrder == nil && q.Action != "say" && (handleErr == nil || launched) {
+				r.MirroredOrder = readOrderMirror(q.Name, workspaceOfRun(name))
+			}
+		}()
 	}
 	if q.Action == "adopt" {
 		res, e := AdoptRun(q.Name, q.To)
