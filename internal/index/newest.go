@@ -20,7 +20,7 @@ type sourceUnit struct {
 // RunNewest captures units in activity order across native sources. Each unit
 // retains its native reader and its archive- and source-scoped signatures.
 func RunNewest(sources []trace.Source, cl Archive, st *State, opt Options) (*Report, error) {
-	if opt.MigrateArchive || opt.Workers > 1 || opt.Select != nil {
+	if opt.MigrateArchive || opt.Workers < 0 || opt.Workers > 1 || opt.Select != nil {
 		return nil, errors.New("newest-first capture requires a sequential scan without migration or unit filters")
 	}
 	unlock, err := lockArchive(cl)
