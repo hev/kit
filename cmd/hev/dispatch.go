@@ -506,7 +506,10 @@ func newDispatchCommand() *cobra.Command {
 		return emit(r)
 	}}
 	rpcCmd.Flags().StringVar(&nodeID, "node", "", "Host-owned SSH grant ID")
-	d.AddCommand(rpcCmd, dispatchRelayCommand())
+	d.AddCommand(rpcCmd, dispatchRelayCommand(), &cobra.Command{
+		Use: "mirror-order", Hidden: true, Args: cobra.NoArgs,
+		Run: func(_ *cobra.Command, _ []string) { dispatch.RunOrderMirror() },
+	})
 	return d
 }
 

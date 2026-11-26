@@ -52,11 +52,17 @@ type TraceCapture struct {
 	OpKeyRef        string `toml:"api_key_op_ref,omitempty" json:"-"`
 }
 
+type KitBinding struct {
+	API string `toml:"api"`
+	Key string `toml:"key"`
+}
+
 type Workspace struct {
 	TraceCapture
 
 	Subscriptions Subscriptions `toml:"subscriptions,omitempty" json:"subscriptions,omitempty"`
 	Layer         Layer         `toml:"layer,omitempty" json:"layer,omitempty"`
+	Kit           *KitBinding   `toml:"kit,omitempty" json:"-"`
 	Cluster       Cluster       `toml:"cluster,omitempty" json:"cluster,omitempty"`
 
 	Project
