@@ -45,7 +45,7 @@ func (s *Server) dashboardRows(r *http.Request, stats bool) ([]trace.SessionRow,
 		return nil, "", err
 	}
 	prompts := stats || q.Get("include_stats") == "true" || q.Has("weekday") || q.Has("hour")
-	all, err := reader.ListDashboardSessionRows(stats, prompts, q.Has("summary"))
+	all, err := reader.ListDashboardSessionRows(stats && !q.Has("eval"), prompts, q.Has("summary"))
 	if err != nil {
 		return nil, "", err
 	}

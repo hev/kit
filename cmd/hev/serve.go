@@ -45,7 +45,7 @@ var serveCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			return serveKitDashboard(cmd.OutOrStdout(), ln, kitClient(k), k.TeamSlug)
+			return serveKitDashboard(cmd.OutOrStdout(), ln, kitClient(k), k.TeamSlug, k.Key)
 		}
 		cl, images, err := tracesWithImages(serveNamespace)
 		if err != nil {
@@ -59,7 +59,12 @@ var serveCmd = &cobra.Command{
 		fmt.Fprintf(cmd.OutOrStdout(), "hev read side: http://%s\n", ln.Addr())
 		// Fill picker state only when a picker is opened; Stats needs its own
 		// projected snapshot, so startup warming would duplicate that cold read.
-		server := readserve.New(cl).WithCacheTTL(serveCacheTTL).WithBoard(serveBoard(cmd.OutOrStdout()))
+		server := readserve.New(cl).WithCacheTTL(serveCacheTTL)
+		var key string
+		if layer := layerOf(cl); layer != nil {
+			key = layer.APIKey
+		}
+		serveLocalWorkspace(cmd.Context(), cmd.OutOrStdout(), server, key)
 		if images != nil && images.Store != nil {
 			// Images whose bytes this host captured are shown inline.
 			server.WithImages(images.Store)
@@ -109,7 +114,8 @@ func serveDemoTraces(cmd *cobra.Command) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "hev read side (demo traces, %d sessions): http://%s/#traces\n", len(sessions), ln.Addr())
-	server := readserve.New(&readserve.MemoryReader{Sessions: sessions, Blocks: blocks}).WithCacheTTL(0).WithBoard(serveBoard(cmd.OutOrStdout()))
+	server := readserve.New(&readserve.MemoryReader{Sessions: sessions, Blocks: blocks}).WithCacheTTL(0)
+	serveLocalWorkspace(cmd.Context(), cmd.OutOrStdout(), server, "")
 	return http.Serve(ln, server.Handler())
 }
 
@@ -120,8 +126,8 @@ func serveDemoTraces(cmd *cobra.Command) error {
 // be opened keeps the tab and says so; the reason is printed here, for the
 // operator, and never sent to the browser.
 func serveBoard(out io.Writer) *readserve.Board {
-	unavailable := func(err error) *readserve.Board {
-		fmt.Fprintf(out, "board: unavailable: %v\n", err)
+	unavailable := func(_ error) *readserve.Board {
+		fmt.Fprintf(out, "board: unavailable\n")
 		return readserve.UnavailableBoard()
 	}
 	if err := boardsettings.Load(); err != nil {

@@ -35,6 +35,7 @@ type Reader = tracearchive.Reader
 type Link struct{ Label, Href string }
 
 type Server struct {
+	workspace     *Workspace
 	links         []Link
 	reviewEnabled bool
 	reader        Reader
@@ -89,7 +90,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "image unavailable", http.StatusInternalServerError)
 		return
 	}
 	h := w.Header()
@@ -148,7 +149,7 @@ func (s *Server) Handler() http.Handler {
 		"GET /api/board/{path...}": (*Server).boardAPI,
 	} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			request := &Server{links: s.links, reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, board: s.board, tabs: s.tabs}
+			request := &Server{links: s.links, reviewEnabled: s.reviewEnabled, reader: s.reader, images: s.images, baselines: s.baselines, archive: s.archive, factoryConfig: s.factoryConfig, board: s.board, tabs: s.tabs, workspace: s.workspace}
 			timing := &layer.Timing{}
 			if c, ok := s.reader.(*layer.Client); ok {
 				request.reader = c.WithContext(r.Context()).WithTiming(timing)
@@ -157,7 +158,8 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	mux.Handle("GET /ui/", uiHandler())
-	return compressResponses(mux)
+	s.workspaceRoutes(mux)
+	return compressResponses(s.protectWorkspace(mux))
 }
 
 type timedWriter struct {
@@ -274,7 +276,7 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 	var evalDone chan struct{}
 	var evalRows []layer.EvalRow
 	var evalErr error
-	if reader, ok := s.reader.(*layer.Client); ok && (r.URL.Path == "/api/sessions" || r.URL.Path == "/api/search") {
+	if reader, ok := s.reader.(*layer.Client); ok && !s.oss() && (r.URL.Path == "/api/sessions" || r.URL.Path == "/api/search") {
 		evalDone = make(chan struct{})
 		go func() {
 			defer close(evalDone)
@@ -374,6 +376,9 @@ func (s *Server) matchingRows(r *http.Request) ([]trace.SessionRow, string, erro
 
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	rows, window, err := s.dashboardRows(r, false)
+	if err == nil {
+		rows, err = s.filterEvalRows(rows, r.URL.Query())
+	}
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -402,6 +407,9 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	rows, window, err := s.dashboardRows(r, true)
+	if err == nil {
+		rows, err = s.filterEvalRows(rows, r.URL.Query())
+	}
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
@@ -456,8 +464,15 @@ func (s *Server) loadSession(id string) (trace.SessionRow, []trace.BlockRow, err
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
-	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": displayRates(now), "generated": now.Format(time.RFC3339), "days": 30, "storage": s.storage(), "board": s.boardPage()})
+	payload, _ := json.Marshal(map[string]any{"facets": map[string]any{}, "session": emptySession(), "corpus": []any{}, "rates": displayRates(now), "generated": now.Format(time.RFC3339), "days": 30, "storage": s.storage(), "board": s.boardPage(), "tier": s.workspaceTier()})
 	body := strings.Replace(pageTemplate, "/*__DATA__*/null", string(payload), 1)
+	if s.workspace != nil {
+		body = strings.Replace(body, "<!--__WORKSPACE__-->", s.sidebar(r.URL.Path), 1)
+		const start, end = "<!--__LEGACY_NAV_START__-->", "<!--__LEGACY_NAV_END__-->"
+		if first, last := strings.Index(body, start), strings.Index(body, end); first >= 0 && last > first {
+			body = body[:first] + body[last+len(end):]
+		}
+	}
 	link := ""
 	if s.reviewEnabled {
 		link = `<a href="/review">label review</a>`

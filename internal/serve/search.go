@@ -44,6 +44,9 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		top = n
 	}
 	rows, window, err := s.rows(r)
+	if err == nil {
+		rows, err = s.filterEvalRows(rows, r.URL.Query())
+	}
 	if err != nil {
 		writeError(w, err, 400)
 		return
@@ -100,7 +103,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if reader, ok := s.reader.(evalReader); ok {
+	if reader, ok := s.reader.(evalReader); ok && !s.oss() {
 		evals, err := s.evals(nil)
 		if err != nil {
 			writeError(w, err, 502)
