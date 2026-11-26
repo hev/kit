@@ -281,11 +281,11 @@ func kitNotice(d *kitcapture.Drainer, o *kitcapture.Outbox) string {
 	case errors.Is(err, kitcapture.ErrTeamMismatch), errors.Is(err, kitcapture.ErrNoTeam):
 		notes = append(notes, fmt.Sprintf("kit outbox not sent (%v): %d batches queued", err, len(pending)))
 	case err != nil:
-		notes = append(notes, fmt.Sprintf("Club Kit API unavailable (%v): %d batches queued", err, len(pending)))
+		notes = append(notes, fmt.Sprintf("hevmind.com service API unavailable (%v): %d batches queued in %s", err, len(pending), o.Dir()))
 	case len(pending) > 0:
-		notes = append(notes, fmt.Sprintf("capturing to the Club Kit API: %d batches queued", len(pending)))
+		notes = append(notes, fmt.Sprintf("capturing to the hevmind.com service API: %d batches queued", len(pending)))
 	default:
-		notes = append(notes, "capturing to the Club Kit API")
+		notes = append(notes, "capturing to the hevmind.com service API")
 	}
 	if n, at := o.Refused(); n > 0 {
 		notes = append(notes, fmt.Sprintf("outbox full: %d batches not queued (last %s); their rows are in the local archive only", n, at.UTC().Format(time.RFC3339)))

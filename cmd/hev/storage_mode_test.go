@@ -197,3 +197,34 @@ func TestTraceListOnFilesCreatesNothing(t *testing.T) {
 	}
 	noArchiveAt(t, archive)
 }
+
+func TestStatusShowsHostedCaptureAndDistinguishesUnsignedConfig(t *testing.T) {
+	for _, signedIn := range []bool{true, false} {
+		name := "service-only"
+		config := "[kit]\nservice = 'https://kit.hevmind.com/private-path'\napi = 'https://api.example'\n"
+		if signedIn {
+			name = "signed-in"
+			config += "key = 'fixture-private-key'\n"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, archive := storageHome(t, config)
+			fakeDaemon(t, `{"pid":7,"mode":"filesystem","namespace":"hev-traces","key_source":"kit","kit_service":"https://kit.hevmind.com"}`)
+			out := statusOutput(t)
+			if !strings.Contains(out, "Storage (daemon): hevmind.com service at https://kit.hevmind.com") {
+				t.Fatal(out)
+			}
+			if signedIn {
+				if !strings.Contains(out, "Storage (this shell): hevmind.com service at https://kit.hevmind.com") ||
+					strings.Contains(out, "files at") || strings.Contains(out, "differ") {
+					t.Fatal(out)
+				}
+			} else if !strings.Contains(out, "Storage (this shell): files at") || !strings.Contains(out, "differ") {
+				t.Fatal(out)
+			}
+			if strings.Contains(out, "fixture-private-key") || strings.Contains(out, "private-path") {
+				t.Fatal("status leaked private storage details")
+			}
+			noArchiveAt(t, archive)
+		})
+	}
+}

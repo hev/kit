@@ -83,7 +83,7 @@ func (s *kitImportState) save() error {
 }
 
 // runKitImport backfills this machine's file archive and file board to the
-// Club Kit API. Sessions are queued in the outbox (rows are upserts, so a resend
+// hevmind.com service API. Sessions are queued in the outbox (rows are upserts, so a resend
 // is harmless) and the outbox is drained with progress; board threads are
 // recreated through the API, with the original poster and time quoted at
 // the top of each post because the API attributes posts to the key.
@@ -97,7 +97,7 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("not signed in; run hev login")
 	}
 	if !kitImportKeyID.MatchString(cfg.Kit.KeyID) {
-		return errors.New("invalid Club Kit key identifier in config")
+		return errors.New("invalid hevmind.com service key identifier in config")
 	}
 	checkpoint := kitImportStatePath(cfg.Kit.KeyID)
 	if err := os.MkdirAll(filepath.Dir(checkpoint), 0o700); err != nil {
@@ -105,7 +105,7 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 	}
 	unlock, err := platformops.LockPath(checkpoint+".lock", true)
 	if platformops.IsLockBusy(err) {
-		return errors.New("Club Kit import is already running for this key")
+		return errors.New("hevmind.com service import is already running for this key")
 	}
 	if err != nil {
 		return err
@@ -120,7 +120,7 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 		return err
 	}
 	if target.Kit == nil {
-		return fmt.Errorf("signed in, but the capture target is not the Club Kit API")
+		return fmt.Errorf("signed in, but the capture target is not the hevmind.com service API")
 	}
 	c := kitClient(cfg.Kit)
 	if cfg.Kit.TeamID == "" {
@@ -138,7 +138,7 @@ func runKitImport(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("load import redaction: %s", redact.HideKitKeys(err.Error(), cfg.Kit.Key))
 	}
 	if scrubber == nil {
-		return errors.New("enable capture.redact before importing to Club Kit")
+		return errors.New("enable capture.redact before importing to hevmind.com service")
 	}
 
 	outbox := target.Kit.Outbox
@@ -218,7 +218,7 @@ func kitQueueSessions(ctx context.Context, a *kitcapture.Archive, state *kitImpo
 		}
 	}
 	if todo > 0 {
-		fmt.Fprintf(out, "Queuing %d of %d local sessions for the Club Kit API…\n", todo, len(rows))
+		fmt.Fprintf(out, "Queuing %d of %d local sessions for the hevmind.com service API…\n", todo, len(rows))
 	}
 	n := 0
 	for _, r := range rows {
@@ -270,7 +270,7 @@ func kitQueueSessions(ctx context.Context, a *kitcapture.Archive, state *kitImpo
 	return n, state.save()
 }
 
-// kitImportBoard recreates this machine's file board through the Club Kit API.
+// kitImportBoard recreates this machine's file board through the hevmind.com service API.
 // A board kept in Layer is not this machine's to copy and is skipped.
 func kitImportBoard(ctx context.Context, c *kitapi.Client, state *kitImportState, out io.Writer, scrubber *redact.Scrubber) (int, int, error) {
 	dir := settings.Dir()

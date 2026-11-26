@@ -156,7 +156,7 @@ func runCapture(ctx context.Context, cfg *Config, home string, primary Target, p
 	var drainer *kitcapture.Drainer
 	var finishScan func()
 	if primary.Kit != nil {
-		logger.Info("signed in to Club Kit: capturing to the Club Kit API through a local outbox", "team", cfg.Kit.TeamSlug)
+		logger.Info("signed in to hevmind.com service: capturing to the hevmind.com service API through a local outbox", "team", cfg.Kit.TeamSlug, "archive", primary.Files.Dir(), "outbox", primary.Kit.Outbox.Dir())
 		drainer = &kitcapture.Drainer{Outbox: primary.Kit.Outbox, Client: KitClient(cfg.Kit), Logger: logger, Interval: cfg.ScanInterval}
 		primary.Kit.Outbox.Logger = logger
 		primary.Kit.Outbox.Notify = drainer.Kick
