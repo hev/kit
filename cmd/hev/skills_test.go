@@ -148,10 +148,15 @@ func TestBundledSkillCommands(t *testing.T) {
 		}
 		os.Exit(0)
 	}
-	for _, line := range []string{"missing-command", "traces search query --missing-flag", "peers list --missing-flag", "board search query --missing-flag"} {
+	runSkillHelp := func(line string) ([]byte, error) {
 		c := exec.Command(os.Args[0], "-test.run=^TestBundledSkillCommands$")
-		c.Env = append(os.Environ(), "KIT_SKILL_HELPER=1", "KIT_SKILL_COMMAND="+line)
-		if out, e := c.CombinedOutput(); e == nil {
+		// Skip the race runtime's exit delay for each short-lived help subprocess.
+		raceOptions := strings.TrimSpace(os.Getenv("GORACE") + " atexit_sleep_ms=0")
+		c.Env = append(os.Environ(), "KIT_SKILL_HELPER=1", "KIT_SKILL_COMMAND="+line, "GORACE="+raceOptions)
+		return c.CombinedOutput()
+	}
+	for _, line := range []string{"missing-command", "traces search query --missing-flag", "peers list --missing-flag", "board search query --missing-flag"} {
+		if out, e := runSkillHelp(line); e == nil {
 			t.Errorf("unknown command/flag accepted: %s\n%s", line, out)
 		}
 	}
@@ -176,9 +181,7 @@ func TestBundledSkillCommands(t *testing.T) {
 			line = strings.SplitN(line, " >", 2)[0]
 			line = strings.TrimSuffix(strings.TrimSpace(line), "&")
 			line = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(line, "example")
-			c := exec.Command(os.Args[0], "-test.run=^TestBundledSkillCommands$")
-			c.Env = append(os.Environ(), "KIT_SKILL_HELPER=1", "KIT_SKILL_COMMAND="+strings.TrimPrefix(line, "hev "))
-			if out, e := c.CombinedOutput(); e != nil {
+			if out, e := runSkillHelp(strings.TrimPrefix(line, "hev ")); e != nil {
 				t.Errorf("%s: %s: %v\n%s", path, line, e, out)
 			}
 		}
