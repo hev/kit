@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -224,6 +223,8 @@ type mirrorWatch struct {
 	Binding   [32]byte
 }
 
+const mirrorWatchEnv = "HEV_ORDER_MIRROR_WATCH"
+
 var launchOrderMirror = startOrderMirror
 
 func startOrderMirror(host Host, selected string, order *kitapi.MirroredOrder, watch bool, signIn mirrorSignIn) {
@@ -233,26 +234,15 @@ func startOrderMirror(host Host, selected string, order *kitapi.MirroredOrder, w
 	}
 	route := Host{Local: host.Local, SSH: host.SSH, OS: host.OS, PathPrefix: host.PathPrefix}
 	payload, err := json.Marshal(mirrorWatch{route, selected, *order, watch, signIn.fingerprint()})
-	if err != nil {
-		return
-	}
-	input, err := os.CreateTemp("", "hev-order-mirror-*")
-	if err != nil {
+	if err != nil || len(payload) > 8<<10 {
 		mirrorDebug()
 		return
 	}
-	defer input.Close()
-	defer os.Remove(input.Name())
-	if _, err := input.Write(payload); err != nil {
-		mirrorDebug()
-		return
-	}
-	if _, err := input.Seek(0, 0); err != nil {
-		mirrorDebug()
-		return
-	}
+	// The detached process needs only the redacted snapshot, route and binding
+	// fingerprint. The environment avoids retaining a Windows temp file while
+	// the child holds an inherited handle.
 	cmd := exec.Command(exe, "dispatch", "mirror-order")
-	cmd.Stdin = input
+	cmd.Env = append(os.Environ(), mirrorWatchEnv+"="+string(payload))
 	if os.Getenv("HEV_KIT_MIRROR_DEBUG") == "1" {
 		if info, err := os.Stderr.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
 			cmd.Stderr = os.Stderr
@@ -279,9 +269,11 @@ func mirrorActive(state string) bool {
 
 // RunOrderMirror runs outside the dispatching process. The SSH target only
 // returns snapshots and never receives the initiating workspace's kit key.
-func RunOrderMirror(input io.Reader) {
+func RunOrderMirror() {
+	input := os.Getenv(mirrorWatchEnv)
+	_ = os.Unsetenv(mirrorWatchEnv)
 	var watch mirrorWatch
-	if json.NewDecoder(io.LimitReader(input, 64<<10)).Decode(&watch) != nil || !ValidName(watch.Order.Name) {
+	if len(input) > 8<<10 || json.Unmarshal([]byte(input), &watch) != nil || !ValidName(watch.Order.Name) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 7*24*time.Hour)
