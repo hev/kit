@@ -16,6 +16,8 @@ func TestCheckoutConfigAliases(t *testing.T) {
 	}{
 		{name: "checkout table", config: "[checkout]\n" + fields, root: "~/repos", policy: policy},
 		{name: "legacy table", config: "[workspace]\n" + fields, root: "~/repos", policy: policy},
+		{name: "legacy dotted table", config: "workspace.mode = 'oss'\n", root: "~/workspace", policy: WorkspaceConfig{Mode: "oss"}},
+		{name: "legacy inline table", config: "workspace = { mode = 'oss' }\n", root: "~/workspace", policy: WorkspaceConfig{Mode: "oss"}},
 		{name: "legacy root", config: "workspace = '~/repos'\n", root: "~/repos"},
 		{name: "empty legacy root", config: "workspace = ''\n", root: "~/workspace"},
 		{name: "checkout root overrides legacy root", config: "workspace = '~/legacy'\n[checkout]\n" + fields, root: "~/repos", policy: policy},

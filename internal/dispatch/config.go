@@ -172,8 +172,8 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		return c, configDecodeError(e)
 	}
 	hasCheckout := md.IsDefined("checkout")
-	switch md.Type("workspace") {
-	case "String":
+	switch {
+	case md.Type("workspace") == "String":
 		var root string
 		if err := md.PrimitiveDecode(workspace, &root); err != nil {
 			return c, fmt.Errorf("invalid checkout configuration")
@@ -181,14 +181,11 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		if root != "" {
 			c.Workspace = root
 		}
-	case "Hash":
+	case md.IsDefined("workspace"):
 		if hasCheckout {
 			return c, fmt.Errorf("cannot specify both [checkout] and [workspace] in dispatch.toml")
 		}
 		checkout, hasCheckout = workspace, true
-	case "":
-	default:
-		return c, fmt.Errorf("invalid checkout configuration")
 	}
 	if hasCheckout {
 		if err := md.PrimitiveDecode(checkout, &c.WorkspacePolicy); err != nil {
