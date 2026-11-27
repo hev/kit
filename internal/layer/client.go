@@ -589,7 +589,7 @@ func (c *Client) ListDashboardSessionRows(stats, prompts, summary bool) ([]trace
 	}
 	wanted := []string{"session_id", "end", "start", "repo_url", "model", "harness", "host", "author_id", "author_name", "tool_names", "skills", "total_tokens", "cost", "wall_ms", "api_ms", "prompt_count", "tool_count", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"}
 	if !stats {
-		wanted = append(wanted, "summary", "summary_reason", "summary_backfilled", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents")
+		wanted = append(wanted, "summary", "summary_reason", "summary_backfilled", "first_prompt_short", "tool_counts", "branch", "request_count", "has_subagents", "evaluation")
 	} else if summary {
 		wanted = append(wanted, "summary")
 	}

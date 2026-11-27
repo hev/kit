@@ -263,7 +263,7 @@ func modeOf(body []byte) string {
 }
 
 func (s *Server) boardPage() map[string]any {
-	if s.board == nil {
+	if s.board == nil || s.oss() {
 		return map[string]any{"enabled": false}
 	}
 	return map[string]any{"enabled": true, "mode": s.board.mode}

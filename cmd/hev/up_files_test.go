@@ -70,7 +70,7 @@ func TestUpStepOrderOnFiles(t *testing.T) {
 	if err := runUp(context.Background(), &out, true); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(calls(t, log), "serve") {
+	if strings.Contains(calls(t, log), "com.hev.test.serve") {
 		t.Fatalf("--no-dashboard installed the dashboard:\n%s", calls(t, log))
 	}
 }

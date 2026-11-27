@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hev_ kit — traces</title>
 <!-- Value picker and palette from hev/layer-ui, staged by scripts/import-layer-ui.py. -->
-<link rel="stylesheet" href="ui/theme.css">
-<link rel="stylesheet" href="ui/list-select.css">
+<link rel="stylesheet" href="/ui/theme.css">
+<link rel="stylesheet" href="/ui/list-select.css">
+<link rel="stylesheet" href="/ui/workspace.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <!-- Fonts must not delay the loading chrome or the first archive request. -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -456,14 +457,15 @@ a.bd-row:hover{background:var(--paper-warm)}
 </style>
 </head>
 <body class="loading">
+<!--__WORKSPACE__-->
 <div class="top">
   <span class="wordmark">hev<i>_</i> kit</span>
   <a class="ghmark" href="https://github.com/hev/kit" target="_blank" rel="noopener" title="hev/kit on GitHub" aria-label="hev/kit on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
-  <nav class="tabs" id="tabs" aria-label="Sections">
+  <!--__LEGACY_NAV_START__--><nav class="tabs" id="tabs" aria-label="Sections">
     <button data-v="traces">Traces</button>
     <button data-v="board" hidden>Board</button>
     <!--__TABS__-->
-  </nav>
+  </nav><!--__LEGACY_NAV_END__-->
   <div class="tabs sub" id="trace-tabs" aria-label="Traces views">
     <button data-v="traces">List</button>
     <button data-v="stats">Stats</button>
@@ -486,6 +488,7 @@ a.bd-row:hover{background:var(--paper-warm)}
   <section class="view statsview" id="v-stats"></section>
   <section class="view" id="v-traces"></section>
   <section class="view boardview" id="v-board"></section>
+  <section class="view" id="v-workspace"></section>
   <section class="view" id="v-transcript"><div class="term" id="term"></div><div class="spine" id="spine"></div><div class="statusline" id="statusline"></div></section>
   <section class="view" id="v-timeline">
     <div class="tl-left">
@@ -657,7 +660,7 @@ const RANGES={
 const cards=new Map();
 const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
 const filterView=()=>currentView==='v-stats'?'stats':'traces';
-const pickerUI=import('./ui/list-select.mjs');pickerUI.catch(()=>{});
+const pickerUI=import('/ui/list-select.mjs');pickerUI.catch(()=>{});
 // Share only in-flight requests. The server owns archive TTL and background
 // revalidation; retaining resolved responses here would hide its refreshed rows
 // under a previously opened URL while a new host scope sees current values.
@@ -750,8 +753,9 @@ function renderChips(){
   row.append(select);
  };
  // Grades, roles and instances live on eval rows. Offer them only once the archive has any.
+ if(DATA.tier && DATA.tier!=='oss') dropdown('eval','Eval',[['','All evaluations'],['passed','Passed'],['failed','Failed'],['corrected','Corrected'],['pending','Pending'],['unevaluated','Unevaluated']]);
  const marks=[...new Set([...(DATA.facets?.marks||[]),...[...params.keys()].filter(k=>k.startsWith('mark_')&&k.endsWith('_max')).map(k=>k.slice(5,-4))])].sort();
- if(marks.length||params.has('poor')){
+ if(DATA.tier!=='oss'&&(marks.length||params.has('poor'))){
   for(const key of ['role','instance'])if(DATA.facets?.[key]?.length||params.has(key))dropdown(key,key,[['','any '+key],...(DATA.facets?.[key]||[]).map(v=>[v,v])]);
   dropdown('poor','poor',[['','All grades'],['true','Poor only'],['false','Not poor']]);
   for(const mark of marks)dropdown('mark_'+mark+'_max',mark+' ceiling',[['',mark+': any'],...['2','3','4'].map(n=>[n,mark+': ≤ '+n])]);
@@ -862,6 +866,8 @@ function tracesView(){
  }
  const table=el('table',{class:'grid'}),head=el('tr'),body=el('tbody');
  for(const [key,label] of [['summary','Trace'],['model','Harness / model'],['project','Repo / branch'],['end','Last'],['prompts','Prompts'],['tools','Tools'],['tok','Tokens'],['cost','Cost'],['wall_ms','API / wall']])head.append(el('th',{class:'sortable',onclick:()=>{sortAsc=key===sortKey?!sortAsc:false;sortKey=key;sortChosen=true;built.traces=false;show('traces');}},label));
+ const showEval=DATA.tier==='pro'||DATA.tier==='hosted';
+ if(showEval) head.append(el('th',{scope:'col'},'Eval'));
  const cols=head.children.length;
  table.append(el('thead',{},head),body);v.append(table);
  let shown=0;const more=el('button',{onclick:drawMore},'Show more');v.append(more);
@@ -876,6 +882,7 @@ function tracesView(){
    if(/^https?:\/\//.test(r.repo_url||''))repo.append(el('a',{class:'repo',href:r.repo_url+'/tree/'+encodeURIComponent(r.branch||''),target:'_blank',rel:'noopener',onclick:e=>e.stopPropagation()},repoLabel+' ↗'));else repo.append(repoLabel);
    tr.append(title,el('td',{},el('span',{class:'pill'},r.harness),' '+shortModel(r.model)),repo,el('td',{class:'nw'},r.end?ago(r.end):''));
    for(const value of [fmtN(r.prompts),fmtN(r.tools),fmtTok(r.tok),fmtUsd(r.cost),fmtMs(r.api_ms)+' / '+fmtMs(r.wall_ms)])tr.append(el('td',{class:'num'},value));
+   if(showEval) tr.append(el('td',{class:'eval-badge'},r.eval_status||r.evaluation?.outcome||(r.eval?(r.eval.poor?'failed':'passed'):'unevaluated')));
    attachPreview(tr,r);body.append(tr);
    // A hit reads as a line of the trace under its row, not a squeezed column.
    if(searchRows!==null&&r.snippet){
@@ -1518,7 +1525,7 @@ function boardTag(t){return el('a',{class:'bd-tag'+(BOARD.tag===t?' on':''),href
 function boardSnippet(s){return esc(s).replace(/\[([^\[\]\n]{1,80})\]/g,'<mark>$1</mark>');}
 function boardEmpty(text){return el('div',{class:'bd-empty'},text);}
 async function boardJSON(path,seq){
- const data=await getJSON('api/board/'+path);
+ const data=await getJSON('/api/board/'+path);
  if(seq!==BOARD.seq)throw Object.assign(Error('superseded'),{superseded:true});
  return data;
 }
@@ -1593,7 +1600,7 @@ function boardImages(list){
  const box=el('div',{class:'bd-imgs'});
  for(const im of list||[]){
   if(!/^[0-9a-f]{64}$/.test(im.sha256||''))continue;
-  const url='api/board/blob/'+im.sha256;const name=im.name||'image';
+  const url='/api/board/blob/'+im.sha256;const name=im.name||'image';
   const img=el('img',{src:url,loading:'lazy',alt:name,title:`${name} · ${im.width}×${im.height}`});
   if(im.width&&im.height){img.setAttribute('width',String(im.width));img.setAttribute('height',String(im.height));}
   const a=el('a',{href:url,target:'_blank',rel:'noopener'},img);
@@ -1629,12 +1636,15 @@ function show(name){
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on', v.id==='v-'+name));
   // Two sections: Traces (its list, stats and a session's drill views) and Board.
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.v===(board?'board':'traces')));
-  $('#trace-tabs').hidden=board;$('#range').hidden=board;
+  const nonTrace=board||name==='workspace';
+  $('#trace-tabs').hidden=nonTrace;$('#range').hidden=nonTrace;
+  $('.top').classList.toggle('workspace-top-hidden',!!DATA.tier&&nonTrace);
   document.querySelectorAll('#trace-tabs button').forEach(b=>b.classList.toggle('on', b.dataset.v===name || (DRILL.has(name) && b.dataset.v==='traces')));
-  $('#shead').hidden = !DRILL.has(name);$('#archive-filters').hidden=DRILL.has(name)||board;
+  $('#shead').hidden = !DRILL.has(name);$('#archive-filters').hidden=DRILL.has(name)||nonTrace;
   document.querySelectorAll('.subnav button').forEach(b=>b.classList.toggle('on', b.dataset.v===name));
-  if (!built[name] || board){ built[name]=true; ({stats:statsView, traces:tracesView, board:boardView, transcript:transcriptView, timeline:()=>{drawTimeline(); timelineRight();}, sstats:sessionStatsView})[name](); }
+  if (!built[name] || board){ built[name]=true; ({stats:statsView, traces:tracesView, board:boardView, workspace:workspaceView, transcript:transcriptView, timeline:()=>{drawTimeline(); timelineRight();}, sstats:sessionStatsView})[name](); }
   else if (name==='timeline') drawTimeline();
+  if(name==='workspace') return;
   if (board){ if (location.hash!==boardHash()) history.replaceState(null,'',location.pathname+location.search+boardHash()); return; }
   if (name==='traces' && !archivePending && statusLine.hidden) setLoading(false);
   placeStatus();
@@ -1643,8 +1653,9 @@ function show(name){
   if(!archivePending&&((name==='traces'&&!DATA.listTiming)||(name==='stats'&&!statsReusable())))refreshArchive(name);
 }
 document.querySelectorAll('#tabs button,#trace-tabs button').forEach(b=>b.onclick=()=>{ if (b.dataset.v==='board') boardGo({}); else show(b.dataset.v); });
-if (DATA.board?.enabled) $('#tabs button[data-v=board]').hidden=false;
+if (DATA.board?.enabled && !DATA.tier) $('#tabs button[data-v=board]').hidden=false;
 document.addEventListener('keydown', e=>{
+  if (e.defaultPrevented || $('#workspace-search-dialog')?.open) return;
   if (e.target.tagName==='INPUT' || e.target.tagName==='SELECT') return;
   if (currentView==='v-transcript'){
     if (e.key==='}'||e.key==='{'){ const term=$('#term'); const tops=S.turns.map(t=>$('#t-'+t.uuid).offsetTop-20); const i = e.key==='}' ? tops.findIndex(y=>y>term.scrollTop+4) : tops.filter(y=>y<term.scrollTop-4).length-1; if (i>=0 && i<tops.length) term.scrollTop=tops[i]; }
@@ -1665,6 +1676,7 @@ function applyTheme(t){
   const r=document.documentElement; if (t==='auto') r.removeAttribute('data-theme'); else r.dataset.theme=t;
   const dark = t==='dark' || (t==='auto' && darkMQ.matches);
   if (dark) r.dataset.appearance='dark'; else r.removeAttribute('data-appearance');
+  $('#workspace-theme')?.setAttribute('aria-pressed',String(dark));
   $('#theme').title = (dark?'Dark':'Light')+(t==='auto'?' (following the system)':'')+' · switch to '+(dark?'light':'dark');
 }
 $('#theme').onclick=()=>{
@@ -1672,15 +1684,59 @@ $('#theme').onclick=()=>{
   try { localStorage.setItem('kit.theme', themeNow); } catch(e){}
   applyTheme(themeNow);
 };
+if ($('#workspace-theme')) $('#workspace-theme').onclick=$('#theme').onclick;
 darkMQ.addEventListener?.('change', ()=>{ if (themeNow==='auto') applyTheme('auto'); });
 applyTheme(themeNow);
+function workspaceView(){
+ document.body.classList.remove('loading');statusLine.hidden=true;
+ const target=$('#v-workspace'), section=location.pathname.slice(1);
+ const titles={evidence:'Evidence',orders:'Orders',peers:'Peers',mobile:'Mobile',settings:'Profile & settings',profile:'Profile & settings'};
+ const listing=el('div',{class:'workspace-list'},el('h1',{},titles[section]));
+ target.replaceChildren(listing);
+ if(section==='mobile'){
+   const recent=el('div',{role:'status'},'Loading recent traces…');
+   listing.append(el('h2',{},'Recent traces'),recent,el('a',{href:'/#traces'},'Open all Traces'));
+   getJSON('/api/sessions?window=7d').then(data=>{
+     const rows=(data.sessions||[]).slice(0,8);
+     recent.replaceChildren(...rows.map(row=>el('article',{},el('a',{href:'/'+traceURL(row)},row.summary||row.first_prompt_short||row.id))));
+     if(!rows.length) recent.textContent='No traces in the last seven days.';
+   }).catch(()=>{recent.textContent='Recent traces unavailable.';});
+   return;
+ }
+ const results=el('div',{role:'status'},'Loading…');
+ const endpoint='/api/'+(section==='profile'?'settings':section);
+ let controller;
+ const read=async q=>{
+   controller?.abort();
+   const request=new AbortController();
+   controller=request;
+   results.textContent='Loading…';
+   try {
+     const data=await getJSON(endpoint+'?'+new URLSearchParams({q}),request.signal);
+     if(request.signal.aborted) return;
+     const rows=data.rows||[];
+     results.replaceChildren(...rows.map(row=>el('article',{id:row.id||''},el('h2',{},row.title),el('p',{},row.detail||''))));
+     if(!rows.length) results.textContent='No results.';
+     if(location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+   } catch { if(!request.signal.aborted) results.textContent='Source unavailable.'; }
+ };
+ if(section==='evidence'||section==='orders'){
+   const input=el('input',{type:'search',value:params.get('q')||'','aria-label':'Search '+titles[section]});
+   listing.append(el('form',{onsubmit:event=>{event.preventDefault();read(input.value);}},input,el('button',{type:'submit'},'Search')));
+ }
+ listing.append(results);
+ read(params.get('q')||'');
+}
+if(DATA.tier) import('/ui/workspace.mjs').then(module=>module.mountWorkspace(DATA.tier));
 header(); rangeBar();renderFilterBar();
 function route(){
   const h=location.hash.slice(1);
-  if ((h==='board'||h.startsWith('board?')||h.startsWith('board/')) && DATA.board?.enabled){ parseBoardHash(h); show('board'); }
+  if(DATA.tier && location.pathname==='/board' && DATA.board?.enabled){parseBoardHash(h||'board');show('board');}
+  else if(DATA.tier && location.pathname!=='/') show('workspace');
+  else if ((h==='board'||h.startsWith('board?')||h.startsWith('board/')) && DATA.board?.enabled){ parseBoardHash(h); show('board'); }
   else if (h.startsWith('t-')){ show('transcript'); requestAnimationFrame(()=>jumpTo(h.slice(2))); }
   else if (h==='eval') show('transcript');
-  else show(['stats','traces','transcript','timeline','sstats'].includes(h)?h:'stats');
+  else show(['stats','traces','transcript','timeline','sstats'].includes(h)?h:DATA.tier?'traces':'stats');
 }
 window.addEventListener('hashchange', ()=>{ if (currentView==='v-board' ? location.hash!==boardHash() : '#'+currentView.slice(2)!==location.hash) route(); });
 route();

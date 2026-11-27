@@ -80,6 +80,9 @@ jobs:
       - name: Stats compact frontend path (no browser)
         run: node scripts/test-stats-path.cjs
 
+      - name: Serve workspace sidebar and search
+        run: node scripts/test-serve-workspace.cjs
+
       - name: native job Darwin source cross-compile (not native acceptance)
         run: |
           GOOS=darwin GOARCH=arm64 go test -c -o "$RUNNER_TEMP/nativejob-darwin-arm64.test" ./pkg/nativejob

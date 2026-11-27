@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hev/kit/internal/layer"
+	"github.com/hev/kit/internal/preval"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -36,6 +37,9 @@ func latestEvals(rows []layer.EvalRow) []layer.EvalRow {
 	return out
 }
 func (s *Server) evals(q url.Values) ([]layer.EvalRow, error) {
+	if s.oss() {
+		return nil, nil
+	}
 	f, err := evalFilter(q)
 	if err != nil {
 		return nil, err
@@ -102,6 +106,9 @@ func (s *Server) evals(q url.Values) ([]layer.EvalRow, error) {
 	return out, nil
 }
 func (s *Server) joinedCorpus(rows []trace.SessionRow) ([]map[string]any, error) {
+	if s.oss() {
+		return corpus(rows), nil
+	}
 	evals, err := s.evals(nil)
 	if err != nil {
 		return nil, err
@@ -117,14 +124,26 @@ func (s *Server) joinedCorpus(rows []trace.SessionRow) ([]map[string]any, error)
 	out := corpus(rows)
 	for _, row := range out {
 		row["eval"] = nil
+		var poor *bool
+		outcome := ""
+		if e, ok := row["evaluation"].(*preval.Evaluation); ok {
+			outcome = e.Outcome
+		}
 		if e := byID[row["id"].(string)]; e != nil {
+			poor = &e.Poor
 			row["eval"] = map[string]any{"marks": e.Marks, "poor": e.Poor, "role": e.Role, "instance": e.Instance}
+		}
+		if s.workspace != nil {
+			row["eval_status"] = EvalStatus(outcome, poor)
 		}
 	}
 	return out, nil
 }
 func (s *Server) sessionData(row trace.SessionRow, blocks []trace.BlockRow) (map[string]any, error) {
 	data := buildSessionImages(row, blocks, s.imageLocal)
+	if s.oss() {
+		return data, nil
+	}
 	data["eval_baseline"] = s.sessionBaseline(projectName(row.RepoURL))
 	reader, ok := s.reader.(evalReader)
 	if !ok {
@@ -281,4 +300,67 @@ func computeBaseline(src evalSource) (map[string]markAverage, map[string]map[str
 		}
 	}
 	return overall, projects, nil
+}
+
+// EvalStatus unifies the current PR outcome and legacy grade representations.
+func EvalStatus(outcome string, legacyPoor *bool) string {
+	switch outcome {
+	case preval.Merged:
+		return "passed"
+	case preval.Closed, preval.Stale, preval.Superseded, preval.Reverted:
+		return "failed"
+	case preval.Corrected:
+		return "corrected"
+	case "":
+		if legacyPoor == nil {
+			return "unevaluated"
+		}
+		if *legacyPoor {
+			return "failed"
+		}
+		return "passed"
+	default:
+		return "pending"
+	}
+}
+
+func (s *Server) filterEvalRows(rows []trace.SessionRow, q url.Values) ([]trace.SessionRow, error) {
+	if !q.Has("eval") || s.oss() {
+		return rows, nil
+	}
+	status := q.Get("eval")
+	switch status {
+	case "", "all":
+		return rows, nil
+	case "passed", "failed", "corrected", "pending", "unevaluated":
+	default:
+		return nil, errors.New("invalid evaluation filter")
+	}
+	grades, err := s.evals(nil)
+	if err != nil {
+		return nil, err
+	}
+	legacy := make(map[string]bool, len(grades))
+	for _, grade := range grades {
+		e, err := grade.Eval()
+		if err != nil {
+			return nil, err
+		}
+		legacy[grade.SessionID] = e.Poor
+	}
+	filtered := make([]trace.SessionRow, 0, len(rows))
+	for _, row := range latestSessions(rows) {
+		outcome := ""
+		if row.Evaluation != nil && row.Evaluation.Valid() {
+			outcome = row.Evaluation.Outcome
+		}
+		var poor *bool
+		if value, ok := legacy[row.SessionID]; ok {
+			poor = &value
+		}
+		if EvalStatus(outcome, poor) == status {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, nil
 }

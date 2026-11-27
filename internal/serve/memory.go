@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hev/kit/internal/grep"
+	"github.com/hev/kit/internal/layer"
 	"github.com/hev/kit/internal/trace"
 )
 
@@ -221,4 +223,28 @@ func globMatch(pattern, s string) bool {
 		s = s[j+len(p):]
 	}
 	return true
+}
+
+// SearchHits gives the local demo and in-memory fixtures the same word matching
+// as the file archive, without creating a second archive on disk.
+func (m *MemoryReader) SearchHits(q string, limit int, filter any) ([]layer.Hit, error) {
+	query, err := grep.Compile([]string{q})
+	if err != nil {
+		return nil, nil
+	}
+	var hits []layer.Hit
+	for _, block := range m.Blocks {
+		matches, err := memoryMatch(map[string]any{"session_id": block.SessionID}, filter)
+		if err != nil {
+			return nil, err
+		}
+		if score, ok := query.Score(block.Text); matches && ok {
+			hits = append(hits, layer.Hit{ID: block.ID, SessionID: block.SessionID, TurnUUID: block.TurnUUID, Text: block.Text, Role: block.Role, BlockType: block.BlockType, Dist: float64(score)})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Dist > hits[j].Dist })
+	if limit > 0 && len(hits) > limit {
+		hits = hits[:limit]
+	}
+	return hits, nil
 }

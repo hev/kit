@@ -118,19 +118,19 @@ func runKitSearch(ctx context.Context, out io.Writer, c *kitapi.Client, phrasing
 // kitDashboard serves the local dashboard page with its /api reads answered
 // by the hevmind.com service API, so `hev serve` shows the team's archive on a signed-in
 // machine. Routes the hevmind.com service API does not carry answer 404.
-func kitDashboard(c *kitapi.Client) http.Handler {
-	page := dashboard.NewReaderHandler(emptyReader{}, dashboard.ReaderOptions{Board: readserve.HostedBoard(c)})
+func kitDashboard(c *kitapi.Client, keys ...string) http.Handler {
+	server := readserve.New(emptyReader{}).WithBoard(readserve.HostedBoard(c)).WithWorkspace(hostedWorkspace(c, keys))
+	page := server.Handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/api/board/") {
+		p, ok := dashboard.APIPath(r.URL.Path)
+		if !ok || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
 			page.ServeHTTP(w, r)
 			return
 		}
-		p, ok := dashboard.APIPath(r.URL.Path)
-		if !ok || r.Method != http.MethodGet {
-			http.Error(w, `{"error":"not available from the hevmind.com service API"}`, http.StatusNotFound)
-			return
-		}
-		raw, err := c.DoRaw(r.Context(), "GET", "/v1/traces"+p, r.URL.Query(), nil)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		w.Header().Set("Cache-Control", "private, no-store")
+		raw, err := c.DoRaw(ctx, http.MethodGet, "/v1/traces"+p, r.URL.Query(), nil)
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			code := http.StatusBadGateway
@@ -139,16 +139,24 @@ func kitDashboard(c *kitapi.Client) http.Handler {
 				code = e.Status
 			}
 			w.WriteHeader(code)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "hosted traces unavailable"})
 			return
 		}
-		_, _ = w.Write(raw)
+		raw, err = server.RedactJSON(raw)
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "hosted traces unavailable"})
+			return
+		}
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(raw)
+		}
 	})
 }
 
-func serveKitDashboard(out io.Writer, ln net.Listener, c *kitapi.Client, team string) error {
+func serveKitDashboard(out io.Writer, ln net.Listener, c *kitapi.Client, team, key string) error {
 	fmt.Fprintf(out, "hev read side (hevmind.com service team %s): http://%s\n", team, ln.Addr())
-	return http.Serve(ln, kitDashboard(c))
+	return http.Serve(ln, kitDashboard(c, key))
 }
 
 // emptyReader backs the page handler; every /api read goes to the hevmind.com service API.
