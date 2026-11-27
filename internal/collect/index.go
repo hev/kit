@@ -93,16 +93,21 @@ func (l *LayerTurns) Upsert(ctx context.Context, turns []Turn) error {
 			"service": t.Service, "harness": "app:" + t.Service,
 		})
 	}
-	var out struct {
-		Status string `json:"status"`
-		Error  string `json:"error"`
-	}
-	body := map[string]any{"upsert_rows": rows, "distance_metric": "cosine_distance", "schema": l.schema()}
-	if err := l.Client.WithContext(ctx).Request("POST", "/v2/namespaces/"+l.Client.Namespace, body, &out); err != nil {
-		return err
-	}
-	if out.Status != "OK" && out.Error != "" {
-		return fmt.Errorf("layer write: %s", out.Error)
+	client := l.Client.WithContext(ctx)
+	schema := l.schema()
+	for start := 0; start < len(rows); start += layer.MaxEmbeddedWriteRows {
+		end := min(start+layer.MaxEmbeddedWriteRows, len(rows))
+		var out struct {
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		}
+		body := map[string]any{"upsert_rows": rows[start:end], "distance_metric": "cosine_distance", "schema": schema}
+		if err := client.Request("POST", "/v2/namespaces/"+client.Namespace, body, &out); err != nil {
+			return err
+		}
+		if out.Status != "OK" && out.Error != "" {
+			return fmt.Errorf("layer write: %s", out.Error)
+		}
 	}
 	return nil
 }
