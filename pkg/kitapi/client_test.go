@@ -2,6 +2,7 @@ package kitapi_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -216,5 +217,44 @@ func TestMaskKeyOnlyDisplaysValidPrefixAndTail(t *testing.T) {
 				t.Fatal("unexpected display mask")
 			}
 		})
+	}
+}
+
+func TestWhoamiExpiryAcceptsTimestampsAndMissingValues(t *testing.T) {
+	const expiry = "2027-02-24T00:00:00Z"
+	for _, tt := range []struct {
+		name, field, want string
+	}{
+		{"milliseconds", `,"expires_at":1803427200123`, "2027-02-24T00:00:00.123Z"},
+		{"seconds", `,"expires_at":1803427200`, expiry},
+		{"RFC3339", `,"expires_at":"2027-02-24T00:00:00Z"`, expiry},
+		{"offset", `,"expires_at":"2027-02-23T19:00:00-05:00"`, expiry},
+		{"null", `,"expires_at":null`, ""},
+		{"empty", `,"expires_at":""`, ""},
+		{"omitted", "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var who kitapi.Whoami
+			if err := json.Unmarshal([]byte(`{"key_name":"Build machine"`+tt.field+`}`), &who); err != nil {
+				t.Fatal(err)
+			}
+			if who.ExpiresAt != tt.want || who.KeyName != "Build machine" {
+				t.Fatalf("decoded key name %q and expiry %q, want Build machine and %q", who.KeyName, who.ExpiresAt, tt.want)
+			}
+		})
+	}
+}
+
+func TestWhoamiExpiryRejectsInvalidValues(t *testing.T) {
+	const privateValue = "hev_sensitive_fixture"
+	for _, value := range []string{`{"key":"` + privateValue + `"}`, `["` + privateValue + `"]`, `"` + privateValue + `"`, `false`, `1.5`, `9223372036854775808`, `9223372036854775807`} {
+		var who kitapi.Whoami
+		err := json.Unmarshal([]byte(`{"expires_at":`+value+`}`), &who)
+		if err == nil || !strings.Contains(err.Error(), "expires_at") {
+			t.Fatalf("invalid expiry %s: expected a field error, got %v", value, err)
+		}
+		if strings.Contains(err.Error(), privateValue) {
+			t.Fatal("expiry error contained the raw input")
+		}
 	}
 }
