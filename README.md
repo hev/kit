@@ -257,6 +257,13 @@ and learnings on `hev board`, proof packages in `hev evidence`, and proposals
 and specs in dispatch orders (`hev dispatch`, stored under `~/.hev/orders`).
 See [release notes](releases/) and the [Layer schema policy](schemas/layer/).
 
+For running dispatch workers, `hev steer RUN MESSAGE` puts a note and its
+acknowledgement command in the run's inbox. A delivery receipt records that kit
+wrote the inbox entry. Once the worker handles the message, it runs
+`hev steer ack ID` on the run's host. Kit can inject an outstanding note at the
+next prompt. Use `hev steer ls RUN` to find receipts on the run's host, or
+`hev steer ls RUN --host HOST` to select a host explicitly.
+
 A machine that only sends work needs no daemon: `hev skills setup` installs the
 bundled agent skills for Claude Code, Codex, pi and OpenCode, records the
 machine's skills role and syncs team sources, and starts nothing. `hev up` runs

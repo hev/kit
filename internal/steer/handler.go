@@ -86,7 +86,9 @@ func (s Store) Handle(ev hooks.Event, ack string, now time.Time) (hooks.Response
 		var parts []string
 		for i := range ms {
 			m := &ms[i]
-			if m.State == Queued && (m.Level == Note || m.Level == Urgent) {
+			// Unacknowledged inbox messages still reach the next prompt.
+			inInbox := m.State == Injected && m.Injected != nil && m.Injected.Event == InboxEvent
+			if (m.State == Queued || inInbox) && (m.Level == Note || m.Level == Urgent) {
 				m.State, m.Injected = Injected, mark(ev.Event)
 				put(m)
 				parts = append(parts, inject(*m, ack))

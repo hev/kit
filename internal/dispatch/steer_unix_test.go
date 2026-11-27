@@ -4,6 +4,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -421,7 +422,7 @@ func TestLegacyMessagesAreNoteReceipts(t *testing.T) {
 	}
 	want := map[string]string{say.SteerID: "LEGACY_SAY", peer.SteerID: "PEER_SEND", st.SteerID: "STEER_NOTE", urgent.SteerID: "UNWIRED_URGENT"}
 	for _, m := range ms {
-		if want[m.ID] != m.Text || m.State != steer.Queued || m.Delivery != steer.TurnBoundary {
+		if want[m.ID] != m.Text || m.State != steer.Injected || m.Injected == nil || m.Injected.Event != steer.InboxEvent || m.Acked != nil || m.Delivery != steer.TurnBoundary {
 			t.Fatalf("%+v (want %v)", m, want)
 		}
 		if m.Text == "UNWIRED_URGENT" && m.Level != steer.Urgent || m.Text != "UNWIRED_URGENT" && m.Level != steer.Note {
@@ -437,17 +438,48 @@ func TestLegacyMessagesAreNoteReceipts(t *testing.T) {
 			t.Fatalf("inbox %q: %s", s, b)
 		}
 	}
-	// The note is injected at the next prompt and only then can be acked.
+	// An explicit inbox ack works before the next prompt. Reading the inbox
+	// above left every receipt unacknowledged.
+	if got, err := store.Ack(st.SteerID, "worker"); err != nil || got.State != steer.Acked || got.Acked.Event != "ack" {
+		t.Fatalf("inbox ack: %+v %v", got, err)
+	}
+	for id := range want {
+		if !strings.Contains(string(b), steerAck(id)) {
+			t.Fatalf("missing acknowledgement command for %s", id)
+		}
+	}
+	// Only unacknowledged notes are injected at the next prompt.
 	ev, err := hooks.Normalize("claude", "prompt-submit", []byte(`{"session_id":"s","hook_event_name":"UserPromptSubmit","prompt":"go"}`), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp, err := store.Handle(ev, "ack", time.Now())
-	if err != nil || !strings.Contains(resp.Context, "LEGACY_SAY") {
+	if err != nil || !strings.Contains(resp.Context, "LEGACY_SAY") || strings.Contains(resp.Context, "STEER_NOTE") {
 		t.Fatalf("%+v %v", resp, err)
 	}
-	if got, _ := store.Get(say.SteerID); got.State != steer.Injected {
+	if got, _ := store.Get(say.SteerID); got.State != steer.Injected || got.Injected.Event != "prompt-submit" || got.Acked != nil {
 		t.Fatalf("%+v", got)
+	}
+
+	// A failed append leaves the receipt queued and refuses acknowledgement.
+	inbox := filepath.Join(dir, "inbox.md")
+	if err := os.Rename(inbox, inbox+".previous"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(inbox, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const failedNote = "sensitive message"
+	if _, err := Handle(Request{Action: "steer", Name: name, Note: failedNote, Level: steer.Note}); err == nil ||
+		strings.Contains(err.Error(), dir) || strings.Contains(err.Error(), failedNote) {
+		t.Fatalf("expected a redacted delivery error, got %v", err)
+	}
+	ms, err = store.List()
+	if err != nil || len(ms) != 5 || ms[4].State != steer.Queued || ms[4].Injected != nil {
+		t.Fatalf("failed delivery receipt: %+v %v", ms, err)
+	}
+	if _, err := store.Ack(ms[4].ID, "worker"); !errors.Is(err, steer.ErrNotInjected) {
+		t.Fatalf("ack after failed delivery: %v", err)
 	}
 }
 

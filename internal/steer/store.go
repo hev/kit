@@ -1,6 +1,6 @@
 // Package steer keeps steering messages and their receipts (RFC 0013): one
 // JSON file per message in the target's steer directory, moved through
-// queued -> injected -> acked by the hook layer and `hev steer ack`.
+// queued -> delivered or injected -> acked.
 package steer
 
 import (
@@ -48,6 +48,7 @@ const (
 const (
 	ToolBoundary = "tool-boundary"
 	TurnBoundary = "turn-boundary"
+	InboxEvent   = "inbox"
 )
 
 // Mark records when and where a receipt moved.
@@ -268,6 +269,16 @@ func (s Store) SaveState(st State) error {
 
 // Enqueue stores a new queued message.
 func (s Store) Enqueue(level, text, from, delivery string, haltTimeout time.Duration) (Message, error) {
+	return s.enqueue(level, text, from, delivery, haltTimeout, nil)
+}
+
+// EnqueueInbox records inbox delivery. The lock keeps acknowledgements and
+// hook injection from racing the append and receipt update.
+func (s Store) EnqueueInbox(level, text, from string, appendInbox func(id string) error) (Message, error) {
+	return s.enqueue(level, text, from, TurnBoundary, 0, appendInbox)
+}
+
+func (s Store) enqueue(level, text, from, delivery string, haltTimeout time.Duration, appendInbox func(string) error) (Message, error) {
 	if !ValidLevel(level) {
 		return Message{}, fmt.Errorf("unknown level %q (want %s)", level, strings.Join(Levels, ", "))
 	}
@@ -286,11 +297,19 @@ func (s Store) Enqueue(level, text, from, delivery string, haltTimeout time.Dura
 	if m.Halting() && haltTimeout > 0 {
 		m.HaltTimeout = haltTimeout.String()
 	}
+	if err := s.Put(m); err != nil || appendInbox == nil {
+		return m, err
+	}
+	if err := appendInbox(m.ID); err != nil {
+		return m, err
+	}
+	m.State = Injected
+	m.Injected = &Mark{At: time.Now().UTC(), Event: InboxEvent}
 	return m, s.Put(m)
 }
 
 // ErrNotInjected refuses an ack for a message the agent was never shown.
-var ErrNotInjected = errors.New("not injected yet: the agent has not been shown this message, so it cannot acknowledge it")
+var ErrNotInjected = errors.New("not delivered or injected yet: the agent cannot acknowledge this message")
 
 // Ack acknowledges an injected message. Acking twice is harmless.
 func (s Store) Ack(id, by string) (Message, error) {

@@ -799,38 +799,30 @@ func Handle(q Request) (r Response, handleErr error) {
 		}
 		if live[q.Name] || q.Action == "peer-send" {
 			defer unlock()
-			f, err := os.OpenFile(filepath.Join(dir, "inbox.md"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-			if err != nil {
-				return r, err
-			}
-			_, err = f.WriteString("\n## " + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" + q.Note + "\n")
-			syncErr := f.Sync()
-			closeErr := f.Close()
-			if err == nil {
-				err = syncErr
-			}
-			if err != nil {
-				return r, err
-			}
-			if originalAction == "say" && recordAsk(&m, "say", q.Note, q.Caller) != "" {
-				if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
-					return r, err
-				}
-			}
-			// The message is a turn-boundary steer receipt too (RFC 0013):
-			// injected at the run's next prompt, counted in ls and show.
-			// hev steer passes its level; plain say and peer-send are notes.
 			level := q.Level
 			if level != steer.Urgent {
 				level = steer.Note
 			}
-			rm, rerr := steer.RunStore(Root(), q.Name).Enqueue(level, q.Note, steerLabel(q.Caller), steer.TurnBoundary, 0)
-			r.Message = "sent " + q.Name
-			if rerr == nil {
-				r.SteerID, r.Delivery = rm.ID, steer.TurnBoundary
-				r.Message += " (" + rm.ID + ")"
-			} else {
-				r.Message += "; its steer receipt was not recorded: " + rerr.Error()
+			rm, err := steer.RunStore(Root(), q.Name).EnqueueInbox(level, q.Note, steerLabel(q.Caller), func(id string) error {
+				f, err := os.OpenFile(filepath.Join(dir, "inbox.md"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+				if err != nil {
+					return err
+				}
+				_, err = f.WriteString("\n## " + time.Now().UTC().Format(time.RFC3339Nano) + "\n\n" +
+					q.Note + "\n\nAfter handling this message, run `" + steerAck(id) + "`.\n")
+				syncErr := f.Sync()
+				closeErr := f.Close()
+				return errors.Join(err, syncErr, closeErr)
+			})
+			if err != nil {
+				return r, fmt.Errorf("could not record steering inbox delivery for %s", q.Name)
+			}
+			r.SteerID, r.Delivery = rm.ID, rm.Delivery
+			r.Message = "sent " + q.Name + " (" + rm.ID + ")"
+			if originalAction == "say" && recordAsk(&m, "say", q.Note, q.Caller) != "" {
+				if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
+					return r, fmt.Errorf("could not record sender metadata for %s", q.Name)
+				}
 			}
 			if q.Action == "peer-send" {
 				r.DeliveryStatus = "delivered to run inbox"
@@ -846,7 +838,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					r.DeliveryStatus = "queued for next round"
 				}
 			}
-			return r, closeErr
+			return r, nil
 		}
 		unlock()
 		q.Action = "rework"

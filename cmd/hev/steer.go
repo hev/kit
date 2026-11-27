@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,8 +31,9 @@ Levels:
   redirect  halt, commit the worktree as a checkpoint, and rework the same run with
             MESSAGE appended (branch and PR kept); dispatch runs only
 
-Every message gets an ID and a receipt: queued -> injected (time, turn, tool
-call) -> acked. hev steer says which delivery the target gets: tool-boundary
+Every message gets an ID and a receipt: queued -> delivered or injected -> acked.
+For dispatch inbox delivery, the injected event is "inbox". Run the ack
+command in the inbox entry after handling it. hev steer reports tool-boundary
 when kit's hooks run in it, else the turn-boundary fallback. Nothing is killed
 to deliver; a halt that has not ended its turn after --halt-timeout (default
 10m, [hooks] halt_timeout) becomes a hard stop of a dispatch run.
@@ -101,7 +103,7 @@ func newSteerCommand() *cobra.Command {
 		failed := false
 		for _, id := range args {
 			if !steer.ValidID(id) {
-				fmt.Fprintf(cmd.ErrOrStderr(), "%s: not a steer ID\n", id)
+				fmt.Fprintln(cmd.ErrOrStderr(), "invalid steer ID")
 				failed = true
 				continue
 			}
@@ -113,7 +115,11 @@ func newSteerCommand() *cobra.Command {
 			}
 			m, err := store.Ack(id, by)
 			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", id, err)
+				if errors.Is(err, steer.ErrNotInjected) {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", id, err)
+				} else {
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: could not record acknowledgement\n", id)
+				}
 				failed = true
 				continue
 			}
@@ -126,20 +132,24 @@ func newSteerCommand() *cobra.Command {
 	}})
 
 	var lsJSON bool
-	ls := &cobra.Command{Use: "ls [TARGET]", Short: "List steering receipts on this host", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		home, _ := os.UserHomeDir()
-		stores := localSteerStores(home)
-		if len(args) == 1 {
-			s, ok := localSteerStore(home, args[0])
-			if !ok {
-				return fmt.Errorf("no local steering target %s (for a remote run use hev dispatch show)", args[0])
-			}
-			stores = []steer.Store{s}
-		}
+	var lsHost, lsConfig string
+	ls := &cobra.Command{Use: "ls [TARGET]", Short: "List local steering receipts or look up a dispatch target", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		var all []steer.Message
-		for _, s := range stores {
-			ms, _ := s.List()
-			all = append(all, ms...)
+		if len(args) == 1 {
+			var err error
+			all, err = lookupSteer(cmd.Context(), args[0], lsHost, lsConfig)
+			if err != nil {
+				return err
+			}
+		} else {
+			if lsHost != "" || lsConfig != "" {
+				return fmt.Errorf("a target is required with --host or --config")
+			}
+			home, _ := os.UserHomeDir()
+			for _, s := range localSteerStores(home) {
+				ms, _ := s.List()
+				all = append(all, ms...)
+			}
 		}
 		if lsJSON {
 			enc := json.NewEncoder(cmd.OutOrStdout())
@@ -151,6 +161,8 @@ func newSteerCommand() *cobra.Command {
 		return nil
 	}}
 	ls.Flags().BoolVar(&lsJSON, "json", false, "Print receipts as JSON")
+	ls.Flags().StringVar(&lsHost, "host", "", "Dispatch host of the target")
+	ls.Flags().StringVar(&lsConfig, "config", "", "Dispatch config path")
 	c.AddCommand(ls)
 
 	c.AddCommand(&cobra.Command{Use: "show ID", Short: "Print one steering message and its receipt", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
@@ -178,7 +190,11 @@ func steerReceiptTable(raw string) string {
 	for _, m := range ms {
 		injected, latency, acked := "-", "-", "-"
 		if m.Injected != nil {
-			injected = fmt.Sprintf("%s turn %d call %d (%s)", m.Injected.At.Format("15:04:05"), m.Injected.Turn, m.Injected.ToolCall, m.Injected.Event)
+			if m.Injected.Event == steer.InboxEvent {
+				injected = m.Injected.At.Format("15:04:05") + " (inbox)"
+			} else {
+				injected = fmt.Sprintf("%s turn %d call %d (%s)", m.Injected.At.Format("15:04:05"), m.Injected.Turn, m.Injected.ToolCall, m.Injected.Event)
+			}
 			latency = m.Latency().Round(100 * time.Millisecond).String()
 		}
 		if m.Acked != nil {
@@ -192,6 +208,9 @@ func steerReceiptTable(raw string) string {
 			text = text[:57] + "..."
 		}
 		state := m.State
+		if state == steer.Injected && m.Injected != nil && m.Injected.Event == steer.InboxEvent {
+			state = "delivered"
+		}
 		if m.Escalated != nil {
 			state += " (hard stop)"
 		}
@@ -201,18 +220,52 @@ func steerReceiptTable(raw string) string {
 	return b.String()
 }
 
-// localSteerStore resolves a target name to a store on this host.
-func localSteerStore(home, target string) (steer.Store, bool) {
-	root := dispatch.Root()
-	if name, ok := strings.CutPrefix(target, "o-"); ok {
-		return steer.OrchestratorStore(root, name), true
+// localSteerDispatchTarget identifies local runs and orchestrators, including
+// forwarding stubs. The dispatch RPC follows those stubs to the current owner.
+func localSteerDispatchTarget(target string) bool {
+	if !dispatch.ValidAddress(target) {
+		return false
 	}
-	if dispatch.ValidName(target) {
-		if _, err := os.Stat(filepath.Join(root, target, "meta.json")); err == nil {
-			return steer.RunStore(root, target), true
+	if name, ok := strings.CutPrefix(target, "o-"); ok {
+		_, err := dispatch.LoadOrchestrator(name)
+		return err == nil
+	}
+	_, err := os.Stat(filepath.Join(dispatch.Root(), target, "meta.json"))
+	return err == nil
+}
+
+func lookupSteer(ctx context.Context, target, host, configPath string) ([]steer.Message, error) {
+	q := dispatch.Request{Action: "show", Name: target}
+	var r dispatch.Response
+	var err error
+	if host == "" && localSteerDispatchTarget(target) {
+		r, err = dispatch.Handle(q)
+		if err != nil {
+			return nil, fmt.Errorf("could not look up local dispatch steering receipts for %s", target)
+		}
+	} else {
+		if host == "" {
+			home, _ := os.UserHomeDir()
+			if store, ok := steer.PeersStore(home, target); ok {
+				if _, statErr := os.Stat(store.Dir); statErr == nil || !os.IsNotExist(statErr) || tmuxHasSession(ctx, target) {
+					messages, readErr := store.List()
+					if readErr != nil {
+						return nil, fmt.Errorf("could not read local peers steering receipts")
+					}
+					return messages, nil
+				}
+			}
+		}
+		r, err = remoteSteer(ctx, q, host, configPath)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return steer.PeersStore(home, target)
+	var messages []steer.Message
+	if raw := r.Files["steer.json"]; raw != "" && json.Unmarshal([]byte(raw), &messages) != nil {
+		return nil, fmt.Errorf("invalid steering receipts for %s", target)
+	}
+	return messages, nil
 }
 
 func localSteerStores(home string) []steer.Store {
@@ -249,20 +302,11 @@ func localSteerStores(home string) []steer.Store {
 func sendSteer(ctx context.Context, target, text, level, host, configPath, haltTimeout string) (dispatch.Response, error) {
 	caller := dispatch.DetectCaller()
 	q := dispatch.Request{Action: "steer", Name: target, Note: text, Level: level, HaltTimeout: haltTimeout, Caller: &caller}
-	root := dispatch.Root()
 	if host == "" {
-		local := false
-		if name, ok := strings.CutPrefix(target, "o-"); ok {
-			_, err := os.Stat(dispatch.OrchestratorDir(name))
-			local = err == nil
-		} else if dispatch.ValidName(target) {
-			_, err := os.Stat(filepath.Join(root, target, "meta.json"))
-			local = err == nil
-		}
-		if local {
+		if localSteerDispatchTarget(target) {
 			return dispatch.Handle(q)
 		}
-		if !strings.Contains(target, "/") && tmuxHasSession(target) {
+		if !strings.Contains(target, "/") && tmuxHasSession(ctx, target) {
 			return steerPeers(ctx, target, text, level, caller)
 		}
 	}
@@ -272,33 +316,70 @@ func sendSteer(ctx context.Context, target, text, level, host, configPath, haltT
 		}
 		return peersSendNote(target, text, false)
 	}
-	cfg, err := dispatch.Load(dispatch.ConfigPath(configPath))
-	if err != nil {
-		return dispatch.Response{}, err
-	}
-	inv := dispatch.Inventory(cfg, host)
-	var matches []string
-	for n, r := range inv {
-		for _, row := range r.Rows {
-			if row.Name == target {
-				matches = append(matches, n)
-			}
-		}
-	}
-	if len(matches) != 1 {
-		return dispatch.Response{}, fmt.Errorf("no dispatch run, orchestrator or local peers session named %s (or ambiguous; select --host)", target)
-	}
-	h := cfg.Hosts[matches[0]]
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	return dispatch.RPC(ctx, h, q)
+	return remoteSteer(ctx, q, host, configPath)
 }
 
-func tmuxHasSession(name string) bool {
+func remoteSteer(ctx context.Context, q dispatch.Request, host, configPath string) (dispatch.Response, error) {
+	if !dispatch.ValidAddress(q.Name) {
+		return dispatch.Response{}, fmt.Errorf("invalid dispatch target")
+	}
+	cfg, err := dispatch.Load(dispatch.ConfigPath(configPath))
+	if err != nil {
+		if q.Action == "show" {
+			return dispatch.Response{}, fmt.Errorf("could not load dispatch configuration")
+		}
+		return dispatch.Response{}, err
+	}
+	if host == "" {
+		inv := dispatchInventory(cfg, "")
+		var matches []string
+		for _, name := range dispatch.SortedHosts(inv) {
+			for _, row := range inv[name].Rows {
+				if row.Name == q.Name {
+					matches = append(matches, name)
+					break
+				}
+			}
+		}
+		switch {
+		case len(matches) > 1:
+			return dispatch.Response{}, fmt.Errorf("dispatch target %s is ambiguous; select --host", q.Name)
+		case len(matches) == 1:
+			host = matches[0]
+		default:
+			for _, response := range inv {
+				if response.Error != "" {
+					return dispatch.Response{}, fmt.Errorf("could not locate dispatch target %s; some hosts were unreachable", q.Name)
+				}
+			}
+			return dispatch.Response{}, fmt.Errorf("dispatch target %s not found", q.Name)
+		}
+	}
+	h, ok := cfg.Hosts[host]
+	if !ok {
+		return dispatch.Response{}, fmt.Errorf("unknown dispatch host")
+	}
+	ctx = dispatch.WorkspaceContext(ctx, cfg.SelectedWorkspace)
+	timeout := 5 * time.Minute
+	if q.Action == "show" {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	r, err := dispatch.RPC(ctx, h, q)
+	if err != nil && q.Action == "show" {
+		return dispatch.Response{}, fmt.Errorf("could not look up dispatch target %s on the selected host", q.Name)
+	}
+	return r, err
+}
+
+func tmuxHasSession(ctx context.Context, name string) bool {
 	if !regexpSession(name) {
 		return false
 	}
-	return exec.Command("tmux", "has-session", "-t", "="+name).Run() == nil
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "tmux", "has-session", "-t", "="+name).Run() == nil
 }
 
 func regexpSession(name string) bool {
