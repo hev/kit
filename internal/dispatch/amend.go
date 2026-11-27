@@ -224,6 +224,9 @@ func amend(q Request) (Response, error) {
 	if err = readJSON(filepath.Join(dir, "meta.json"), &m); err != nil {
 		return r, err
 	}
+	if o.WorkID != "" && o.WorkID != m.WorkID {
+		return r, fmt.Errorf("amend cannot change work_id")
+	}
 	if m.Parent != "" {
 		return r, fmt.Errorf("amend implementation orders, not validators")
 	}
@@ -246,6 +249,7 @@ func amend(q Request) (Response, error) {
 		return r, nil
 	}
 	next := m
+	o.WorkID = ""
 	next.Order = o
 	restarting := !live[q.Name] || restartOrder(m.Order, o) || carriedRecipeChanged(m, o)
 	h := history(dir, m)

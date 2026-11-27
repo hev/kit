@@ -120,6 +120,11 @@ creates a worktree, starts the agent, and records its result. It works without
 the capture daemon. Follow work with `hev dispatch logs`, inspect it with
 `hev dispatch show`, and send instructions with `hev dispatch say`. Replace an order with
 `hev dispatch amend` while keeping its name, branch, and PR.
+
+Dispatch assigns each new run a UUID (`work_id`) locally and makes it available
+to workers as `HEV_WORK_ID`. Find it in `hev dispatch show` or `hev dispatch ls --json`.
+Rework, retry, amend, and superseding replacements keep the same UUID. To use an
+existing UUID, set `work_id:` in the order or pass `--work-id`.
 Run a Codex review with `hev review run BRANCH`, `hev review run BASE..HEAD`,
 or `hev review run RUN --host HOST`. Use `hev review put` to record a review
 manually, for example

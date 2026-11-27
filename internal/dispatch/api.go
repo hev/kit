@@ -158,7 +158,7 @@ func cancelQueuedAPI(entry queueEntry) error {
 	if err := WriteJSON(filepath.Join(dir, "meta.json"), q.Meta); err != nil {
 		return err
 	}
-	result := Result{Start: q.Meta.Start, End: time.Now().UTC(), Stopped: true, Halted: true, ExitCode: 143}
+	result := Result{WorkID: q.Meta.WorkID, Start: q.Meta.Start, End: time.Now().UTC(), Stopped: true, Halted: true, ExitCode: 143}
 	if err := WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
 		return err
 	}

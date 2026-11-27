@@ -15,6 +15,7 @@ import (
 )
 
 const oldTrace = "0d98d96d1f5acba898a8b922b80f0a92"
+const oldWorkID = "735e7b57-b84f-4cae-b25d-9a8a35945629"
 const oldSpan = "f153bb771c2703d7"
 
 // closeHost is a local host whose one slot a live d-busy session holds, so a
@@ -45,11 +46,11 @@ func endedRun(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	start := time.Now().UTC().Add(-time.Hour)
-	m := dispatch.Meta{Order: dispatch.Order{Name: name, Repo: "app", Host: "here"}, Branch: "d/" + name, Start: start, TraceID: oldTrace, SpanID: oldSpan}
+	m := dispatch.Meta{WorkID: oldWorkID, Order: dispatch.Order{Name: name, Repo: "app", Host: "here"}, Branch: "d/" + name, Start: start, TraceID: oldTrace, SpanID: oldSpan}
 	if err := dispatch.WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
 		t.Fatal(err)
 	}
-	r := dispatch.Result{Start: start, End: start.Add(time.Minute), Branch: m.Branch, Head: "abc", PR: "https://example.test/pr/1", Outcome: dispatch.OutcomeBlocked, Reason: "needs sudo", TraceID: oldTrace, SpanID: oldSpan}
+	r := dispatch.Result{WorkID: oldWorkID, Start: start, End: start.Add(time.Minute), Branch: m.Branch, Head: "abc", PR: "https://example.test/pr/1", Outcome: dispatch.OutcomeBlocked, Reason: "needs sudo", TraceID: oldTrace, SpanID: oldSpan}
 	if err := dispatch.WriteJSON(filepath.Join(dir, "result.json"), r); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestDispatchSupersedesClosesOldRunAndKeepsTrace(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	row := queuedRow(t, "new")
-	if row.TraceID != oldTrace || row.ParentSpanID == "" || len(row.Asks) != 1 || row.Asks[0].ParentSpanID != oldSpan {
+	if row.WorkID != oldWorkID || row.TraceID != oldTrace || row.ParentSpanID == "" || len(row.Asks) != 1 || row.Asks[0].ParentSpanID != oldSpan {
 		t.Fatalf("new run did not continue the old trace: %+v", row.Meta)
 	}
 }
@@ -125,7 +126,7 @@ func TestDispatchRunSupersedesFrontmatterAndExplicitTrace(t *testing.T) {
 	if err != nil || !strings.Contains(out, "closed old") {
 		t.Fatalf("%v\nout %s\nerr %s", err, out, errOut)
 	}
-	if row := queuedRow(t, "new-run"); row.TraceID != other {
+	if row := queuedRow(t, "new-run"); row.TraceID != other || row.WorkID != oldWorkID {
 		t.Fatalf("explicit trace replaced: %+v", row.Meta)
 	}
 	if r := readClosed(t, oldDir); r.SupersededBy != "here/new-run" {
@@ -209,5 +210,30 @@ func TestDispatchCloseCommand(t *testing.T) {
 	}
 	if _, _, err = runCloseDispatch(t, "--config", cfg, "close", "elsewhere/old"); err == nil || !strings.Contains(err.Error(), "unknown host elsewhere") {
 		t.Fatalf("unknown host: %v", err)
+	}
+}
+
+func TestDispatchExplicitWorkID(t *testing.T) {
+	cfg := closeHost(t)
+	endedRun(t, "old")
+	path := filepath.Join(t.TempDir(), "order.md")
+	order := "---\nname: new\nrepo: app\nhost: here\n---\nFinish it.\n## Acceptance\n- Done\n"
+	if err := os.WriteFile(path, []byte(order), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{path, "--work-id", "garbage"},
+		{path, "--work-id="},
+		{"--host", "here", "run", "app", "task", "--name", "new", "--work-id", "garbage"},
+		{path, "--work-id", "8e953039-eb62-493f-91c0-edc77916dbbd", "--supersedes", "here/old"},
+	} {
+		_, _, err := runCloseDispatch(t, append([]string{"--config", cfg}, args...)...)
+		if err == nil || !strings.Contains(err.Error(), "work_id") {
+			t.Fatalf("expected work_id error for %v, got %v", args, err)
+		}
+	}
+	out, _, err := runCloseDispatch(t, "--config", cfg, path, "--work-id", oldWorkID)
+	if err != nil || !strings.Contains(out, "queued new") || queuedRow(t, "new").WorkID != oldWorkID {
+		t.Fatalf("valid work_id: %v, %s", err, out)
 	}
 }

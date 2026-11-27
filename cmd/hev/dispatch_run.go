@@ -15,6 +15,7 @@ func newDispatchRun(load func() (dispatch.Config, error), configPath, host *stri
 	run := &cobra.Command{Use: "run REPO TASK...", Args: cobra.MinimumNArgs(2)}
 	run.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent)")
 	run.Flags().StringVar(&supersedes, "supersedes", "", "Close [HOST/]OLD_NAME as superseded once this run is admitted (and continue its trace unless --trace is set)")
+	run.Flags().String("work-id", "", "Use an existing work UUID for this dispatch")
 	run.Flags().StringVar(&inline.Name, "name", "", "Run name")
 	run.Flags().StringVar(&inline.Base, "base", "", "Base branch")
 	run.Flags().StringVar(&inline.Harness, "harness", "", "Agent harness")

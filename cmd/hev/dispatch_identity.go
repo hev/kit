@@ -23,6 +23,7 @@ func newDispatchIdentityCommand() *cobra.Command {
 		Use:   "identity",
 		Short: "Read or write shared work identity in Layer",
 		Long: "Read or write shared work identity in Layer and print JSON. " +
+			"Dispatch assigns work_id locally for every new run. This command manages shared Layer identities. " +
 			"Uses the signed-in hevmind.com service or Layer configuration by default. " +
 			"Set HEV_WORK_IDENTITY_ENDPOINT and HEV_WORK_IDENTITY_KEY to use a different endpoint and bearer key. " +
 			"Use resolve to turn an address or alias into the canonical ask ID before writing.",

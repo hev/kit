@@ -44,6 +44,7 @@ func newDispatchCommand() *cobra.Command {
 	d.Flags().StringVar(&contextFile, "context-file", "", "Local context recipe for this dispatch only, carried in the order (see hev context plan)")
 	d.Flags().StringVar(&traceRef, "trace", "", "Continue an existing trace (trace ID or W3C traceparent) instead of starting a new one")
 	d.Flags().StringVar(&supersedes, "supersedes", "", "Close [HOST/]OLD_NAME as superseded once this run is admitted (and continue its trace unless --trace is set)")
+	d.Flags().String("work-id", "", "Use an existing work UUID for this dispatch")
 	d.PersistentFlags().StringVar(&configPath, "config", "", "Dispatch TOML configuration")
 	d.PersistentFlags().StringVar(&host, "host", "", "Select host")
 	d.PersistentFlags().BoolVar(&asJSON, "json", false, "Print JSON")
@@ -528,15 +529,35 @@ func startDispatch(cmd *cobra.Command, c dispatch.Config, h dispatch.Host, o dis
 	cmd.SetContext(dispatch.WorkspaceContext(cmd.Context(), c.SelectedWorkspace))
 	text = effectiveOrderHost(text, o.Host)
 	var e error
+	workID := o.WorkID
+	if cmd.Flags().Changed("work-id") {
+		id, err := cmd.Flags().GetString("work-id")
+		if err != nil {
+			return err
+		}
+		if err := dispatch.ValidateWorkID(id); err != nil {
+			return err
+		}
+		if workID != "" && workID != id {
+			return fmt.Errorf("--work-id conflicts with order work_id")
+		}
+		workID = id
+	}
 	var old supersededRun
 	if supersedes != "" {
 		old = lookupSuperseded(cmd.Context(), c, supersedes, cmd.ErrOrStderr())
+		if old.WorkID != "" {
+			if workID != "" && workID != old.WorkID {
+				return fmt.Errorf("--supersedes conflicts with work_id of the replaced run")
+			}
+			workID = old.WorkID
+		}
 		if traceRef == "" && old.TraceRef != "" {
 			// Keep the replacement in the old run's ask-rooted trace.
 			traceRef = old.TraceRef
 		}
 	}
-	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
+	q := dispatch.Request{Action: "start", Name: o.Name, Order: text, Meta: dispatch.Meta{Order: o, WorkID: workID, Namespace: h.Namespace, HarnessWrapper: h.HarnessWrapper}, Cap: h.Cap, Workspace: h.Workspace}
 	if e = dispatch.StampTrace(&q.Meta, dispatch.TraceStart{Ref: traceRef, Orchestrator: dispatch.CallerOrchestrator(), Caller: dispatch.DetectCaller(), Text: dispatch.OrderAskText(text)}); e != nil {
 		return e
 	}

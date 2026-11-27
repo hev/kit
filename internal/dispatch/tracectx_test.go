@@ -208,6 +208,7 @@ func traceEnvFixture(t *testing.T, name string) (Meta, string) {
 	// A stale context in the supervisor's own environment must not leak.
 	t.Setenv("TRACEPARENT", Traceparent(NewTraceID(), NewSpanID()))
 	t.Setenv("HEV_TRACE_ID", NewTraceID())
+	t.Setenv("HEV_WORK_ID", "stale")
 	cfg := filepath.Join(home, "dispatch.toml")
 	if e := os.WriteFile(cfg, []byte("[hosts.here]\nlocal = true\n"), 0600); e != nil {
 		t.Fatal(e)
@@ -216,7 +217,7 @@ func traceEnvFixture(t *testing.T, name string) (Meta, string) {
 	if e := os.MkdirAll(filepath.Join(dir, "wt"), 0700); e != nil {
 		t.Fatal(e)
 	}
-	m := Meta{Start: time.Now().UTC(), ConfigPath: cfg, LaunchResolved: true, Order: Order{Name: name, Repo: "app", Harness: "claude", Timeout: 1}}
+	m := Meta{WorkID: testWorkID, Start: time.Now().UTC(), ConfigPath: cfg, LaunchResolved: true, Order: Order{Name: name, Repo: "app", Harness: "claude", Timeout: 1}}
 	if err := StampTrace(&m, TraceStart{Text: "ask"}); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func testWorkerTraceEnv(t *testing.T) {
 	allowChildProbes(t)
 	_ = superviseRound(m.Name)
 	env := readEnvDump(t, dump, "claude")
-	want := []string{"TRACEPARENT=" + Traceparent(m.TraceID, m.SpanID), "HEV_TRACE_ID=" + m.TraceID, "HEV_SPAN_ID=" + m.SpanID, "HEV_RUN=" + m.Name}
+	want := []string{"TRACEPARENT=" + Traceparent(m.TraceID, m.SpanID), "HEV_TRACE_ID=" + m.TraceID, "HEV_SPAN_ID=" + m.SpanID, "HEV_RUN=" + m.Name, "HEV_WORK_ID=" + m.WorkID}
 	for _, w := range want {
 		if !slices.Contains(env, w) {
 			t.Fatalf("worker env lacks %s", w)
@@ -251,7 +252,7 @@ func testWorkerTraceEnv(t *testing.T) {
 		t.Fatalf("worker env has %d trace variables, want exactly one of each", count)
 	}
 	var r Result
-	if err := readJSON(filepath.Join(Root(), m.Name, "result.json"), &r); err != nil || r.TraceID != m.TraceID || r.SpanID != m.SpanID {
+	if err := readJSON(filepath.Join(Root(), m.Name, "result.json"), &r); err != nil || r.TraceID != m.TraceID || r.SpanID != m.SpanID || r.WorkID != m.WorkID {
 		t.Fatalf("result trace: %+v %v", r, err)
 	}
 }
@@ -259,8 +260,8 @@ func testWorkerTraceEnv(t *testing.T) {
 func TestWorkerTraceEnv(t *testing.T) { testWorkerTraceEnv(t) }
 
 func TestWorkerEnvironmentUntraced(t *testing.T) {
-	env := workerEnvironment(Meta{Order: Order{Name: "old"}}, []string{"PATH=/bin", "TRACEPARENT=00-" + NewTraceID() + "-" + NewSpanID() + "-01"}, nil)
-	if hasEnv(env, "TRACEPARENT") || hasEnv(env, "HEV_TRACE_ID") || !slices.Contains(env, "HEV_RUN=old") || !hasEnv(env, "PATH") {
+	env := workerEnvironment(Meta{Order: Order{Name: "old"}}, []string{"PATH=/bin", "HEV_WORK_ID=stale", "TRACEPARENT=00-" + NewTraceID() + "-" + NewSpanID() + "-01"}, nil)
+	if hasEnv(env, "HEV_WORK_ID") || hasEnv(env, "TRACEPARENT") || hasEnv(env, "HEV_TRACE_ID") || !slices.Contains(env, "HEV_RUN=old") || !hasEnv(env, "PATH") {
 		t.Fatalf("%v", env)
 	}
 }

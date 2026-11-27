@@ -132,6 +132,7 @@ type supersededRun struct {
 	// TraceRef continues the old run's trace: its trace ID with its current
 	// attempt span as the parent, when both are known.
 	TraceRef string
+	WorkID   string
 }
 
 // lookupSuperseded finds the run --supersedes names and reads its trace. A
@@ -141,7 +142,7 @@ func lookupSuperseded(ctx context.Context, cfg dispatch.Config, ref string, warn
 	s := supersededRun{Host: hostName, Name: name}
 	hostName, h, err := locateDispatchRun(cfg, hostName, name)
 	if err != nil {
-		fmt.Fprintf(warn, "Warning: --supersedes %s: %v; the new run will not inherit its trace\n", ref, err)
+		fmt.Fprintf(warn, "Warning: --supersedes %s: %v; the new run will not inherit its trace or work identity\n", ref, err)
 		return s
 	}
 	s.Host = hostName
@@ -149,12 +150,13 @@ func lookupSuperseded(ctx context.Context, cfg dispatch.Config, ref string, warn
 	defer cancel()
 	r, err := dispatch.RPC(ctx, h, dispatch.Request{Action: "show", Name: name})
 	if err != nil {
-		fmt.Fprintf(warn, "Warning: --supersedes %s: %v; the new run will not inherit its trace\n", ref, err)
+		fmt.Fprintf(warn, "Warning: --supersedes %s: %v; the new run will not inherit its trace or work identity\n", ref, err)
 		return s
 	}
 	var m dispatch.Meta
 	_ = json.Unmarshal([]byte(r.Files["meta.json"]), &m)
 	s.TraceRef = supersededTraceRef(m)
+	s.WorkID = m.WorkID
 	return s
 }
 
