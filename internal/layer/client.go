@@ -304,34 +304,43 @@ func (n *tokenCount) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// Write upserts one batch. The caller batches; this does one round trip so a
-// failure names the rows it was carrying.
+// MaxEmbeddedWriteRows keeps trace upserts below the store's embedding batch limit.
+const MaxEmbeddedWriteRows = 200
+
+// Write upserts chunks in order and returns the totals for successful requests,
+// including when a later request fails.
 func (c *Client) Write(rows []Row) (WriteResult, error) {
+	var result WriteResult
 	if len(rows) == 0 {
-		return WriteResult{}, nil
+		return result, nil
 	}
-	body := map[string]any{
-		"upsert_rows":     rows,
-		"distance_metric": "cosine_distance",
-		"schema":          c.schema(),
-	}
+	schema := c.schema()
 	for _, row := range rows {
 		if row.VersionID != "" {
-			schema := body["schema"].(map[string]any)
 			for _, key := range []string{"path", "project", "version_id"} {
 				schema[key] = map[string]any{"type": "string", "filterable": key == "project"}
 			}
 			break
 		}
 	}
-	var out writeResponse
-	if err := c.do("POST", "/v2/namespaces/"+c.Namespace, body, &out); err != nil {
-		return WriteResult{}, err
+	for start := 0; start < len(rows); start += MaxEmbeddedWriteRows {
+		end := min(start+MaxEmbeddedWriteRows, len(rows))
+		body := map[string]any{
+			"upsert_rows":     rows[start:end],
+			"distance_metric": "cosine_distance",
+			"schema":          schema,
+		}
+		var out writeResponse
+		if err := c.do("POST", "/v2/namespaces/"+c.Namespace, body, &out); err != nil {
+			return result, err
+		}
+		if out.Status != "OK" && out.Error != "" {
+			return result, fmt.Errorf("layer write: %s", out.Error)
+		}
+		result.RowsUpserted += out.RowsUpserted
+		result.EmbeddingTokens += int(out.Performance.EmbeddingTokens)
 	}
-	if out.Status != "OK" && out.Error != "" {
-		return WriteResult{}, fmt.Errorf("layer write: %s", out.Error)
-	}
-	return WriteResult{RowsUpserted: out.RowsUpserted, EmbeddingTokens: int(out.Performance.EmbeddingTokens)}, nil
+	return result, nil
 }
 
 // WriteBlocks writes whole, non-embedded blocks beside the chunk namespace.

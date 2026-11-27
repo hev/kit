@@ -46,6 +46,68 @@ func capture(t *testing.T, reply string) (*Client, *map[string]any) {
 // namespace created without it can never gain a vector column, and a namespace
 // created with the wrong model can only be re-embedded by re-ingesting
 // everything. It is asserted here so a refactor cannot quietly drop it.
+func TestWriteCapsEmbeddedRequests(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		rows         int
+		failRequest  int
+		wantSizes    []int
+		wantUpserted int
+	}{
+		{name: "empty"},
+		{name: "below cap", rows: 199, wantSizes: []int{199}, wantUpserted: 199},
+		{name: "at cap", rows: 200, wantSizes: []int{200}, wantUpserted: 200},
+		{name: "above cap", rows: 201, wantSizes: []int{200, 1}, wantUpserted: 201},
+		{name: "large", rows: 494, wantSizes: []int{200, 200, 94}, wantUpserted: 494},
+		{name: "mid-batch failure", rows: 494, failRequest: 2, wantSizes: []int{200, 200}, wantUpserted: 200},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rows := make([]Row, tt.rows)
+			for i := range rows {
+				rows[i] = Row{ID: strconv.Itoa(i), Text: "trace chunk"}
+			}
+			var sizes []int
+			var delivered []Row
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Rows []Row `json:"upsert_rows"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode upsert: %v", err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				sizes = append(sizes, len(body.Rows))
+				delivered = append(delivered, body.Rows...)
+				if len(sizes) == tt.failRequest {
+					http.Error(w, "chunk rejected", http.StatusBadRequest)
+					return
+				}
+				fmt.Fprintf(w, `{"status":"OK","rows_upserted":%d,"performance":{"embedding_tokens":%d}}`, len(body.Rows), 2*len(body.Rows))
+			}))
+			got, err := New(srv.URL, "key", "traces", "").Write(rows)
+			srv.Close()
+			if tt.failRequest != 0 {
+				if err == nil || !strings.Contains(err.Error(), "chunk rejected") {
+					t.Fatalf("write error = %v, want chunk rejected", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(sizes, tt.wantSizes) {
+				t.Fatalf("request sizes = %v, want %v", sizes, tt.wantSizes)
+			}
+			if !reflect.DeepEqual(delivered, append([]Row(nil), rows[:len(delivered)]...)) {
+				t.Fatal("requests changed the order or contents of the rows")
+			}
+			want := WriteResult{RowsUpserted: tt.wantUpserted, EmbeddingTokens: 2 * tt.wantUpserted}
+			if got != want {
+				t.Fatalf("write result = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestWriteDeclaresEmbeddingAndFullText(t *testing.T) {
 	cl, got := capture(t, `{"status":"OK","rows_upserted":1,"performance":{"embedding_tokens":42}}`)
 

@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +143,54 @@ func fakeGateway(t *testing.T, rows []map[string]any) (*layer.Client, *[]map[str
 		SchemaLimits: layer.SchemaLimits{Embed: layer.Coverage{Support: layer.Supported}},
 	}
 	return cl, &bodies
+}
+
+func TestLayerTurnsCapsEmbeddedRequests(t *testing.T) {
+	for _, count := range []int{200, 494} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			turns := make([]Turn, count)
+			wantIDs := make([]string, count)
+			for i := range turns {
+				turns[i] = Turn{Namespace: "story-a", TurnID: strconv.Itoa(i), Prompt: "prompt"}
+				wantIDs[i] = turns[i].DocID()
+			}
+			var sizes []int
+			var ids []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Rows []struct {
+						ID string `json:"id"`
+					} `json:"upsert_rows"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode upsert: %v", err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				sizes = append(sizes, len(body.Rows))
+				for _, row := range body.Rows {
+					ids = append(ids, row.ID)
+				}
+				w.Write([]byte(`{"status":"OK"}`))
+			}))
+			idx := &LayerTurns{Client: layer.New(srv.URL, "local", "app-turns", ""), Namespace: "story-a"}
+			err := idx.Upsert(context.Background(), turns)
+			srv.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantSizes := []int{200}
+			if count == 494 {
+				wantSizes = []int{200, 200, 94}
+			}
+			if !slices.Equal(sizes, wantSizes) {
+				t.Fatalf("request sizes = %v, want %v", sizes, wantSizes)
+			}
+			if !slices.Equal(ids, wantIDs) {
+				t.Fatal("requests lost or reordered turn IDs")
+			}
+		})
+	}
 }
 
 func TestLayerTurnsScopesEveryReadToNamespaceOwnerAndTenant(t *testing.T) {

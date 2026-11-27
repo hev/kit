@@ -74,8 +74,8 @@ func indexInstruction(f trace.InstructionFile, cl Archive, scrubber *redact.Scru
 		rows = append(rows, row)
 		v.ChunkIDs = append(v.ChunkIDs, row.ID)
 	}
-	for start := 0; start < len(rows); start += 200 {
-		result, err := cl.Write(rows[start:min(start+200, len(rows))])
+	for start := 0; start < len(rows); start += layer.MaxEmbeddedWriteRows {
+		result, err := cl.Write(rows[start:min(start+layer.MaxEmbeddedWriteRows, len(rows))])
 		if err != nil {
 			return err
 		}

@@ -253,8 +253,8 @@ func runUnits(src trace.Source, cl Archive, st *State, opt Options, units []trac
 	if opt.Workers < 0 || opt.Workers > 8 || (opt.Workers > 1 && !opt.ReadSide) {
 		return nil, fmt.Errorf("workers must be 0–8 and parallel workers require read-side mode")
 	}
-	if opt.BatchRows <= 0 {
-		opt.BatchRows = 200
+	if opt.BatchRows <= 0 || opt.BatchRows > layer.MaxEmbeddedWriteRows {
+		opt.BatchRows = layer.MaxEmbeddedWriteRows
 	}
 	if len(opt.Tiers) == 0 {
 		opt.Tiers = []trace.Tier{trace.TierText, trace.TierToolUse}
