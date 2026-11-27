@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/hev/kit/internal/version"
 	"github.com/spf13/cobra"
@@ -73,7 +76,9 @@ func main() {
 	if handled, code := executePlugin(rootCmd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); handled {
 		os.Exit(code)
 	}
-	if err := rootCmd.Execute(); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if exit, ok := err.(*commandExit); ok {
 			os.Exit(exit.code)
 		}
