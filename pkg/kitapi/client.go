@@ -324,7 +324,7 @@ type Whoami struct {
 	KeyName         string   `json:"key_name"`
 	KeyMask         string   `json:"key_mask"`
 	Scopes          []string `json:"scopes"`
-	ExpiresAt       string   `json:"expires_at"`
+	ExpiresAt       string   `json:"expires_at"` // UTC RFC3339 or empty
 	Team            struct {
 		ID          string `json:"id"`
 		Slug        string `json:"slug"`
@@ -335,6 +335,56 @@ type Whoami struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"author"`
+}
+
+// UnmarshalJSON accepts both timestamp representations used by the whoami API.
+func (w *Whoami) UnmarshalJSON(data []byte) error {
+	type plainWhoami Whoami
+	decoded := struct {
+		*plainWhoami
+		ExpiresAt json.RawMessage `json:"expires_at"`
+	}{plainWhoami: (*plainWhoami)(w)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if len(decoded.ExpiresAt) == 0 {
+		return nil
+	}
+	w.ExpiresAt = ""
+	if bytes.Equal(decoded.ExpiresAt, []byte("null")) {
+		return nil
+	}
+
+	var expiry time.Time
+	if decoded.ExpiresAt[0] == '"' {
+		var timestamp string
+		if err := json.Unmarshal(decoded.ExpiresAt, &timestamp); err != nil {
+			return errors.New("invalid whoami expires_at string")
+		}
+		if timestamp == "" {
+			return nil
+		}
+		var err error
+		expiry, err = time.Parse(time.RFC3339, timestamp)
+		if err != nil {
+			return errors.New("whoami expires_at must be an RFC3339 timestamp")
+		}
+	} else {
+		epoch, err := strconv.ParseInt(string(decoded.ExpiresAt), 10, 64)
+		if err != nil {
+			return errors.New("whoami expires_at must be an integer Unix timestamp or an RFC3339 string")
+		}
+		expiry = time.Unix(epoch, 0)
+		if epoch > 1_000_000_000_000 {
+			expiry = time.UnixMilli(epoch)
+		}
+	}
+	expiry = expiry.UTC()
+	if expiry.Year() < 0 || expiry.Year() > 9999 {
+		return errors.New("whoami expires_at is outside the RFC3339 year range")
+	}
+	w.ExpiresAt = expiry.Format(time.RFC3339Nano)
+	return nil
 }
 
 func (c *Client) Whoami(ctx context.Context) (Whoami, error) {

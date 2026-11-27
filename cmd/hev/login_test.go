@@ -411,6 +411,10 @@ func TestKitLoginMintedHevKeyParityAndRefusals(t *testing.T) {
 			t.Fatalf("[kit].key = %v, want minted hev_ key", kit["key"])
 		}
 
+		f.set(func() {
+			f.whoamiMetadata["expires_at"] = time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+		})
+
 		out.Reset()
 		if err := runLoginStatus(context.Background(), &out); err != nil {
 			t.Fatalf("runLoginStatus: %v", err)
