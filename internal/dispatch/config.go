@@ -116,7 +116,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 		host, _ = os.Hostname()
 	}
 	var md toml.MetaData
-	var workspace toml.Primitive
+	var checkout, workspace toml.Primitive
 	var e error
 	if target {
 		var raw struct {
@@ -126,6 +126,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			Cap            *int                      `toml:"cap"`
 			Classes        map[string]int            `toml:"classes"`
 			Admission      Admission                 `toml:"admission"`
+			Checkout       toml.Primitive            `toml:"checkout"`
 			Workspace      toml.Primitive            `toml:"workspace"`
 			Hosts          map[string]toml.Primitive `toml:"hosts"`
 			Notify         toml.Primitive            `toml:"notify"`
@@ -142,7 +143,7 @@ func loadConfig(path, host string, target bool) (Config, error) {
 			if raw.Cap != nil {
 				c.Cap = *raw.Cap
 			}
-			workspace = raw.Workspace
+			checkout, workspace = raw.Checkout, raw.Workspace
 			c.Hosts = map[string]Host{}
 			for n, primitive := range raw.Hosts {
 				var h Host
@@ -160,32 +161,44 @@ func loadConfig(path, host string, target bool) (Config, error) {
 	} else {
 		var raw struct {
 			*Config
+			Checkout  toml.Primitive `toml:"checkout"`
 			Workspace toml.Primitive `toml:"workspace"`
 		}
 		raw.Config = &c
 		md, e = toml.DecodeFile(path, &raw)
-		workspace = raw.Workspace
+		checkout, workspace = raw.Checkout, raw.Workspace
 	}
 	if e != nil {
 		return c, configDecodeError(e)
 	}
-	if md.IsDefined("workspace") {
-		if md.Type("workspace") == "String" {
-			e = md.PrimitiveDecode(workspace, &c.Workspace)
-			if c.Workspace == "" {
-				c.Workspace = "~/workspace"
-			}
-		} else {
-			e = md.PrimitiveDecode(workspace, &c.WorkspacePolicy)
-			if c.WorkspacePolicy.Root != "" {
-				c.Workspace = c.WorkspacePolicy.Root
-			}
+	hasCheckout := md.IsDefined("checkout")
+	switch md.Type("workspace") {
+	case "String":
+		var root string
+		if err := md.PrimitiveDecode(workspace, &root); err != nil {
+			return c, fmt.Errorf("invalid checkout configuration")
 		}
-		if e != nil {
-			return c, fmt.Errorf("invalid workspace configuration")
+		if root != "" {
+			c.Workspace = root
 		}
-		if e = c.WorkspacePolicy.validate(); e != nil {
-			return c, e
+	case "Hash":
+		if hasCheckout {
+			return c, fmt.Errorf("cannot specify both [checkout] and [workspace] in dispatch.toml")
+		}
+		checkout, hasCheckout = workspace, true
+	case "":
+	default:
+		return c, fmt.Errorf("invalid checkout configuration")
+	}
+	if hasCheckout {
+		if err := md.PrimitiveDecode(checkout, &c.WorkspacePolicy); err != nil {
+			return c, fmt.Errorf("invalid checkout configuration")
+		}
+		if err := c.WorkspacePolicy.validate(); err != nil {
+			return c, err
+		}
+		if c.WorkspacePolicy.Root != "" {
+			c.Workspace = c.WorkspacePolicy.Root
 		}
 	}
 	if target {
