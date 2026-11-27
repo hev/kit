@@ -266,6 +266,9 @@ func TestWorkIDAdmissionAndFollowUps(t *testing.T) {
 				t.Fatal(err)
 			}
 			order := strings.Replace(string(b), "## Acceptance", "Revised scope.\n\n## Acceptance", 1)
+			// Authenticated starts use the receiver's host label. Keep the
+			// amendment on that host even when the sender used an alias.
+			order = strings.Replace(order, "host: here", "host: "+f.meta().Host, 1)
 			f.do(Request{Action: "amend", Order: order})
 			if got := f.meta().WorkID; got != id {
 				t.Fatalf("amend changed work_id to %q", got)
