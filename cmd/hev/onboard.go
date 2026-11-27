@@ -434,7 +434,7 @@ func servePortOrDefault() int {
 }
 
 // pickerCommand finds the Picker: a `pick` subcommand of this hev, or a
-// `hev-pick` plugin on PATH. Nil when neither is installed.
+// `hev-pick` executable on PATH. Nil when neither is installed.
 func pickerCommand() *exec.Cmd {
 	for _, c := range rootCmd.Commands() {
 		if c.Name() == "pick" {
