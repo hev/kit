@@ -1,0 +1,10 @@
+package serve
+import("net/http/httptest";"strings";"testing";"github.com/hev/kit/internal/trace")
+func TestSecurityReviewUnauthenticatedTrace(t *testing.T){
+ s:=New(&fakeReader{sessions:[]trace.SessionRow{{SessionID:"audit",Summary:"synthetic-private-summary",PromptCount:1}},blocks:[]trace.BlockRow{{SessionID:"audit",Role:"user",BlockType:"text",Text:"synthetic-private-prompt"}}})
+ r:=httptest.NewRequest("GET","http://attacker.invalid/api/session/audit",nil)
+ r.RemoteAddr="192.0.2.10:1234"
+ w:=httptest.NewRecorder();s.Handler().ServeHTTP(w,r)
+ if w.Code!=200 || !strings.Contains(w.Body.String(),"synthetic-private-prompt"){t.Fatalf("unexpected %d %s",w.Code,w.Body.String())}
+ t.Log("Unauthenticated request with foreign Host receives synthetic private prompt")
+}

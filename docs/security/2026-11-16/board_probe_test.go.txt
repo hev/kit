@@ -1,0 +1,10 @@
+package server
+import("net/http";"net/http/httptest";"strings";"testing")
+func TestSecurityReviewForeignOriginMutation(t *testing.T){
+ s,err:=New(nil);if err!=nil{t.Fatal(err)};s.readOnly=false
+ reached:=false;s.mux=http.NewServeMux();s.mux.HandleFunc("POST /new",func(w http.ResponseWriter,r *http.Request){reached=r.FormValue("body")=="synthetic";w.WriteHeader(201)})
+ r:=httptest.NewRequest("POST","http://localhost:7700/new",strings.NewReader("body=synthetic"));r.Header.Set("Content-Type","application/x-www-form-urlencoded");r.Header.Set("Origin","https://attacker.invalid")
+ w:=httptest.NewRecorder();s.Handler().ServeHTTP(w,r)
+ if !reached||w.Code!=201{t.Fatalf("mutation blocked: %d",w.Code)}
+ t.Log("Foreign-origin form POST reaches write route without authentication or CSRF rejection; stub route avoids real writes")
+}

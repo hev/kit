@@ -1,0 +1,114 @@
+=== RUN   TestSecurityReviewUnauthenticatedTrace
+    security_review_probe_test.go:9: Unauthenticated request with foreign Host receives synthetic private prompt
+--- PASS: TestSecurityReviewUnauthenticatedTrace (0.00s)
+PASS
+ok  	github.com/hev/kit/internal/serve	0.003s
+=== RUN   TestCORSReadsOnlyForListedOrigins
+--- PASS: TestCORSReadsOnlyForListedOrigins (0.00s)
+=== RUN   TestReadOnlyWalkRouter
+--- PASS: TestReadOnlyWalkRouter (0.00s)
+=== RUN   TestReadOnlyThreadReadsNeverWrite
+--- PASS: TestReadOnlyThreadReadsNeverWrite (0.00s)
+=== RUN   TestSecurityReviewForeignOriginMutation
+    security_review_probe_test.go:9: Foreign-origin form POST reaches write route without authentication or CSRF rejection; stub route avoids real writes
+--- PASS: TestSecurityReviewForeignOriginMutation (0.00s)
+PASS
+ok  	github.com/hev/kit/internal/board/server	0.010s
+=== RUN   TestHEVDRunInboxLiveAndEnded
+--- PASS: TestHEVDRunInboxLiveAndEnded (0.00s)
+=== RUN   TestHEVDFallbackNoticeOnce
+--- PASS: TestHEVDFallbackNoticeOnce (0.00s)
+=== RUN   TestHEVDStatusesAndOutboundOnly
+=== RUN   TestHEVDStatusesAndOutboundOnly/delivered_to_session_inbox
+=== RUN   TestHEVDStatusesAndOutboundOnly/delivered_to_run_inbox
+=== RUN   TestHEVDStatusesAndOutboundOnly/queued_for_next_round
+=== RUN   TestHEVDStatusesAndOutboundOnly/held_for_ended_run
+=== RUN   TestHEVDStatusesAndOutboundOnly/failed
+--- PASS: TestHEVDStatusesAndOutboundOnly (0.00s)
+    --- PASS: TestHEVDStatusesAndOutboundOnly/delivered_to_session_inbox (0.00s)
+    --- PASS: TestHEVDStatusesAndOutboundOnly/delivered_to_run_inbox (0.00s)
+    --- PASS: TestHEVDStatusesAndOutboundOnly/queued_for_next_round (0.00s)
+    --- PASS: TestHEVDStatusesAndOutboundOnly/held_for_ended_run (0.00s)
+    --- PASS: TestHEVDStatusesAndOutboundOnly/failed (0.00s)
+=== RUN   TestHEVDAuthFailureNoFallback
+--- PASS: TestHEVDAuthFailureNoFallback (0.00s)
+=== RUN   TestHEVDUnreachableFallbackReplaysStdin
+--- PASS: TestHEVDUnreachableFallbackReplaysStdin (0.00s)
+=== RUN   TestHEVDRealInboxAndRetry
+--- PASS: TestHEVDRealInboxAndRetry (0.00s)
+=== RUN   TestHEVDLostResponseNeverFallsBack
+--- PASS: TestHEVDLostResponseNeverFallsBack (0.00s)
+=== RUN   TestHEVDNeverPastesIntoUnregisteredTerminal
+--- PASS: TestHEVDNeverPastesIntoUnregisteredTerminal (0.00s)
+=== RUN   TestHEVDRejectsInvalidRequests
+--- PASS: TestHEVDRejectsInvalidRequests (0.00s)
+=== RUN   TestHEVDEngineConfiguredSelection
+--- PASS: TestHEVDEngineConfiguredSelection (0.00s)
+=== RUN   TestHEVDProvenanceAndStatusInjection
+--- PASS: TestHEVDProvenanceAndStatusInjection (0.00s)
+=== RUN   TestStartListenerConfiguration
+--- PASS: TestStartListenerConfiguration (0.00s)
+=== RUN   TestHEVDSenderAddresses
+=== RUN   TestHEVDSenderAddresses/Box-Mac-mini/foh-hev-10
+=== RUN   TestHEVDSenderAddresses/box/my_session
+=== RUN   TestHEVDSenderAddresses/box.local/session.name
+--- PASS: TestHEVDSenderAddresses (0.00s)
+    --- PASS: TestHEVDSenderAddresses/Box-Mac-mini/foh-hev-10 (0.00s)
+    --- PASS: TestHEVDSenderAddresses/box/my_session (0.00s)
+    --- PASS: TestHEVDSenderAddresses/box.local/session.name (0.00s)
+PASS
+ok  	github.com/hev/kit/internal/peers	0.017s
+=== RUN   TestHandleGrantRepoActions
+--- PASS: TestHandleGrantRepoActions (0.00s)
+=== RUN   TestHandleGrantRemove
+--- PASS: TestHandleGrantRemove (0.00s)
+=== RUN   TestRepoAdmission
+=== RUN   TestRepoAdmission/allowed
+=== RUN   TestRepoAdmission/refused
+=== RUN   TestRepoAdmission/no-list
+=== RUN   TestRepoAdmission/empty-list
+--- PASS: TestRepoAdmission (0.00s)
+    --- PASS: TestRepoAdmission/allowed (0.00s)
+    --- PASS: TestRepoAdmission/refused (0.00s)
+    --- PASS: TestRepoAdmission/no-list (0.00s)
+    --- PASS: TestRepoAdmission/empty-list (0.00s)
+=== RUN   TestTargetRepoRefusalBeforeGitMutation
+=== RUN   TestTargetRepoRefusalBeforeGitMutation/repos_=_[]
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+=== RUN   TestTargetRepoRefusalBeforeGitMutation/repos_=_['https://example.com/other/project']
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+--- PASS: TestTargetRepoRefusalBeforeGitMutation (0.01s)
+    --- PASS: TestTargetRepoRefusalBeforeGitMutation/repos_=_[] (0.01s)
+    --- PASS: TestTargetRepoRefusalBeforeGitMutation/repos_=_['https://example.com/other/project'] (0.01s)
+=== RUN   TestTargetRepoAdmissionAllowsFetch
+=== RUN   TestTargetRepoAdmissionAllowsFetch/allowed
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+=== RUN   TestTargetRepoAdmissionAllowsFetch/no-list
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+note: move hosts.buildbox.cap to top-level cap in the target default config
+--- PASS: TestTargetRepoAdmissionAllowsFetch (0.02s)
+    --- PASS: TestTargetRepoAdmissionAllowsFetch/allowed (0.01s)
+    --- PASS: TestTargetRepoAdmissionAllowsFetch/no-list (0.01s)
+=== RUN   TestRestrictedRepoUnreadableOrigin
+--- PASS: TestRestrictedRepoUnreadableOrigin (0.00s)
+=== RUN   TestSenderBindingAndRunPermissions
+--- PASS: TestSenderBindingAndRunPermissions (0.00s)
+=== RUN   TestSenderValidatorIsolationAndEndedSay
+--- PASS: TestSenderValidatorIsolationAndEndedSay (0.00s)
+PASS
+ok  	github.com/hev/kit/internal/dispatch	0.060s
+=== RUN   TestCodeExpiryReplayBindingAndRevoke
+--- PASS: TestCodeExpiryReplayBindingAndRevoke (0.00s)
+=== RUN   TestKeyLinesUnixWindowsPathsACLs
+--- PASS: TestKeyLinesUnixWindowsPathsACLs (0.00s)
+PASS
+ok  	github.com/hev/kit/internal/nodes	0.004s
