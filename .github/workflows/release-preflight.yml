@@ -52,7 +52,7 @@ jobs:
           ref: ${{ steps.src.outputs.ref }}
           fetch-depth: 0 # tags, main and the train branch, for the lineage check
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true

@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -135,7 +135,7 @@ jobs:
       # will leave hev/skills main after the cutover.
       PEERS_REFERENCE_SHA: 947e74f78465ab093aca3ccc15a071b2081a8730
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Look for the hev/skills read key
         id: key
@@ -149,7 +149,7 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.key.outputs.present == 'true'
         with:
           repository: hev/skills
@@ -158,13 +158,13 @@ jobs:
           path: python-reference
           persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         if: steps.key.outputs.present == 'true'
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.key.outputs.present == 'true'
         with:
           python-version: "3.x"
@@ -211,7 +211,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
