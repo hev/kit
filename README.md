@@ -1,7 +1,7 @@
 # hev kit
 
 hev kit is a **meta-harness** for Claude Code, Codex, Antigravity (agy), Pi,
-and OpenCode. It works across harnesses, sessions, and machines and ships as
+OpenCode, and Grok. It works across harnesses, sessions, and machines and ships as
 one distributed `hev` binary for macOS, Linux, and Windows.
 
 A workspace binds subscriptions and authentication to a home folder and a
@@ -27,12 +27,14 @@ upgrade that compatibility formula, which depends on `hev`.
 
 Linux and Windows binaries are on [GitHub Releases](https://github.com/hev/kit/releases).
 Extract the archive for your OS and architecture and put the binary on your PATH.
-0.6 is not tagged yet; build from main for the features described here
-(Go is required):
+
+With Go 1.26 or newer, install from the `v0.7` release branch:
 
 ```sh
-go install github.com/hev/kit/cmd/hev@main
+go install github.com/hev/kit/cmd/hev@v0.7
 ```
+
+Use `go install github.com/hev/kit/cmd/hev@main` to build from the `main` branch.
 
 See the [Windows guide](https://hevkit.com/docs/windows) for capture service setup. With no
 key (Starter Kit), `hev up` keeps traces in files on this machine, searches
