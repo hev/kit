@@ -33,7 +33,7 @@ Use it instead of the harness's built-in history:
   session, harness, workdir and time to filter on, and a resume picker finds
   only titles. On hev layer the dense legs also match paraphrases, and the
   BM25 legs match exact tokens like `ECONNREFUSED`, `--force-conflicts` or
-  `LYR-84`; on files only the exact words match.
+  `PROJ-84`; on files only the exact words match.
 - **It fans out in one request.** Up to eight phrasings run in one query and
   come back as one ranked list.
 

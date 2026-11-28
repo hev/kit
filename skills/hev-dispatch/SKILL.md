@@ -7,7 +7,7 @@ metadata:
 
 Write an order with YAML frontmatter naming name, host, repo, base, harness, model, validation and reply. Add concrete Acceptance items. Use configured host names; never guess routing. Add `context: PATH` to name a context recipe in the repository; dispatch builds its bundle at launch and gives the worker the assembled context on standard input (`hev context --help`, `hev context review --run NAME`).
 
-When you dispatch for a person and the order's repository has instruction files (AGENTS.md, CLAUDE.md, `.claude/agents`, `.claude/skills`, `.agents/skills`), first do the context review in the `hev-context` skill: plan, propose a narrowed recipe, show the person one screen, then `hev dispatch order.md --context-file narrowed.json` and tell them the digest. If `hev context plan` finds no instruction files (kit has none), dispatch as usual without a recipe. If the person says to skip the review, dispatch without `--context-file`, and the worker loads the files whole. `hev dispatch` itself never prompts; a person dispatching by hand is not asked anything.
+When you dispatch for a person and the order's repository has instruction files (AGENTS.md, CLAUDE.md, `.claude/agents`, `.claude/skills`, `.agents/skills`), first do the context review in the `hev-context` skill: plan, propose a narrowed recipe, show the person one screen, then `hev dispatch order.md --context-file narrowed.json` and tell them the digest. If `hev context plan` finds no instruction files, dispatch as usual without a recipe. If the person says to skip the review, dispatch without `--context-file`, and the worker loads the files whole. `hev dispatch` itself never prompts; a person dispatching by hand is not asked anything.
 
 To give one run skills from the host's skills shelf, add `skills: [pack/skill, ...]` to the order (or `"skills"` to its context recipe). Only those skills are linked into that worker's harness for the run; at most one may come from a `mode` pack. `hev skills shelf` on the host lists what is pinned (https://hevkit.com/docs/skills-shelf).
 
@@ -19,7 +19,7 @@ hev dispatch show example-order
 hev dispatch ls
 hev dispatch say example-order --resolve db 'SQLite'
 hev dispatch close example-order 'PR merged by hand'
-hev dispatch order-b.md --supersedes oven/example-order
+hev dispatch order-b.md --supersedes HOST/example-order
 hev steer example-order 'Scope changed: use candidate B' --level urgent
 hev steer ls example-order
 ```
