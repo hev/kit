@@ -267,11 +267,75 @@ func TestKitLoginStatusLogout(t *testing.T) {
 	}
 }
 
+func TestKitLoginRequiresServiceBeforeOpeningBrowser(t *testing.T) {
+	kitTestHome(t)
+	old := openBrowser
+	t.Cleanup(func() { openBrowser = old })
+	opened := make(chan string, 1)
+	openBrowser = func(target string) { opened <- target }
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var out bytes.Buffer
+	err := runLogin(ctx, &out, "", "")
+	if err == nil || err.Error() != "Club Kit cloud sign-in isn't open yet. Join the waitlist at https://hevkit.com/#waitlist." {
+		t.Fatalf("bare login error = %v", err)
+	}
+	select {
+	case target := <-opened:
+		t.Fatalf("bare login opened a browser at %s", target)
+	default:
+	}
+	if out.Len() != 0 {
+		t.Fatalf("bare login prompted for browser sign-in: %s", &out)
+	}
+}
+
+func TestKitLoginAcceptsExplicitService(t *testing.T) {
+	for _, source := range []string{"flag", "environment", "config"} {
+		t.Run(source, func(t *testing.T) {
+			path := kitTestHome(t)
+			f := newFakeKit(t)
+			old := openBrowser
+			t.Cleanup(func() { openBrowser = old })
+			openBrowser = f.browse(func(state string) string { return state })
+
+			var flag string
+			switch source {
+			case "flag":
+				flag = f.srv.URL
+			case "environment":
+				t.Setenv(kitServiceEnv, f.srv.URL)
+			case "config":
+				doc := readTOML(t, path)
+				config := new(bytes.Buffer)
+				doc["kit"] = map[string]any{"service": f.srv.URL}
+				if err := toml.NewEncoder(config).Encode(doc); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, config.Bytes(), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var out bytes.Buffer
+			if err := runLogin(ctx, &out, flag, ""); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "acme as Ada") {
+				t.Fatalf("sign-in output = %q", &out)
+			}
+		})
+	}
+}
+
 func TestKitLoginServicePrecedence(t *testing.T) {
 	kitTestHome(t)
 	doc := map[string]any{}
-	if got := resolveKitService("", doc); got != defaultKitService {
-		t.Fatalf("default service = %s", got)
+	if got := resolveKitService("", doc); got != "" {
+		t.Fatalf("unconfigured service = %s", got)
 	}
 	doc["kit"] = map[string]any{"service": "https://configured.example"}
 	if got := resolveKitService("", doc); got != "https://configured.example" {
@@ -478,6 +542,32 @@ func TestKitLoginMintedHevKeyParityAndRefusals(t *testing.T) {
 				t.Fatalf("invalid exchange wrote [kit] config: %v", doc["kit"])
 			}
 		})
+	}
+}
+
+func TestKitLoginWaitlistCLI(t *testing.T) {
+	home := t.TempDir()
+	env := []string{
+		"HEV_CONFIG=" + filepath.Join(home, "config.toml"),
+		"HEV_KIT_SERVICE=",
+		"HEVLAYER_ENDPOINT=",
+		"HEVLAYER_API_KEY=",
+		"HEVLAYER_API_KEY_REF=",
+		"HEVLAYER_API_KEY_OP_REF=",
+	}
+	help, stderr, code := runHevChild(t, home, env, "--help")
+	if code != 0 || !strings.Contains(help, "Other commands:") {
+		t.Fatalf("top-level help: exit %d, %s%s", code, help, stderr)
+	}
+	for _, line := range strings.Split(help, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && (fields[0] == "login" || fields[0] == "logout") {
+			t.Fatalf("top-level help lists %s", fields[0])
+		}
+	}
+	out, stderr, code := runHevChild(t, home, env, "login")
+	if code != 1 || out != "" || strings.TrimSpace(stderr) != "Club Kit cloud sign-in isn't open yet. Join the waitlist at https://hevkit.com/#waitlist." {
+		t.Fatalf("bare login: exit %d, stdout %q, stderr %q", code, out, stderr)
 	}
 }
 
