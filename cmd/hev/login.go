@@ -30,10 +30,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// kitServiceEnv names the sign-in service when neither --service nor the
-// config's [kit] service does.
+// kitServiceEnv names the sign-in service when --service is omitted.
 const kitServiceEnv = "HEV_KIT_SERVICE"
-const defaultKitService = "https://kit.hevmind.com"
 
 // openBrowser is replaced in tests by a fake browser.
 var openBrowser = func(u string) {
@@ -55,7 +53,7 @@ var openBrowser = func(u string) {
 var loginTimeout = 3 * time.Minute
 
 func init() {
-	login := &cobra.Command{Use: "login", SilenceUsage: true, SilenceErrors: true, Short: "Sign this machine into the hevmind.com service", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	login := &cobra.Command{Use: "login", Hidden: true, SilenceUsage: true, SilenceErrors: true, Short: "Sign this machine into the hevmind.com service", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		service, _ := cmd.Flags().GetString("service")
 		invite, _ := cmd.Flags().GetString("code")
 		importHistory, _ := cmd.Flags().GetBool("import")
@@ -78,7 +76,7 @@ func init() {
 	login.AddCommand(&cobra.Command{Use: "status", SilenceUsage: true, SilenceErrors: true, Short: "Ask the hevmind.com service who this machine is signed in as", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return runLoginStatus(cmd.Context(), cmd.OutOrStdout())
 	}})
-	logout := &cobra.Command{Use: "logout", SilenceUsage: true, SilenceErrors: true, Short: "Revoke this machine's hevmind.com service key and restore the previous archive target", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	logout := &cobra.Command{Use: "logout", Hidden: true, SilenceUsage: true, SilenceErrors: true, Short: "Revoke this machine's hevmind.com service key and restore the previous archive target", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		local, _ := cmd.Flags().GetBool("local")
 		return runLogout(cmd.Context(), cmd.OutOrStdout(), local)
 	}}
@@ -205,10 +203,7 @@ func resolveKitService(flag string, doc map[string]any) string {
 	}
 	kit, _ := doc["kit"].(map[string]any)
 	service, _ := kit["service"].(string)
-	if service != "" {
-		return service
-	}
-	return defaultKitService
+	return service
 }
 
 type kitExchange struct {
@@ -249,6 +244,9 @@ func runLogin(ctx context.Context, out io.Writer, flag, invite string) error {
 		return fmt.Errorf("already signed in; run hev logout first")
 	}
 	service := resolveKitService(flag, doc)
+	if service == "" {
+		return errors.New("Club Kit cloud sign-in isn't open yet. Join the waitlist at https://hevkit.com/#waitlist.")
+	}
 	if !validKitURL(service) {
 		return fmt.Errorf("hevmind.com service must use HTTPS or loopback HTTP")
 	}
