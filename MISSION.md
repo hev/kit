@@ -1,6 +1,7 @@
 # Mission
 
-hev kit is a meta-harness for Claude Code, Codex, Antigravity, Pi, and OpenCode.
+hev kit is a meta-harness for Claude Code, Codex, Antigravity, Pi, OpenCode,
+and Grok.
 One binary on macOS, Linux, and Windows gives those harnesses shared tools for
 traces, board, peers, dispatch, cron, orchestration, secrets, and clusters.
 
