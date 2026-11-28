@@ -21,6 +21,10 @@ type traceFlow struct {
 }
 
 func newTraceFlow(t *testing.T) *traceFlow {
+	return startTraceFlow(t, Handle, "")
+}
+
+func startTraceFlow(t *testing.T, start func(Request) (Response, error), workID string) *traceFlow {
 	t.Helper()
 	clearTraceEnv(t)
 	home := t.TempDir()
@@ -60,6 +64,9 @@ func newTraceFlow(t *testing.T) *traceFlow {
 	amendLaunch = func(dir, name string) error { return nil }
 	order := strings.Replace(strings.Replace(good, "repo: kit", "repo: "+filepath.ToSlash(repo)+"\nvalidation: browser", 1), "name: example", "name: traced", 1)
 	order = strings.Replace(order, "host: buildbox", "host: here", 1)
+	if workID != "" {
+		order = strings.Replace(order, "name: traced", "name: traced\nwork_id: "+workID, 1)
+	}
 	o, err := Parse(order)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +75,7 @@ func newTraceFlow(t *testing.T) *traceFlow {
 	if err := StampTrace(&q.Meta, TraceStart{Caller: f.caller, Text: OrderAskText(order)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Handle(q); err != nil {
+	if _, err := start(q); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -215,5 +222,63 @@ func TestTraceUntracedRunStaysUntraced(t *testing.T) {
 	f.do(Request{Action: "rework", Note: "again"})
 	if got := f.meta(); got.TraceID != "" || got.SpanID != "" || len(got.Asks) != 0 {
 		t.Fatalf("invented a trace: %+v", got)
+	}
+}
+
+func TestWorkIDAdmissionAndFollowUps(t *testing.T) {
+	ids := map[string]bool{}
+	for _, tc := range []struct {
+		name     string
+		explicit string
+		remote   bool
+	}{
+		{name: "local"},
+		{name: "remote", remote: true},
+		{name: "explicit", explicit: testWorkID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := Handle
+			if tc.remote {
+				start = func(q Request) (Response, error) {
+					q.Order = strings.Replace(q.Order, "validation: browser", "validation: none", 1)
+					return HandleAs(q, "member:test")
+				}
+			}
+			f := startTraceFlow(t, start, tc.explicit)
+			id := f.meta().WorkID
+			if err := ValidateWorkID(id); err != nil || ids[id] || (tc.explicit != "" && id != tc.explicit) {
+				t.Fatalf("unexpected admitted work_id %q (%v)", id, err)
+			}
+			ids[id] = true
+			for _, q := range []Request{
+				{Action: "rework", Note: "Cover the error case"},
+				{Action: "retry"},
+			} {
+				f.finish()
+				f.do(q)
+				if got := f.meta().WorkID; got != id {
+					t.Fatalf("%s changed work_id to %q", q.Action, got)
+				}
+			}
+			f.finish()
+			b, err := os.ReadFile(filepath.Join(f.dir, "order.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			order := strings.Replace(string(b), "## Acceptance", "Revised scope.\n\n## Acceptance", 1)
+			// Authenticated starts use the receiver's host label. Keep the
+			// amendment on that host even when the sender used an alias.
+			order = strings.Replace(order, "host: here", "host: "+f.meta().Host, 1)
+			f.do(Request{Action: "amend", Order: order})
+			if got := f.meta().WorkID; got != id {
+				t.Fatalf("amend changed work_id to %q", got)
+			}
+			conflict := strings.Replace(order, "name: traced\nwork_id: "+tc.explicit, "name: traced", 1)
+			conflict = strings.Replace(conflict, "name: traced", "name: traced\nwork_id: 8e953039-eb62-493f-91c0-edc77916dbbd", 1)
+			_, err = Handle(Request{Action: "amend", Name: f.name, Order: conflict})
+			if err == nil || !strings.Contains(err.Error(), "cannot change work_id") || f.meta().WorkID != id {
+				t.Fatalf("amend with conflicting work_id: %v", err)
+			}
+		})
 	}
 }

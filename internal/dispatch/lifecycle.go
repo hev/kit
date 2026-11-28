@@ -170,5 +170,5 @@ func recordUnconfirmed(dir string, m Meta, err error) {
 	if readJSON(filepath.Join(dir, "result.json"), &completed) == nil && !completed.End.IsZero() {
 		return
 	}
-	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{LaunchUnconfirmed: true, Start: m.Start, ExitCode: 1, Error: err.Error()})
+	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{WorkID: m.WorkID, LaunchUnconfirmed: true, Start: m.Start, ExitCode: 1, Error: err.Error()})
 }

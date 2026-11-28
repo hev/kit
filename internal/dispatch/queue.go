@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -54,6 +55,9 @@ func queueEntries() ([]queueEntry, error) {
 func enqueue(q Request) (Response, error) {
 	o, err := Parse(q.Order)
 	if err != nil {
+		return Response{}, err
+	}
+	if err := assignWorkID(&q.Meta, o.WorkID); err != nil {
 		return Response{}, err
 	}
 	if o.Name != q.Name || q.Meta.Name != q.Name || q.Meta.Parent != "" {
@@ -123,6 +127,13 @@ func controlQueued(q Request) (Response, bool, error) {
 			return Response{}, true, err
 		}
 		r := Response{Message: fmt.Sprintf("queued %s (position %d): waiting for a free host slot and earlier FIFO orders", q.Name, i+1), Files: map[string]string{"order.md": e.Request.Order}}
+		if q.Action == "show" {
+			meta, err := json.MarshalIndent(e.Request.Meta, "", "  ")
+			if err != nil {
+				return r, true, err
+			}
+			r.Files["meta.json"] = string(meta)
+		}
 		if q.Action == "stop" {
 			if q.MirrorSnapshot {
 				r.MirroredOrder = queuedMirror(e, "halted", time.Now().UTC())
@@ -182,14 +193,15 @@ func sweepQueue(exclude string) error {
 				if !supervisorLive(dir) {
 					var m Meta
 					if readJSON(filepath.Join(dir, "meta.json"), &m) != nil {
-						if err = WriteJSON(filepath.Join(dir, "meta.json"), entries[0].Request.Meta); err != nil {
+						m = entries[0].Request.Meta
+						if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
 							unlock()
 							return err
 						}
 					}
 					var result Result
 					if readJSON(filepath.Join(dir, "result.json"), &result) != nil || result.End.IsZero() {
-						result = Result{AdmissionFailed: true, ExitCode: 1, Start: entries[0].Enqueued, End: time.Now().UTC(), Error: "receiver interrupted during queue admission; inspect before rework"}
+						result = Result{WorkID: m.WorkID, AdmissionFailed: true, ExitCode: 1, Start: entries[0].Enqueued, End: time.Now().UTC(), Error: "receiver interrupted during queue admission; inspect before rework"}
 						if err = WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
 							unlock()
 							return err
@@ -246,7 +258,7 @@ func sweepQueue(exclude string) error {
 					unlock()
 					return e
 				}
-				if e := WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, Start: q.Meta.Start, End: time.Now().UTC(), Error: err.Error()}); e != nil {
+				if e := WriteJSON(filepath.Join(dir, "result.json"), Result{WorkID: q.Meta.WorkID, AdmissionFailed: true, ExitCode: 1, Start: q.Meta.Start, End: time.Now().UTC(), Error: err.Error()}); e != nil {
 					unlock()
 					return e
 				}

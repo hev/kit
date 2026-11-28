@@ -951,6 +951,13 @@ func Handle(q Request) (r Response, handleErr error) {
 				return r, e
 			}
 			m = q.Meta
+			declaredID := o.WorkID
+			if m.Parent != "" {
+				declaredID = ""
+			}
+			if e = assignWorkID(&m, declaredID); e != nil {
+				return r, e
+			}
 			if m.WorkspaceName != "" {
 				selected, err := workspace.Named(m.WorkspaceName)
 				if err != nil {
@@ -988,7 +995,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					if e = WriteJSON(filepath.Join(dir, "meta.json"), m); e != nil {
 						return r, e
 					}
-					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
+					if e = WriteJSON(filepath.Join(dir, "result.json"), Result{WorkID: m.WorkID, AdmissionFailed: true, SameHost: m.SameHost, ExitCode: 1, End: time.Now().UTC(), Validation: "fail", Error: err.Error()}); e != nil {
 						return r, e
 					}
 					return r, err
@@ -1025,7 +1032,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					}
 					// Keep even early setup failures visible and explicitly removable.
 					_ = WriteJSON(filepath.Join(dir, "meta.json"), m)
-					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{AdmissionFailed: true, ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: handleErr.Error()})
+					_ = WriteJSON(filepath.Join(dir, "result.json"), Result{WorkID: m.WorkID, AdmissionFailed: true, ExitCode: 1, Start: m.Start, End: time.Now().UTC(), Branch: m.Branch, Error: handleErr.Error()})
 				}
 			}()
 			if e = os.WriteFile(filepath.Join(dir, "order.md"), []byte(q.Order), 0600); e != nil {

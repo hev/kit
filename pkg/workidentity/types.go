@@ -1,4 +1,4 @@
-// Package workidentity is a client for the opt-in Layer work identity API.
+// Package workidentity is a client for the Layer work identity API.
 package workidentity
 
 import (

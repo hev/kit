@@ -15,6 +15,7 @@ import (
 )
 
 type Order struct {
+	WorkID      string        `json:"-"` // Explicit identity from frontmatter, persisted in Meta.
 	Fallbacks   FallbackChain `json:"fallbacks"`
 	Every       string        `json:"every,omitempty"`
 	Until       string        `json:"until,omitempty"`
@@ -138,7 +139,7 @@ func Parse(text string) (Order, error) {
 		}
 		v = strings.TrimSpace(v)
 		switch k {
-		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "supersedes", "skills", "fallbacks":
+		case "name", "host", "repo", "base", "harness", "model", "effort", "validation", "reply", "issue", "linear", "timeout", "preview", "every", "until", "max_lifetime", "class", "context", "context_recipe", "trace", "supersedes", "work_id", "skills", "fallbacks":
 		default:
 			return o, fmt.Errorf("unknown key: %s", k)
 		}
@@ -223,6 +224,11 @@ func Parse(text string) (Order, error) {
 	}
 	for k, v := range fields {
 		switch k {
+		case "work_id":
+			if err := ValidateWorkID(v); err != nil {
+				return o, err
+			}
+			o.WorkID = v
 		case "every":
 			o.Every = v
 		case "until":

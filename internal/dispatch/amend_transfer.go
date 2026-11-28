@@ -176,6 +176,15 @@ func receiveAmend(q Request, live map[string]bool) (r Response, retErr error) {
 	if err != nil {
 		return r, err
 	}
+	if o.WorkID != "" && o.WorkID != q.Meta.WorkID {
+		return r, fmt.Errorf("amend cannot change work_id")
+	}
+	if q.Meta.WorkID != "" {
+		if err := ValidateWorkID(q.Meta.WorkID); err != nil {
+			return r, err
+		}
+	}
+	o.WorkID = "" // Frontmatter identity is persisted separately from Order.
 	if o.Name != q.Name || q.Meta.Name != q.Name || !reflect.DeepEqual(q.Meta.Order, o) || q.Meta.Branch != "d/"+q.Name {
 		return r, fmt.Errorf("amend order mismatch")
 	}

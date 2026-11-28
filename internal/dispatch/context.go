@@ -399,7 +399,7 @@ func contextInput(dir string, m Meta) (*os.File, error) {
 // failAttempt records an attempt that ended before launch.
 func failAttempt(dir string, m Meta, err error) {
 	now := time.Now().UTC()
-	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{ExitCode: 1, Start: m.Start, End: now, Branch: m.Branch, Error: err.Error(), SameHost: m.SameHost, ContextDigest: m.ContextDigest, TraceID: m.TraceID, SpanID: m.SpanID})
+	_ = WriteJSON(filepath.Join(dir, "result.json"), Result{WorkID: m.WorkID, ExitCode: 1, Start: m.Start, End: now, Branch: m.Branch, Error: err.Error(), SameHost: m.SameHost, ContextDigest: m.ContextDigest, TraceID: m.TraceID, SpanID: m.SpanID})
 }
 
 // ContextBundleDir returns the bundle directory a run on this host was given:

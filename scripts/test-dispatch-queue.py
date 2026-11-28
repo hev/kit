@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 hev = str(Path(sys.argv[1]).resolve())
 with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
@@ -29,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
     script("tmux", f'exec "{real_tmux}" -S "{socket}" "$@"\n')
     script("gh", "exit 1\n")
     script("codex", 'name=$(basename "$(dirname "$PWD")")\n'
+           'echo "$HEV_WORK_ID" > "$HOME/work-id-$name"\n'
            'echo "$name" >> "$HOME/starts"\n'
            'while [ ! -f "$HOME/release-$name" ]; do sleep 0.05; done\n')
     env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
@@ -74,6 +76,11 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         assert "position 2" in submit("third")
         rows = inventory()
         assert [(r["name"], r["position"]) for r in rows if r["state"] == "queued"] == [("second", 1), ("third", 2)], rows
+        ids = {r["name"]: r["work_id"] for r in rows}
+        assert len(set(ids.values())) == len(ids)
+        for name, work_id in ids.items():
+            assert str(uuid.UUID(work_id)) == work_id != str(uuid.UUID(int=0))
+            assert f'"work_id": "{work_id}"' in cli("show", name)
         print(cli("ls"), end="")
         (root / "release-first").touch()
         wait_for(lambda: starts() == ["first", "second"], "completion starts second")
@@ -101,6 +108,15 @@ with tempfile.TemporaryDirectory(prefix="kq-", dir="/tmp") as tmp:
         # attention notice, removes its records and drains the queue in HOME.
         # Removing HOME under it fails rmtree, so wait for every supervisor.
         wait_for(lambda: not sessions(), "supervisors exit after the last result")
+        for name in ("first", "second", "after-crash"):
+            worker_id = (root / f"work-id-{name}").read_text().strip()
+            meta = json.loads((root / f".hev/orders/{name}/meta.json").read_text())
+            result = json.loads((root / f".hev/orders/{name}/result.json").read_text())
+            assert worker_id == meta["work_id"] == result["work_id"]
+            if name in ids:
+                assert worker_id == ids[name]
+        assert (root / "work-id-third").read_text().strip() == ids["third"]
+        print("PASS: persistent work UUIDs in show, list, workers and results")
         print("PASS: FIFO completion, positions/list, killed-supervisor sweep, concurrent enqueue, cancel")
     finally:
         for name in ["first", "second", "third", "after-crash"]:

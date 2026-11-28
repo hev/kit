@@ -23,6 +23,7 @@ import (
 )
 
 type Meta struct {
+	WorkID          string          `json:"work_id,omitempty"`
 	WorkspaceName   string          `json:"workspace,omitempty"`
 	Compacted       bool            `json:"compacted,omitempty"`
 	HeadSHA         string          `json:"head_sha,omitempty"`
@@ -84,6 +85,7 @@ type Meta struct {
 	Untraced     string    `json:"untraced,omitempty"`
 }
 type Result struct {
+	WorkID   string           `json:"work_id,omitempty"`
 	Harness  string           `json:"harness,omitempty"`
 	Model    string           `json:"model,omitempty"`
 	Attempts []HarnessAttempt `json:"fallbacks_tried,omitempty"`
@@ -336,7 +338,7 @@ func superviseRound(name string) (superviseErr error) {
 	if e := readJSON(filepath.Join(dir, "meta.json"), &m); e != nil {
 		return e
 	}
-	r := Result{SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch, ContextDigest: m.ContextDigest, TraceID: m.TraceID, SpanID: m.SpanID}
+	r := Result{WorkID: m.WorkID, SameHost: m.SameHost, ExitCode: 1, Start: time.Now().UTC(), Branch: m.Branch, ContextDigest: m.ContextDigest, TraceID: m.TraceID, SpanID: m.SpanID}
 	if m.Parent != "" {
 		defer func() {
 			update := ValidationRecord{SameHost: m.SameHost, Revision: m.Revision, Name: m.Name, Host: m.Host, State: "fail", Verdict: r.Verdict, Evidence: filepath.Join(dir, "evidence"), Error: r.Error}
@@ -543,7 +545,7 @@ func superviseRound(name string) (superviseErr error) {
 // supervisor's own, the target's resolved launch variables, the requester,
 // and this attempt's trace context in place of any inherited one.
 func workerEnvironment(m Meta, base, launch []string) []string {
-	env := withoutPluginOnlyEnv(append(withoutTraceEnv(base), launch...))
+	env := withoutPluginOnlyEnv(append(withoutTraceEnv(base), withoutTraceEnv(launch)...))
 	env = append(env, "HEV_REQUESTED_BY="+requester(m))
 	return append(env, traceEnvironment(m)...)
 }

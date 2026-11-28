@@ -228,6 +228,9 @@ func beginAttempt(m *Meta, parent string) {
 // parent of everything the worker does.
 func traceEnvironment(m Meta) []string {
 	env := []string{"HEV_RUN=" + m.Name}
+	if m.WorkID != "" {
+		env = append(env, "HEV_WORK_ID="+m.WorkID)
+	}
 	if !ValidTraceID(m.TraceID) || !ValidSpanID(m.SpanID) {
 		return env
 	}
@@ -241,7 +244,7 @@ func withoutTraceEnv(env []string) []string {
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
 		switch strings.ToUpper(key) {
-		case "TRACEPARENT", "TRACESTATE", "HEV_TRACE_ID", "HEV_SPAN_ID", "HEV_RUN":
+		case "TRACEPARENT", "TRACESTATE", "HEV_TRACE_ID", "HEV_SPAN_ID", "HEV_RUN", "HEV_WORK_ID":
 			continue
 		}
 		out = append(out, item)
