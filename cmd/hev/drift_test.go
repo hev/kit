@@ -16,7 +16,6 @@ func TestDispatchHelpTree(t *testing.T) {
 			t.Run(strings.Join(next, "/"), func(t *testing.T) {
 				root := &cobra.Command{Use: "hev"}
 				root.AddCommand(newDispatchCommand())
-				installPluginHelp(root)
 				var out bytes.Buffer
 				root.SetOut(&out)
 				root.SetErr(&out)

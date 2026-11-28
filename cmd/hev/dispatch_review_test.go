@@ -35,18 +35,6 @@ func TestAttachNestedAndRemotePath(t *testing.T) {
 	}
 }
 
-func TestBatchPluginRejectsShellSyntax(t *testing.T) {
-	for _, arg := range []string{"a&calc", "x|y", "%PATH%", "a!b", "a^b", "a(b)", "x>y", "x<y", "a\"b", "a\nb"} {
-		if _, err := cmdPluginLine(`C:\plugin dir\hev-hello.cmd`, []string{arg}); err == nil {
-			t.Fatalf("accepted %q", arg)
-		}
-	}
-	line, err := cmdPluginLine(`C:\plugin dir\hev-hello.cmd`, []string{"hello world"})
-	if err != nil || line != `""C:\plugin dir\hev-hello.cmd" "hello world""` {
-		t.Fatalf("%q %v", line, err)
-	}
-}
-
 func TestInventoryNameSafety(t *testing.T) {
 	used, err := inventoryNames(map[string]dispatch.Response{"remote": {Names: []string{"reserved"}, Rows: []dispatch.Row{{Meta: dispatch.Meta{Order: dispatch.Order{Name: "taken"}}}}}})
 	if err != nil || !used["reserved"] || !used["taken"] {
