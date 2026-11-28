@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -369,4 +370,146 @@ func TestStartStopsCleanly(t *testing.T) {
 	defer cancel()
 	stopEnabled := r.Start(ctx, enabled)
 	stopEnabled()
+}
+
+func TestRunCleansBeforePersistingState(t *testing.T) {
+	for _, permanentFailure := range []bool{false, true} {
+		name := "space_recovered"
+		if permanentFailure {
+			name = "state_write_still_fails"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			target := filepath.Join(home, "cleanup-target")
+			if err := os.WriteFile(target, []byte("cache"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if permanentFailure {
+				if err := os.MkdirAll(StatePath(home), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r := Runner{
+				Home: home, TempDir: t.TempDir(), DispatchDir: home, OS: "linux",
+				DiskFree: func(string) (uint64, error) {
+					if _, err := os.Stat(target); os.IsNotExist(err) {
+						return 80 * BytesPerGiB, nil
+					}
+					return 0, nil
+				},
+				CompactRuns: func(dispatch.CompactOptions) (dispatch.CompactReport, error) {
+					return dispatch.CompactReport{BytesFreed: 5}, os.Remove(target)
+				},
+			}
+			var attempts int
+			lockRunner := r
+			r.lockState = func(home string) (func(), error) {
+				attempts++
+				if _, err := os.Stat(target); err == nil {
+					return nil, syscall.ENOSPC
+				}
+				return lockRunner.acquireStateLock(home)
+			}
+			rep, err := r.Run(context.Background(), DefaultConfig(), false)
+			if attempts != 2 || rep.BytesFreed != 5 || !rep.UnderPressure || rep.FreeBytesAfter == 0 {
+				t.Fatalf("expected cleanup between lock attempts, got %d attempts, %+v, %v", attempts, rep, err)
+			}
+			if permanentFailure {
+				if err == nil || !strings.Contains(err.Error(), "could not write hygiene state") || strings.Contains(err.Error(), home) {
+					t.Fatalf("expected a path-free state write error after cleanup, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			state, err := readState(home)
+			if err != nil || state.LastRun == nil || state.BytesFreed != 5 {
+				t.Fatalf("expected persisted cleanup results, got %+v, %v", state, err)
+			}
+		})
+	}
+}
+
+func TestRunEvictsWorkspaceSlotsOnlyWhileUnderPressure(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".hev", "workspace-slots")
+	now := time.Now()
+	makeSlot := func(repo, name string, age time.Duration) string {
+		t.Helper()
+		slot := filepath.Join(root, repo, name)
+		cache := filepath.Join(slot, "cargo-target")
+		if err := os.MkdirAll(cache, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cache, "artifact"), []byte("cache"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(slot, now.Add(-age), now.Add(-age)); err != nil {
+			t.Fatal(err)
+		}
+		return slot
+	}
+	oldest := makeSlot("repo-z", "slot-0", 3*time.Hour)
+	active := makeSlot("repo-a", "slot-0", 4*time.Hour)
+	newer := makeSlot("repo-a", "slot-1", time.Hour)
+	other := makeSlot("repo-a", "slot-other", 5*time.Hour)
+	if err := os.Mkdir(filepath.Join(oldest, "other-cache"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(oldest, now.Add(-3*time.Hour), now.Add(-3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	release, err := platformops.LockPath(active+".lock", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	cfg := DefaultConfig()
+	pressure := false
+	r := Runner{
+		Home: home, TempDir: t.TempDir(), DispatchDir: home, OS: "linux",
+		DiskFree: func(path string) (uint64, error) {
+			if pressure && path == root {
+				if _, err := os.Stat(oldest); err == nil {
+					return 0, nil
+				}
+			}
+			return cfg.MinFreeBytes(), nil
+		},
+		CompactRuns: func(dispatch.CompactOptions) (dispatch.CompactReport, error) {
+			return dispatch.CompactReport{}, nil
+		},
+	}
+	assertCache := func(slot string) {
+		t.Helper()
+		if data, err := os.ReadFile(filepath.Join(slot, "cargo-target", "artifact")); err != nil || string(data) != "cache" {
+			t.Fatalf("cache in %s was changed: %q, %v", filepath.Base(slot), data, err)
+		}
+	}
+	rep, err := r.Run(context.Background(), cfg, false)
+	if err != nil || rep.EvictedSlots != 0 {
+		t.Fatalf("eviction without pressure: %+v, %v", rep, err)
+	}
+	assertCache(oldest)
+	pressure = true
+	rep, err = r.Run(context.Background(), cfg, true)
+	if err != nil || rep.EvictedSlots != 2 {
+		t.Fatalf("dry run should count only the two unlocked slots: %+v, %v", rep, err)
+	}
+	assertCache(oldest)
+	if _, err := os.Stat(oldest + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("dry run created a lock: %v", err)
+	}
+	rep, err = r.Run(context.Background(), cfg, false)
+	if err != nil || rep.EvictedSlots != 1 || rep.BytesFreed != int64(cfg.MinFreeBytes()) {
+		t.Fatalf("expected only oldest unlocked slot evicted: %+v, %v", rep, err)
+	}
+	if _, err := os.Stat(oldest); !os.IsNotExist(err) {
+		t.Fatalf("oldest slot remains: %v", err)
+	}
+	assertCache(active)
+	assertCache(newer)
+	assertCache(other)
 }

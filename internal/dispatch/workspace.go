@@ -144,9 +144,7 @@ func gcWorkspaceSlots(now time.Time) (int, error) {
 			return removed, errors.New("cannot list workspace slots")
 		}
 		for _, entry := range slots {
-			id, ok := strings.CutPrefix(entry.Name(), "slot-")
-			i, parseErr := strconv.Atoi(id)
-			if !entry.IsDir() || !ok || parseErr != nil || i < 0 || strconv.Itoa(i) != id {
+			if !isWorkspaceSlot(entry) {
 				continue
 			}
 			slot := filepath.Join(dir, entry.Name())
@@ -184,4 +182,10 @@ func cargoWorkspaceEnvironment(env []string, wt, slot string) []string {
 		return append(env, "CARGO_TARGET_DIR="+filepath.Join(slot, "cargo-target"))
 	}
 	return env
+}
+
+func isWorkspaceSlot(entry os.DirEntry) bool {
+	id, ok := strings.CutPrefix(entry.Name(), "slot-")
+	i, err := strconv.Atoi(id)
+	return entry.IsDir() && ok && err == nil && i >= 0 && strconv.Itoa(i) == id
 }

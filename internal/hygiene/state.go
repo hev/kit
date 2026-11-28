@@ -20,6 +20,7 @@ type State struct {
 	BytesFreed      int64      `json:"bytes_freed"`
 	CompactedRuns   int        `json:"compacted_runs"`
 	PrunedTmpDirs   int        `json:"pruned_tmp_dirs"`
+	EvictedSlots    int        `json:"evicted_slots"`
 	APFSThinned     bool       `json:"apfs_thinned"`
 	UnderPressure   bool       `json:"under_pressure"`
 	LastError       string     `json:"last_error,omitempty"`
