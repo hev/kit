@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,13 +67,13 @@ func runHygienePass(ctx context.Context, out io.Writer, dryRun, asJSON bool) err
 	}
 	runner := hygiene.Runner{}
 	rep, err := runner.Run(ctx, cfg, dryRun)
-	if err != nil {
+	if rep.Timestamp.IsZero() && err != nil {
 		return err
 	}
 	if asJSON {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
-		return enc.Encode(rep)
+		return errors.Join(err, enc.Encode(rep))
 	}
 	if rep.DryRun {
 		fmt.Fprintln(out, "Mode: dry-run (no files modified)")
@@ -86,12 +87,15 @@ func runHygienePass(ctx context.Context, out io.Writer, dryRun, asJSON bool) err
 	}
 	compactVerb := "Compacted"
 	pruneVerb := "Pruned"
+	evictVerb := "Evicted"
 	if rep.DryRun {
 		compactVerb = "Would compact"
 		pruneVerb = "Would prune"
+		evictVerb = "Could evict under continued pressure"
 	}
 	fmt.Fprintf(out, "%s dispatch runs (%d): %s\n", compactVerb, len(rep.CompactedRuns), joinOrNone(rep.CompactedRuns))
 	fmt.Fprintf(out, "%s tmp dirs (%d): %s\n", pruneVerb, len(rep.PrunedTmpDirs), joinOrNone(rep.PrunedTmpDirs))
+	fmt.Fprintf(out, "%s workspace slots: %d\n", evictVerb, rep.EvictedSlots)
 	apfsLine := rep.APFS.Action
 	if rep.APFS.Reason != "" {
 		apfsLine += " (" + rep.APFS.Reason + ")"
@@ -105,7 +109,7 @@ func runHygienePass(ctx context.Context, out io.Writer, dryRun, asJSON bool) err
 	if len(rep.Errors) > 0 {
 		fmt.Fprintf(out, "Warnings: %s\n", strings.Join(rep.Errors, "; "))
 	}
-	return nil
+	return err
 }
 
 func runHygieneStatus(out io.Writer, asJSON bool) error {
@@ -137,8 +141,8 @@ func runHygieneStatus(out io.Writer, asJSON bool) error {
 			formatBytes(st.State.FreeBytesBefore),
 			formatBytes(st.State.FreeBytesAfter),
 			formatBytes(uint64(max(st.State.BytesFreed, 0))))
-		fmt.Fprintf(out, "Last actions: compacted=%d  pruned_tmp=%d  apfs_thinned=%t\n",
-			st.State.CompactedRuns, st.State.PrunedTmpDirs, st.State.APFSThinned)
+		fmt.Fprintf(out, "Last actions: compacted=%d  pruned_tmp=%d  evicted_slots=%d  apfs_thinned=%t\n",
+			st.State.CompactedRuns, st.State.PrunedTmpDirs, st.State.EvictedSlots, st.State.APFSThinned)
 		if st.State.LastError != "" {
 			fmt.Fprintf(out, "Last error: %s\n", st.State.LastError)
 		}

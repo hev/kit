@@ -28,6 +28,7 @@ type Runner struct {
 	ExecCommand func(ctx context.Context, name string, args ...string) ([]byte, error)
 	TmpOwned    func(os.FileInfo) bool
 	APFSTimeout time.Duration
+	lockState   func(string) (func(), error)
 	Logger      *slog.Logger
 }
 
@@ -44,6 +45,7 @@ type Report struct {
 	KeptRuns        []dispatch.CompactAction `json:"kept_runs,omitempty"`
 	PrunedTmpDirs   []string                 `json:"pruned_tmp_dirs"`
 	KeptTmpDirs     []TmpAction              `json:"kept_tmp_dirs,omitempty"`
+	EvictedSlots    int                      `json:"evicted_slots"`
 	APFS            APFSResult               `json:"apfs"`
 	Errors          []string                 `json:"errors,omitempty"`
 }
@@ -124,19 +126,16 @@ func (r Runner) Run(ctx context.Context, cfg Config, dryRun bool) (Report, error
 		return Report{}, err
 	}
 
+	var release func()
 	if !dryRun {
-		dir := stateDir(home)
-		if err := platformops.MkdirAll(dir, 0o700); err != nil {
-			return Report{}, errors.New("could not create hygiene state directory")
-		}
-		release, err := platformops.LockPath(filepath.Join(dir, "run.lock"), true)
-		if platformops.IsLockBusy(err) {
+		var lockErr error
+		release, lockErr = r.acquireStateLock(home)
+		if platformops.IsLockBusy(lockErr) {
 			return Report{}, errors.New("another hygiene pass is already running")
 		}
-		if err != nil {
-			return Report{}, errors.New("could not lock hygiene state")
+		if release != nil {
+			defer release()
 		}
-		defer release()
 	}
 
 	start := r.now()
@@ -188,6 +187,31 @@ func (r Runner) Run(ctx context.Context, cfg Config, dryRun bool) (Report, error
 		rep.Errors = append(rep.Errors, rep.APFS.Error)
 	}
 
+	// Workspace slots can live on a different filesystem from dispatch runs.
+	if minBytes > 0 {
+		slotRoot := filepath.Join(home, ".hev", "workspace-slots")
+		slotFreeBefore, err := r.diskFree(slotRoot)
+		if err != nil {
+			rep.Errors = append(rep.Errors, "could not measure workspace slot disk space")
+		} else if slotFreeBefore < minBytes {
+			rep.UnderPressure = true
+			slotCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			rep.EvictedSlots, err = dispatch.EvictWorkspaceSlots(slotCtx, slotRoot, dryRun, func() (bool, error) {
+				free, err := r.diskFree(slotRoot)
+				return free < minBytes, err
+			})
+			cancel()
+			if err != nil {
+				rep.Errors = append(rep.Errors, sanitizeError(err, home))
+			}
+			if !dryRun && rep.EvictedSlots > 0 {
+				if free, err := r.diskFree(slotRoot); err == nil && free > slotFreeBefore {
+					rep.BytesFreed += int64(free - slotFreeBefore)
+				}
+			}
+		}
+	}
+
 	if dryRun {
 		rep.FreeBytesAfter = rep.FreeBytesBefore
 	} else if freeAfter, err := r.diskFree(dispatchDir); err == nil {
@@ -202,6 +226,16 @@ func (r Runner) Run(ctx context.Context, cfg Config, dryRun bool) (Report, error
 	}
 
 	if !dryRun {
+		// A full or read-only filesystem may prevent creating the lock.
+		// Retry once cleanup has had a chance to free space.
+		if release == nil {
+			var err error
+			release, err = r.acquireStateLock(home)
+			if err != nil {
+				return rep, errors.New("could not lock hygiene state after cleanup")
+			}
+			defer release()
+		}
 		s := State{
 			LastRun:         &start,
 			LastDurationMS:  rep.DurationMS,
@@ -210,16 +244,28 @@ func (r Runner) Run(ctx context.Context, cfg Config, dryRun bool) (Report, error
 			BytesFreed:      rep.BytesFreed,
 			CompactedRuns:   len(rep.CompactedRuns),
 			PrunedTmpDirs:   len(rep.PrunedTmpDirs),
+			EvictedSlots:    rep.EvictedSlots,
 			APFSThinned:     rep.APFS.Action == "thinned",
 			UnderPressure:   rep.UnderPressure,
 			LastError:       strings.Join(rep.Errors, "; "),
 		}
 		if err := writeState(home, s); err != nil {
-			return rep, err
+			return rep, errors.New("could not persist hygiene state after cleanup: " + err.Error())
 		}
 	}
 
 	return rep, nil
+}
+
+func (r Runner) acquireStateLock(home string) (func(), error) {
+	if r.lockState != nil {
+		return r.lockState(home)
+	}
+	dir := stateDir(home)
+	if err := platformops.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	return platformops.LockPath(filepath.Join(dir, "run.lock"), true)
 }
 
 // Status returns the last recorded hygiene state and current disk free space.
@@ -300,13 +346,14 @@ func (r Runner) Start(ctx context.Context, cfg Config) func() {
 				passCancel()
 				if r.Logger != nil {
 					if err != nil {
-						r.Logger.Warn("hygiene pass failed", "err", err)
+						r.Logger.Warn("hygiene pass failed", "err", err, "bytes_freed", rep.BytesFreed, "evicted_slots", rep.EvictedSlots)
 					} else {
 						r.Logger.Info("hygiene pass",
 							"under_pressure", rep.UnderPressure,
 							"bytes_freed", rep.BytesFreed,
 							"compacted_runs", len(rep.CompactedRuns),
 							"pruned_tmp_dirs", len(rep.PrunedTmpDirs),
+							"evicted_slots", rep.EvictedSlots,
 							"apfs_action", rep.APFS.Action,
 							"errors", len(rep.Errors),
 						)
