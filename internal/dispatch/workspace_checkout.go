@@ -120,27 +120,27 @@ func seedDispatchWorkspace(gitArgs []string, wt, head, warm string, clone worksp
 	}
 	for _, entry := range entries {
 		if err := os.Rename(filepath.Join(stage, entry.Name()), filepath.Join(wt, entry.Name())); err != nil {
-			return true, fmt.Errorf("cannot install workspace seed")
+			return true, fmt.Errorf("cannot install checkout seed")
 		}
 	}
 	if _, err := command(wt, "git", "reset", "--mixed", head); err != nil {
-		return true, fmt.Errorf("cannot initialize workspace index")
+		return true, fmt.Errorf("cannot initialize checkout index")
 	}
 	status, err := command(wt, "git", "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching")
 	if err != nil || status != "" {
 		// A stale seed is cache data. Reconstruct the checkout from Git.
 		for _, entry := range entries {
 			if err := os.RemoveAll(filepath.Join(wt, entry.Name())); err != nil {
-				return true, fmt.Errorf("cannot discard workspace seed")
+				return true, fmt.Errorf("cannot discard checkout seed")
 			}
 		}
 		if _, err := command(wt, "git", "reset", "--hard", head); err != nil {
-			return true, fmt.Errorf("cannot check out workspace base")
+			return true, fmt.Errorf("cannot check out checkout base")
 		}
 	}
 	null := strings.Repeat("0", len(head))
 	if _, err := command(wt, "git", "hook", "run", "--ignore-missing", "post-checkout", "--", null, head, "1"); err != nil {
-		return true, fmt.Errorf("workspace post-checkout hook failed")
+		return true, fmt.Errorf("checkout post-checkout hook failed")
 	}
 	return true, nil
 }

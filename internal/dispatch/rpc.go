@@ -574,7 +574,7 @@ func Handle(q Request) (r Response, handleErr error) {
 	}
 	if q.Action == "workspace-gc" {
 		count, err := gcWorkspaceSlots(time.Now())
-		r.Message = fmt.Sprintf("removed %d idle workspace slots", count)
+		r.Message = fmt.Sprintf("removed %d idle checkout slots", count)
 		return r, err
 	}
 	if q.Action == "compact-all" {
@@ -1098,7 +1098,7 @@ func Handle(q Request) (r Response, handleErr error) {
 					base = m.Revision
 				}
 				if m.WorkspaceBase, e = command(repo, "git", "rev-parse", "--verify", "--end-of-options", base+"^{commit}"); e != nil {
-					return r, fmt.Errorf("cannot resolve workspace base")
+					return r, fmt.Errorf("cannot resolve checkout base")
 				}
 				gitArgs[len(gitArgs)-1] = m.WorkspaceBase
 			}

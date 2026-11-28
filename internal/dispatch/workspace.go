@@ -26,17 +26,17 @@ func (w WorkspaceConfig) validate() error {
 	switch w.Mode {
 	case "", "auto", "oss", "pro":
 	default:
-		return errors.New("workspace mode must be auto, oss or pro")
+		return errors.New("checkout mode must be auto, oss or pro")
 	}
 	switch w.Driver {
 	case "", "cow", "git":
 	default:
-		return errors.New("workspace driver must be cow or git")
+		return errors.New("checkout driver must be cow or git")
 	}
 	return nil
 }
 
-var errWorkspaceLicense = errors.New("workspace operation requires a active Kit Pro license (HEV_LICENSE)")
+var errWorkspaceLicense = errors.New("checkout operation requires an active Kit Pro license (HEV_LICENSE)")
 
 func workspacePro(w WorkspaceConfig) (bool, error) {
 	if w.Mode == "oss" {
@@ -60,7 +60,7 @@ func dispatchWorkspaceCap() (int, error) {
 func workspacePolicy() (Config, bool, error) {
 	cfg, err := targetPolicy()
 	if err != nil {
-		return cfg, false, errors.New("cannot read receiver workspace configuration")
+		return cfg, false, errors.New("cannot read receiver checkout configuration")
 	}
 	pro, err := workspacePro(cfg.WorkspacePolicy)
 	return cfg, pro, err
@@ -82,12 +82,12 @@ func workspacePool(repo string) (string, error) {
 	// Linked worktrees and repository aliases must agree on the same pool.
 	common, err := command(repo, "git", "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
-		return "", errors.New("cannot identify workspace repository")
+		return "", errors.New("cannot identify checkout repository")
 	}
 	common, err = filepath.EvalSymlinks(common)
 	root := workspaceStatePath("workspace-slots")
 	if err != nil || root == "" {
-		return "", errors.New("cannot locate workspace slot pool")
+		return "", errors.New("cannot locate checkout slot pool")
 	}
 	hash := sha256.Sum256([]byte(common))
 	return filepath.Join(root, hex.EncodeToString(hash[:])), nil
@@ -95,43 +95,43 @@ func workspacePool(repo string) (string, error) {
 
 func leaseWorkspaceSlot(pool string, cap int) (string, *os.File, func(), error) {
 	if err := os.MkdirAll(pool, 0700); err != nil {
-		return "", nil, nil, errors.New("cannot create workspace slot pool")
+		return "", nil, nil, errors.New("cannot create checkout slot pool")
 	}
 	for i := 0; i < cap; i++ {
 		slot := filepath.Join(pool, "slot-"+strconv.Itoa(i))
 		lock, err := os.OpenFile(slot+".lock", os.O_CREATE|os.O_RDWR, 0600)
 		if err != nil {
-			return "", nil, nil, errors.New("cannot open workspace slot lock")
+			return "", nil, nil, errors.New("cannot open checkout slot lock")
 		}
 		if err = platformops.LockFile(lock, true); err != nil {
 			_ = lock.Close()
 			if platformops.IsLockBusy(err) {
 				continue
 			}
-			return "", nil, nil, errors.New("cannot lease workspace slot")
+			return "", nil, nil, errors.New("cannot lease checkout slot")
 		}
 		stamp := func() { _ = os.Chtimes(slot, time.Now(), time.Now()) }
 		if err = os.MkdirAll(filepath.Join(slot, "cargo-target"), 0700); err != nil {
 			_ = lock.Close()
-			return "", nil, nil, errors.New("cannot initialize workspace slot")
+			return "", nil, nil, errors.New("cannot initialize checkout slot")
 		}
 		stamp()
 		return slot, lock, func() { stamp(); _ = lock.Close() }, nil
 	}
-	return "", nil, nil, errors.New("all workspace slots for this repository are leased")
+	return "", nil, nil, errors.New("all checkout slots for this repository are leased")
 }
 
 func gcWorkspaceSlots(now time.Time) (int, error) {
 	root := workspaceStatePath("workspace-slots")
 	if root == "" {
-		return 0, errors.New("workspace slot GC needs a home directory")
+		return 0, errors.New("checkout slot GC needs a home directory")
 	}
 	pools, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, errors.New("cannot list workspace slot pools")
+		return 0, errors.New("cannot list checkout slot pools")
 	}
 	removed := 0
 	for _, pool := range pools {
@@ -141,7 +141,7 @@ func gcWorkspaceSlots(now time.Time) (int, error) {
 		dir := filepath.Join(root, pool.Name())
 		slots, err := os.ReadDir(dir)
 		if err != nil {
-			return removed, errors.New("cannot list workspace slots")
+			return removed, errors.New("cannot list checkout slots")
 		}
 		for _, entry := range slots {
 			id, ok := strings.CutPrefix(entry.Name(), "slot-")
@@ -155,7 +155,7 @@ func gcWorkspaceSlots(now time.Time) (int, error) {
 				continue
 			}
 			if err != nil {
-				return removed, errors.New("cannot lock workspace slot for GC")
+				return removed, errors.New("cannot lock checkout slot for GC")
 			}
 			info, statErr := os.Lstat(slot)
 			if statErr == nil && info.IsDir() && now.Sub(info.ModTime()) > 7*24*time.Hour {
@@ -166,7 +166,7 @@ func gcWorkspaceSlots(now time.Time) (int, error) {
 			}
 			release()
 			if err != nil {
-				return removed, errors.New("cannot remove idle workspace slot")
+				return removed, errors.New("cannot remove idle checkout slot")
 			}
 		}
 	}

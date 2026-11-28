@@ -17,7 +17,7 @@ func withinWorkspaceHome(home, path string) bool {
 // Inspect one component at a time so an out-of-home symlink is refused before
 // even statting its destination (in particular an offline /Volumes mount).
 func workspaceHomePath(home, path string) (string, error) {
-	unsafePath := errors.New("workspace and Git administration must resolve inside HOME")
+	unsafePath := errors.New("checkout and Git administration must resolve inside HOME")
 	path = filepath.Clean(path)
 	for hops := 0; hops < 40; hops++ {
 		if !withinWorkspaceHome(home, path) {
@@ -112,7 +112,7 @@ func linkedWorkspace(wt string) (string, error) {
 func readWorkspacePointer(path string) (string, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 8192 {
-		return "", errors.New("invalid Git workspace pointer")
+		return "", errors.New("invalid Git checkout pointer")
 	}
 	b, err := os.ReadFile(path)
 	return strings.TrimRight(string(b), "\r\n"), err
@@ -121,7 +121,7 @@ func readWorkspacePointer(path string) (string, error) {
 func workspaceHead(wt string, m Meta) (string, error) {
 	head, err := command(wt, "git", "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
-		return "", errors.New("cannot read workspace HEAD")
+		return "", errors.New("cannot read checkout HEAD")
 	}
 	branch, err := command(wt, "git", "symbolic-ref", "--quiet", "HEAD")
 	if m.Parent != "" && err != nil && head == m.Revision {
@@ -169,37 +169,37 @@ func checkCompactWorkspace(dir string, m Meta, dryRun bool) (string, string, err
 	if head != m.WorkspaceBase {
 		if !dryRun {
 			if _, err = command(wt, "git", "fetch", "--no-tags", "--prune", "--refmap=", "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
-				return "", "", errors.New("cannot verify workspace HEAD on origin")
+				return "", "", errors.New("cannot verify checkout HEAD on origin")
 			}
 		}
 		refs, err := command(wt, "git", "for-each-ref", "--contains="+head, "--count=1", "refs/remotes/origin/")
 		if err != nil || refs == "" {
-			return "", "", errors.New("workspace HEAD is unpushed")
+			return "", "", errors.New("checkout HEAD is unpushed")
 		}
 	}
 	status, err := command(wt, "git", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "--untracked-files=no", "--ignore-submodules=none")
 	if err != nil {
-		return "", "", errors.New("cannot inspect tracked workspace changes")
+		return "", "", errors.New("cannot inspect tracked checkout changes")
 	}
 	if status != "" {
-		return "", "", errors.New("workspace has uncommitted source changes")
+		return "", "", errors.New("checkout has uncommitted source changes")
 	}
 	flags, err := command(wt, "git", "ls-files", "-v", "-z")
 	if err != nil {
-		return "", "", errors.New("cannot inspect workspace index")
+		return "", "", errors.New("cannot inspect checkout index")
 	}
 	for _, entry := range strings.Split(flags, "\x00") {
 		if entry != "" && (entry[0] == 'S' || (entry[0] >= 'a' && entry[0] <= 'z')) {
-			return "", "", errors.New("workspace index hides tracked files from status")
+			return "", "", errors.New("checkout index hides tracked files from status")
 		}
 	}
 	untracked, err := command(wt, "git", "ls-files", "--others", "--directory", "--no-empty-directory", "-z")
 	if err != nil {
-		return "", "", errors.New("cannot inspect untracked workspace files")
+		return "", "", errors.New("cannot inspect untracked checkout files")
 	}
 	for _, path := range strings.Split(untracked, "\x00") {
 		if path != "" && !strings.HasPrefix(path, "target/") && !strings.HasPrefix(path, "node_modules/") {
-			return "", "", errors.New("workspace has untracked source files")
+			return "", "", errors.New("checkout has untracked source files")
 		}
 	}
 	return common, head, nil
@@ -220,29 +220,29 @@ func compactWorkspace(dir string, m Meta) error {
 
 	ignore, err := os.CreateTemp(dir, "workspace-excludes-")
 	if err != nil {
-		return errors.New("cannot prepare workspace compaction")
+		return errors.New("cannot prepare checkout compaction")
 	}
 	defer os.Remove(ignore.Name())
 	_, err = ignore.WriteString("/target/\n/node_modules/\n")
 	closeErr := ignore.Close()
 	if err != nil || closeErr != nil {
-		return errors.New("cannot prepare workspace compaction")
+		return errors.New("cannot prepare checkout compaction")
 	}
 	if current, err := workspaceHead(wt, m); err != nil || current != head {
-		return errors.New("workspace HEAD changed during compaction")
+		return errors.New("checkout HEAD changed during compaction")
 	}
 	prior := m
 	m.Compacted, m.HeadSHA = true, head
 	if err = WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
-		return errors.New("cannot record workspace compaction")
+		return errors.New("cannot record checkout compaction")
 	}
 	if _, err = command(dir, "git", "--git-dir="+common, "-c", "core.excludesFile="+ignore.Name(), "worktree", "remove", "--", wt); err != nil {
 		if _, statErr := os.Lstat(wt); statErr == nil {
 			if rollbackErr := WriteJSON(filepath.Join(dir, "meta.json"), prior); rollbackErr != nil {
-				return errors.New("cannot remove workspace or restore its metadata")
+				return errors.New("cannot remove checkout or restore its metadata")
 			}
 		}
-		return errors.New("Git refused to remove the workspace")
+		return errors.New("Git refused to remove the checkout")
 	}
 	return nil
 }
@@ -250,7 +250,7 @@ func compactWorkspace(dir string, m Meta) error {
 // Validate the repository that reopen will use before dropping the checkout.
 // The common directory itself is enough for a bare repository.
 func workspaceRestoreRepo(m Meta, common string) (string, error) {
-	refusal := errors.New("cannot resolve workspace recovery repository inside HOME")
+	refusal := errors.New("cannot resolve checkout recovery repository inside HOME")
 	home, err := os.UserHomeDir()
 	if err != nil || !filepath.IsAbs(home) {
 		return "", refusal
@@ -319,7 +319,7 @@ func restoreWorkspace(dir string, m *Meta) error {
 	}
 	m.Compacted = false
 	if err := WriteJSON(filepath.Join(dir, "meta.json"), m); err != nil {
-		return errors.New("cannot record workspace restoration")
+		return errors.New("cannot record checkout restoration")
 	}
 	return nil
 }

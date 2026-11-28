@@ -60,7 +60,7 @@ func addDispatchWorkspaceCommands(parent *cobra.Command, load func() (dispatch.C
 	}
 	compact := &cobra.Command{
 		Use:   "compact [HOST/]NAME | --all",
-		Short: "Remove safely recoverable Pro worktrees",
+		Short: "Remove safely recoverable Pro checkouts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all && len(args) == 0 {
 				return invoke(cmd, "compact-all", "")
@@ -74,7 +74,7 @@ func addDispatchWorkspaceCommands(parent *cobra.Command, load func() (dispatch.C
 	compact.Flags().BoolVar(&all, "all", false, "Compact eligible runs on the selected host")
 	parent.AddCommand(compact, &cobra.Command{
 		Use:   "gc",
-		Short: "Evict unlocked workspace slots idle over seven days",
+		Short: "Evict unlocked checkout slots idle over seven days",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return invoke(cmd, "workspace-gc", "")
