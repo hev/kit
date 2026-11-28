@@ -28,10 +28,12 @@ upgrade that compatibility formula, which depends on `hev`.
 Linux and Windows binaries are on [GitHub Releases](https://github.com/hev/kit/releases).
 Extract the archive for your OS and architecture and put the binary on your PATH.
 
-With Go 1.26 or newer, install from the `v0.7` release branch:
+With Git and Go 1.26 or newer, install from the `v0.7` release branch:
 
 ```sh
-go install github.com/hev/kit/cmd/hev@v0.7
+git clone --branch v0.7 https://github.com/hev/kit.git
+cd kit
+go install ./cmd/hev
 ```
 
 Use `go install github.com/hev/kit/cmd/hev@main` to build from the `main` branch.
